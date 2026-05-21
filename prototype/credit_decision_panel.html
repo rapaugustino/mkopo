@@ -1,0 +1,109 @@
+<style>
+  .dc-frame { font-family: var(--font-sans); display: flex; flex-direction: column; gap: 12px; }
+  .dc-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); flex-wrap: wrap; gap: 8px; }
+  .dc-rec { display: grid; grid-template-columns: 36px 1fr; gap: 12px; padding: 14px 16px; background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); }
+  .dc-rec-icon { width: 32px; height: 32px; border-radius: 50%; background: #E1F5EE; color: #0F6E56; display: flex; align-items: center; justify-content: center; font-size: 16px; margin-top: 2px; }
+  .dc-rec-head { font-size: 11px; color: var(--color-text-secondary); margin: 0 0 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .dc-rec-verdict { font-size: 16px; font-weight: 500; margin: 0 0 6px; }
+  .dc-rec-text { font-size: 13px; color: var(--color-text-secondary); margin: 0; line-height: 1.55; }
+  .dc-paths { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .dc-path { padding: 12px 14px; background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-md); cursor: pointer; }
+  .dc-path-selected { border: 2px solid #0F6E56; padding: 11px 13px; background: var(--color-background-primary); }
+  .dc-path-name { font-size: 13px; font-weight: 500; margin: 0 0 4px; display: flex; align-items: center; gap: 6px; }
+  .dc-path-sub { font-size: 11px; color: var(--color-text-secondary); margin: 0; line-height: 1.4; }
+  .dc-card { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 14px 16px; }
+  .dc-title { font-size: 13px; font-weight: 500; margin: 0 0 12px; display: flex; align-items: center; gap: 6px; }
+  .dc-cond { display: grid; grid-template-columns: 18px 1fr; gap: 10px; padding: 10px 0; border-bottom: 0.5px solid var(--color-border-tertiary); }
+  .dc-cond:last-child { border-bottom: none; padding-bottom: 0; }
+  .dc-cond-icon { font-size: 14px; color: var(--color-text-tertiary); margin-top: 2px; }
+  .dc-cond-name { font-size: 13px; font-weight: 500; margin: 0; }
+  .dc-cond-desc { font-size: 12px; color: var(--color-text-secondary); margin: 3px 0 0; line-height: 1.45; }
+  .dc-ts { background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 12px 14px; }
+  .dc-ts-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 12.5px; border-bottom: 0.5px solid var(--color-border-tertiary); }
+  .dc-ts-row:last-child { border-bottom: none; }
+  .dc-ts-key { color: var(--color-text-secondary); }
+  .dc-ts-val { color: var(--color-text-primary); font-weight: 500; }
+  .dc-actions { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+</style>
+
+<h2 class="sr-only">Credit decision panel showing the AI recommendation for conditional approval, three decision paths with conditional approval selected, a list of auto-generated conditions to close, and an editable draft term sheet with actions to send to committee or borrower.</h2>
+
+<div class="dc-frame">
+
+  <div class="dc-header">
+    <div>
+      <p style="font-size: 14px; font-weight: 500; margin: 0;">LN-2026-0847 · Credit decision</p>
+      <p style="font-size: 12px; color: var(--color-text-secondary); margin: 0;">Atlas Holdings LLC · $2.4M bridge</p>
+    </div>
+    <span style="font-size: 11px; color: var(--color-text-secondary);">Underwriter: J. Davis · ready for committee</span>
+  </div>
+
+  <div class="dc-rec">
+    <div class="dc-rec-icon"><i class="ti ti-sparkles" aria-hidden="true"></i></div>
+    <div>
+      <p class="dc-rec-head">AI recommendation · 82% confidence</p>
+      <p class="dc-rec-verdict">Conditional approval</p>
+      <p class="dc-rec-text">Deal economics support approval: DSCR 1.42, LTV 68%, sponsor track record clean (8 prior loans, zero delinquencies). Two open items prevent unconditional approval — stale appraisal and guarantor concentration nearing policy ceiling. Recommended conditions are drafted below.</p>
+    </div>
+  </div>
+
+  <div class="dc-paths">
+    <div class="dc-path">
+      <p class="dc-path-name"><i class="ti ti-check" aria-hidden="true"></i>Approve</p>
+      <p class="dc-path-sub">Standard terms, no conditions</p>
+    </div>
+    <div class="dc-path dc-path-selected">
+      <p class="dc-path-name"><i class="ti ti-list-check" aria-hidden="true"></i>Conditional</p>
+      <p class="dc-path-sub">3 conditions auto-drafted</p>
+    </div>
+    <div class="dc-path">
+      <p class="dc-path-name"><i class="ti ti-x" aria-hidden="true"></i>Decline</p>
+      <p class="dc-path-sub">Drafts adverse-action letter</p>
+    </div>
+  </div>
+
+  <div class="dc-card">
+    <p class="dc-title"><i class="ti ti-list-check" aria-hidden="true"></i>Conditions to close <span style="font-size: 11px; color: var(--color-text-tertiary); font-weight: 400; margin-left: auto;">3 items · editable</span></p>
+    <div class="dc-cond">
+      <i class="ti ti-file-check dc-cond-icon" aria-hidden="true"></i>
+      <div>
+        <p class="dc-cond-name">Updated appraisal dated within 6 months</p>
+        <p class="dc-cond-desc">Current appraisal is 11 months old, outside policy window. Borrower has been notified; document expected by close of week.</p>
+      </div>
+    </div>
+    <div class="dc-cond">
+      <i class="ti ti-file-check dc-cond-icon" aria-hidden="true"></i>
+      <div>
+        <p class="dc-cond-name">Personal financial statement for J. Park</p>
+        <p class="dc-cond-desc">Co-guarantor PFS missing from packet. Routed to borrower via doc-request workflow.</p>
+      </div>
+    </div>
+    <div class="dc-cond">
+      <i class="ti ti-file-check dc-cond-icon" aria-hidden="true"></i>
+      <div>
+        <p class="dc-cond-name">Credit committee sign-off on concentration</p>
+        <p class="dc-cond-desc">Guarantor exposure of $7.1M against $8M policy limit. Auto-routed to committee with supporting graph view.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="dc-card">
+    <p class="dc-title"><i class="ti ti-file-text" aria-hidden="true"></i>Term sheet draft <span style="font-size: 11px; color: var(--color-text-tertiary); font-weight: 400; margin-left: auto;">auto-generated · editable</span></p>
+    <div class="dc-ts">
+      <div class="dc-ts-row"><span class="dc-ts-key">Principal</span><span class="dc-ts-val">$2,400,000</span></div>
+      <div class="dc-ts-row"><span class="dc-ts-key">Rate</span><span class="dc-ts-val">9.50% (10Y T-bill + 525bps)</span></div>
+      <div class="dc-ts-row"><span class="dc-ts-key">Term</span><span class="dc-ts-val">24 months, interest only</span></div>
+      <div class="dc-ts-row"><span class="dc-ts-key">Origination fee</span><span class="dc-ts-val">1.5%</span></div>
+      <div class="dc-ts-row"><span class="dc-ts-key">Prepay</span><span class="dc-ts-val">3-2-1 step-down</span></div>
+      <div class="dc-ts-row"><span class="dc-ts-key">Conditions</span><span class="dc-ts-val">3 (see above)</span></div>
+    </div>
+    <div class="dc-actions" style="margin-top: 14px;">
+      <button style="font-size: 12px; padding: 7px 12px;"><i class="ti ti-pencil" aria-hidden="true"></i> Edit term sheet</button>
+      <div style="display: flex; gap: 6px;">
+        <button style="font-size: 12px; padding: 7px 12px;">Send to committee</button>
+        <button style="font-size: 12px; padding: 7px 14px; background: #0F6E56; color: #E1F5EE; border-color: #0F6E56;">Send to borrower</button>
+      </div>
+    </div>
+  </div>
+
+</div>

@@ -1,0 +1,22 @@
+id: ex-101
+inputs:
+  document_text: |
+    INCOME APPROACH TO VALUE
+
+    Subject property is a 12-unit multifamily building located at 1842
+    South Tacoma Way, Tacoma, Washington.
+
+    Total annual rental income:     $367,400
+    Less: operating expenses:       $83,200
+    Net operating income (NOI):     $284,200
+
+    The subject benefits from strong submarket fundamentals, with
+    vacancy in the South Tacoma submarket reported at 3.2%.
+expected:
+  noi: 284200
+  currency: USD
+metadata:
+  source: synthetic
+  doc_type: appraisal_report
+  labeled_by: jdoe@example.com
+  labeled_at: "2026-04-10"

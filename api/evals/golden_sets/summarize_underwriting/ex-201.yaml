@@ -1,0 +1,30 @@
+id: ex-201
+inputs:
+  loan_data:
+    loan_id: LN-2024-0612
+    borrower: Atlas Holdings LLC
+    amount: 2400000
+    loan_type: bridge
+    property_type: multifamily
+    units: 12
+    location: Tacoma, WA
+    ltv: 0.68
+    dscr: 1.42
+    sponsor_track_record: "8 prior loans with the lender, 0 delinquencies"
+    risk_flags:
+      - type: stale_appraisal
+        detail: "appraisal 11 months old, policy max 6 months"
+      - type: guarantor_concentration
+        detail: "M. Chen exposure $7.1M across 3 active loans"
+expected:
+  must_mention:
+    - "DSCR or debt service coverage"
+    - "LTV or loan-to-value"
+    - "guarantor concentration or M. Chen"
+    - "appraisal age or stale appraisal"
+  must_not_invent: true
+  max_words: 150
+metadata:
+  source: synthetic
+  labeled_by: jdoe@example.com
+  labeled_at: "2026-04-10"

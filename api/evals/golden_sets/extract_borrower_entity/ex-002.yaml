@@ -1,0 +1,18 @@
+id: ex-002
+inputs:
+  document_text: |
+    Loan File Cover Sheet
+
+    Borrower Entity (Legal Name): Cedar Ridge Partners, Inc.
+    Federal Tax ID: ##-#######
+    Mailing Address: 200 W Mercer St Suite 201, Seattle WA 98119
+
+    Loan Type: Bridge
+    Loan Amount Requested: $1,800,000
+expected:
+  borrower_entity: "Cedar Ridge Partners Inc"
+metadata:
+  source: synthetic
+  doc_type: loan_application
+  labeled_by: jdoe@example.com
+  labeled_at: "2026-04-10"

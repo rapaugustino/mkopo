@@ -1,0 +1,107 @@
+<style>
+  .eg-card { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 16px; font-family: var(--font-sans); }
+  .eg-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 8px; }
+  .eg-id { display: flex; align-items: center; gap: 10px; }
+  .eg-avatar { width: 38px; height: 38px; border-radius: 50%; background: var(--color-background-warning); color: var(--color-text-warning); display: flex; align-items: center; justify-content: center; font-weight: 500; font-size: 13px; }
+  .eg-name { font-size: 15px; font-weight: 500; margin: 0; }
+  .eg-role { font-size: 12px; color: var(--color-text-secondary); margin: 0; }
+  .eg-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 3px 8px; border-radius: 4px; font-weight: 500; background: var(--color-background-danger); color: var(--color-text-danger); }
+  .eg-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 0 0 14px; }
+  .eg-stat { background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 10px 12px; }
+  .eg-stat-label { font-size: 11px; color: var(--color-text-secondary); margin: 0 0 3px; }
+  .eg-stat-val { font-size: 16px; font-weight: 500; margin: 0; }
+  .eg-section-title { font-size: 12px; font-weight: 500; color: var(--color-text-secondary); margin: 14px 0 8px; }
+  .eg-list { display: flex; flex-direction: column; gap: 6px; }
+  .eg-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: var(--color-background-secondary); border-radius: var(--border-radius-md); font-size: 12px; }
+  .eg-row-l { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .eg-dot-c { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+</style>
+
+<h2 class="sr-only">Entity inspector for guarantor M. Chen, showing total exposure across three active loans and the connected properties, plus other related parties.</h2>
+
+<div class="eg-card">
+  <div class="eg-top">
+    <div class="eg-id">
+      <div class="eg-avatar">MC</div>
+      <div>
+        <p class="eg-name">Matthew Chen</p>
+        <p class="eg-role">Guarantor · 4 yr relationship</p>
+      </div>
+    </div>
+    <span class="eg-badge"><i class="ti ti-alert-triangle" aria-hidden="true"></i>High concentration</span>
+  </div>
+
+  <div class="eg-stats">
+    <div class="eg-stat"><p class="eg-stat-label">Active exposure</p><p class="eg-stat-val">$7.1M</p></div>
+    <div class="eg-stat"><p class="eg-stat-label">Active loans</p><p class="eg-stat-val">3</p></div>
+    <div class="eg-stat"><p class="eg-stat-label">Delinquencies</p><p class="eg-stat-val">0</p></div>
+    <div class="eg-stat"><p class="eg-stat-label">Policy limit</p><p class="eg-stat-val">$8.0M</p></div>
+  </div>
+
+  <svg viewBox="0 0 640 280" xmlns="http://www.w3.org/2000/svg" style="width: 100%; height: auto; display: block;">
+    <line x1="138" y1="140" x2="275" y2="60" stroke="#888780" stroke-width="1"/>
+    <line x1="138" y1="140" x2="275" y2="140" stroke="#888780" stroke-width="1"/>
+    <line x1="138" y1="140" x2="275" y2="220" stroke="#D85A30" stroke-width="1.5"/>
+    <line x1="365" y1="60" x2="495" y2="60" stroke="#888780" stroke-width="1"/>
+    <line x1="365" y1="140" x2="495" y2="140" stroke="#888780" stroke-width="1"/>
+    <line x1="365" y1="220" x2="495" y2="220" stroke="#888780" stroke-width="1"/>
+
+    <g class="c-amber">
+      <circle cx="100" cy="140" r="38"/>
+      <text x="100" y="135" text-anchor="middle" class="t" font-size="13" font-weight="500">M. Chen</text>
+      <text x="100" y="152" text-anchor="middle" class="ts" font-size="10">Guarantor</text>
+    </g>
+
+    <g class="c-blue">
+      <rect x="275" y="40" width="90" height="40" rx="6"/>
+      <text x="320" y="58" text-anchor="middle" class="t" font-size="11" font-weight="500">LN-2024-0612</text>
+      <text x="320" y="72" text-anchor="middle" class="ts" font-size="10">$2.1M · active</text>
+    </g>
+    <g class="c-blue">
+      <rect x="275" y="120" width="90" height="40" rx="6"/>
+      <text x="320" y="138" text-anchor="middle" class="t" font-size="11" font-weight="500">LN-2025-0234</text>
+      <text x="320" y="152" text-anchor="middle" class="ts" font-size="10">$2.6M · active</text>
+    </g>
+    <g class="c-coral">
+      <rect x="275" y="200" width="90" height="40" rx="6" stroke="#993C1D" stroke-width="1.5"/>
+      <text x="320" y="218" text-anchor="middle" class="t" font-size="11" font-weight="500">LN-2026-0847</text>
+      <text x="320" y="232" text-anchor="middle" class="ts" font-size="10">$2.4M · pending</text>
+    </g>
+
+    <g class="c-gray">
+      <rect x="495" y="40" width="110" height="40" rx="6"/>
+      <text x="550" y="58" text-anchor="middle" class="t" font-size="11" font-weight="500">14-unit MF</text>
+      <text x="550" y="72" text-anchor="middle" class="ts" font-size="10">Tacoma, WA</text>
+    </g>
+    <g class="c-gray">
+      <rect x="495" y="120" width="110" height="40" rx="6"/>
+      <text x="550" y="138" text-anchor="middle" class="t" font-size="11" font-weight="500">Mixed-use retail</text>
+      <text x="550" y="152" text-anchor="middle" class="ts" font-size="10">Seattle, WA</text>
+    </g>
+    <g class="c-gray">
+      <rect x="495" y="200" width="110" height="40" rx="6"/>
+      <text x="550" y="218" text-anchor="middle" class="t" font-size="11" font-weight="500">12-unit MF</text>
+      <text x="550" y="232" text-anchor="middle" class="ts" font-size="10">Tacoma, WA</text>
+    </g>
+  </svg>
+
+  <p class="eg-section-title">Related parties across these loans</p>
+  <div class="eg-list">
+    <div class="eg-row">
+      <div class="eg-row-l">
+        <span class="eg-dot-c" style="background: var(--color-text-info);"></span>
+        <span style="font-weight: 500;">J. Park</span>
+        <span style="color: var(--color-text-secondary);">Co-guarantor · 2 loans</span>
+      </div>
+      <span style="color: var(--color-text-secondary);">$5.0M shared</span>
+    </div>
+    <div class="eg-row">
+      <div class="eg-row-l">
+        <span class="eg-dot-c" style="background: var(--color-text-info);"></span>
+        <span style="font-weight: 500;">S. Okafor</span>
+        <span style="color: var(--color-text-secondary);">Co-guarantor · 1 loan</span>
+      </div>
+      <span style="color: var(--color-text-secondary);">$2.6M shared</span>
+    </div>
+  </div>
+</div>

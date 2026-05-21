@@ -1,0 +1,66 @@
+<style>
+  .dv-frame { font-family: var(--font-sans); display: flex; flex-direction: column; gap: 10px; }
+  .dv-bar { display: flex; align-items: center; justify-content: space-between; padding: 9px 14px; background: var(--color-background-secondary); border-radius: var(--border-radius-md); font-size: 12px; color: var(--color-text-secondary); flex-wrap: wrap; gap: 6px; }
+  .dv-bar-l { display: flex; align-items: center; gap: 8px; }
+  .dv-grid { display: grid; grid-template-columns: 1.55fr 1fr; gap: 12px; }
+  .dv-page { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-md); padding: 16px 18px; font-size: 12.5px; line-height: 1.65; color: var(--color-text-primary); }
+  .dv-page h4 { font-size: 13px; font-weight: 500; margin: 0 0 8px; }
+  .dv-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 12px; }
+  .dv-row-label { color: var(--color-text-secondary); }
+  .dv-hl { background: var(--color-background-warning); color: var(--color-text-warning); padding: 1px 4px; border-radius: 3px; font-weight: 500; }
+  .dv-meta { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-md); padding: 14px; }
+  .dv-meta-label { font-size: 11px; color: var(--color-text-secondary); margin: 0 0 4px; }
+  .dv-meta-val { font-size: 18px; font-weight: 500; margin: 0 0 2px; }
+  .dv-meta-field { font-size: 12px; color: var(--color-text-secondary); margin: 0 0 14px; }
+  .dv-claim { font-size: 12px; line-height: 1.5; color: var(--color-text-secondary); margin: 0 0 12px; padding: 8px 10px; background: var(--color-background-secondary); border-radius: var(--border-radius-md); font-family: var(--font-serif); font-style: italic; }
+  .dv-detail { display: flex; justify-content: space-between; font-size: 12px; padding: 6px 0; border-bottom: 0.5px solid var(--color-border-tertiary); }
+  .dv-detail:last-of-type { border-bottom: none; }
+  .dv-actions { display: flex; gap: 6px; margin-top: 12px; }
+</style>
+
+<h2 class="sr-only">Source document viewer showing the appraisal report page where the property's net operating income was extracted, with confidence and override controls in a side panel.</h2>
+
+<div class="dv-frame">
+
+  <div class="dv-bar">
+    <div class="dv-bar-l">
+      <i class="ti ti-file-text" aria-hidden="true"></i>
+      <span>Appraisal_Report_AtlasHoldings_2024.pdf · page 4 of 12</span>
+    </div>
+    <div style="display: flex; gap: 4px;">
+      <button style="padding: 4px 8px; font-size: 11px;"><i class="ti ti-chevron-left" aria-hidden="true"></i></button>
+      <button style="padding: 4px 8px; font-size: 11px;"><i class="ti ti-chevron-right" aria-hidden="true"></i></button>
+      <button style="padding: 4px 8px; font-size: 11px;"><i class="ti ti-external-link" aria-hidden="true"></i> Full doc</button>
+    </div>
+  </div>
+
+  <div class="dv-grid">
+    <div class="dv-page">
+      <h4>Income approach to value</h4>
+      <p style="margin: 0 0 10px;">Subject property is a 12-unit multifamily building located at 1842 South Tacoma Way, Tacoma, Washington. Property is garden-style apartment, constructed in 1986, with current occupancy of 100% as of inspection.</p>
+
+      <div class="dv-row"><span class="dv-row-label">Total annual rental income</span><span>$367,400</span></div>
+      <div class="dv-row"><span class="dv-row-label">Less: operating expenses</span><span>$83,200</span></div>
+      <div class="dv-row" style="border-top: 0.5px solid var(--color-border-tertiary); margin-top: 4px; padding-top: 6px;"><span style="font-weight: 500;">Net operating income (NOI)</span><span class="dv-hl">$284,200</span></div>
+
+      <p style="margin: 12px 0 0; color: var(--color-text-secondary); font-size: 12px;">The subject benefits from strong submarket fundamentals, with vacancy in the South Tacoma submarket reported at 3.2% per Q4 2024 CoStar data…</p>
+    </div>
+
+    <div class="dv-meta">
+      <p class="dv-meta-label">Extracted value</p>
+      <p class="dv-meta-val">$284,200</p>
+      <p class="dv-meta-field">Annual NOI</p>
+
+      <p class="dv-claim">"Net operating income (NOI): $284,200"</p>
+
+      <div class="dv-detail"><span style="color: var(--color-text-secondary);">Confidence</span><span style="font-weight: 500; color: var(--color-text-success);">91%</span></div>
+      <div class="dv-detail"><span style="color: var(--color-text-secondary);">Method</span><span>Pattern + LLM verify</span></div>
+      <div class="dv-detail"><span style="color: var(--color-text-secondary);">Status</span><span style="color: var(--color-text-tertiary);">Unreviewed</span></div>
+
+      <div class="dv-actions">
+        <button style="padding: 6px 10px; font-size: 11px; flex: 1;"><i class="ti ti-check" aria-hidden="true"></i> Accept</button>
+        <button style="padding: 6px 10px; font-size: 11px; flex: 1;"><i class="ti ti-edit" aria-hidden="true"></i> Override</button>
+      </div>
+    </div>
+  </div>
+</div>

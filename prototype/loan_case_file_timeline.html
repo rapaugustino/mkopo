@@ -1,0 +1,147 @@
+<style>
+  .cf-frame { font-family: var(--font-sans); display: flex; flex-direction: column; gap: 12px; }
+  .cf-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); gap: 12px; flex-wrap: wrap; }
+  .cf-id-block { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .cf-id { font-size: 15px; font-weight: 500; margin: 0; }
+  .cf-sub { font-size: 12px; color: var(--color-text-secondary); margin: 0; }
+  .cf-stage-pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 4px 10px; border-radius: 4px; background: var(--color-background-info); color: var(--color-text-info); font-weight: 500; }
+  .cf-card { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 0; }
+  .cf-card-title { font-size: 13px; font-weight: 500; padding: 14px 16px; border-bottom: 0.5px solid var(--color-border-tertiary); margin: 0; display: flex; align-items: center; justify-content: space-between; }
+  .cf-timeline { padding: 4px 16px 10px; }
+  .cf-event { display: grid; grid-template-columns: 30px 1fr; gap: 12px; padding: 12px 0; border-bottom: 0.5px solid var(--color-border-tertiary); }
+  .cf-event:last-child { border-bottom: none; padding-bottom: 6px; }
+  .cf-icon-wrap { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; margin-top: 2px; }
+  .cf-icon-system { background: var(--color-background-secondary); color: var(--color-text-secondary); }
+  .cf-icon-ai { background: #E1F5EE; color: #0F6E56; }
+  .cf-icon-user { background: var(--color-background-info); color: var(--color-text-info); }
+  .cf-icon-borrower { background: var(--color-background-warning); color: var(--color-text-warning); }
+  .cf-icon-alert { background: var(--color-background-danger); color: var(--color-text-danger); }
+  .cf-event-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .cf-actor { font-size: 13px; font-weight: 500; }
+  .cf-time { font-size: 11px; color: var(--color-text-tertiary); }
+  .cf-event-body { font-size: 13px; color: var(--color-text-secondary); line-height: 1.5; margin: 3px 0 0; }
+  .cf-quote { font-size: 12.5px; padding: 10px 12px; background: var(--color-background-secondary); border-radius: var(--border-radius-md); margin: 8px 0 0; line-height: 1.55; font-family: var(--font-serif); color: var(--color-text-primary); }
+  .cf-pill { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; padding: 2px 7px; border-radius: 3px; font-weight: 500; }
+  .cf-composer { padding: 12px 14px; background: var(--color-background-secondary); border-radius: var(--border-radius-md); margin: 0 14px 14px; }
+  .cf-composer-input { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-md); padding: 10px 12px; font-size: 13px; color: var(--color-text-tertiary); }
+  .cf-composer-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; flex-wrap: wrap; gap: 6px; }
+</style>
+
+<h2 class="sr-only">Case file timeline for loan LN-2026-0847 showing chronological activity from application receipt through AI extraction, assignment, an AI-drafted document request, the borrower's reply, and a flagged risk signal — with a message composer at the bottom.</h2>
+
+<div class="cf-frame">
+  <div class="cf-header">
+    <div class="cf-id-block">
+      <div>
+        <p class="cf-id">LN-2026-0847 · Atlas Holdings LLC</p>
+        <p class="cf-sub">Bridge loan · $2.4M · J. Davis (owner)</p>
+      </div>
+      <span class="cf-stage-pill"><i class="ti ti-microscope" aria-hidden="true"></i>Underwriting</span>
+    </div>
+    <div style="display: flex; gap: 6px;">
+      <button style="font-size: 12px; padding: 6px 10px;"><i class="ti ti-folder" aria-hidden="true"></i> Docs</button>
+      <button style="font-size: 12px; padding: 6px 10px;">Open file</button>
+    </div>
+  </div>
+
+  <div class="cf-card">
+    <p class="cf-card-title">
+      <span>Activity</span>
+      <span style="font-size: 11px; color: var(--color-text-secondary); font-weight: 400;">7 events · newest first</span>
+    </p>
+    <div class="cf-timeline">
+
+      <div class="cf-event">
+        <div class="cf-icon-wrap cf-icon-alert"><i class="ti ti-alert-triangle" aria-hidden="true"></i></div>
+        <div>
+          <div class="cf-event-head">
+            <span class="cf-actor">Risk signal flagged</span>
+            <span class="cf-time">30m ago</span>
+            <span class="cf-pill" style="background: var(--color-background-danger); color: var(--color-text-danger);">Concentration</span>
+          </div>
+          <p class="cf-event-body">Guarantor M. Chen exposure now $7.1M across 3 active loans. Within policy ($8M) but flagged for credit committee visibility.</p>
+        </div>
+      </div>
+
+      <div class="cf-event">
+        <div class="cf-icon-wrap cf-icon-borrower"><i class="ti ti-mail-opened" aria-hidden="true"></i></div>
+        <div>
+          <div class="cf-event-head">
+            <span class="cf-actor">Borrower replied</span>
+            <span class="cf-time">2h ago</span>
+            <span class="cf-pill" style="background: var(--color-background-warning); color: var(--color-text-warning);">2 of 3 docs</span>
+          </div>
+          <p class="cf-event-body">Updated appraisal and Q3 rent roll received. PFS for J. Park still outstanding.</p>
+        </div>
+      </div>
+
+      <div class="cf-event">
+        <div class="cf-icon-wrap cf-icon-user"><i class="ti ti-send" aria-hidden="true"></i></div>
+        <div>
+          <div class="cf-event-head">
+            <span class="cf-actor">J. Davis sent doc request</span>
+            <span class="cf-time">5h ago · drafted by AI</span>
+          </div>
+          <p class="cf-event-body">Email to borrower requesting 3 outstanding items.</p>
+          <p class="cf-quote">Hi Matthew — quick follow-up on the Atlas bridge submission. We're missing three items to complete underwriting: (1) updated appraisal dated within 6 months, (2) Q3 rent roll, (3) personal financial statement for J. Park. Once these arrive we expect to issue a term sheet within 3 business days.</p>
+        </div>
+      </div>
+
+      <div class="cf-event">
+        <div class="cf-icon-wrap cf-icon-ai"><i class="ti ti-file-text" aria-hidden="true"></i></div>
+        <div>
+          <div class="cf-event-head">
+            <span class="cf-actor">Mortgage Lens AI</span>
+            <span class="cf-time">1 day ago</span>
+          </div>
+          <p class="cf-event-body">Underwriting summary generated. 5 citations to source documents.</p>
+        </div>
+      </div>
+
+      <div class="cf-event">
+        <div class="cf-icon-wrap cf-icon-user"><i class="ti ti-user-plus" aria-hidden="true"></i></div>
+        <div>
+          <div class="cf-event-head">
+            <span class="cf-actor">J. Davis assigned</span>
+            <span class="cf-time">1 day ago</span>
+          </div>
+          <p class="cf-event-body">Auto-routed by load-balancer rule: multifamily under $5M.</p>
+        </div>
+      </div>
+
+      <div class="cf-event">
+        <div class="cf-icon-wrap cf-icon-ai"><i class="ti ti-sparkles" aria-hidden="true"></i></div>
+        <div>
+          <div class="cf-event-head">
+            <span class="cf-actor">Mortgage Lens AI</span>
+            <span class="cf-time">2 days ago</span>
+          </div>
+          <p class="cf-event-body">Extracted 47 fields. 24 high confidence, 18 medium, 5 routed for human review.</p>
+        </div>
+      </div>
+
+      <div class="cf-event">
+        <div class="cf-icon-wrap cf-icon-system"><i class="ti ti-mail-forward" aria-hidden="true"></i></div>
+        <div>
+          <div class="cf-event-head">
+            <span class="cf-actor">Application received</span>
+            <span class="cf-time">via broker portal · 2 days ago</span>
+          </div>
+          <p class="cf-event-body">23 documents attached. Routed to Atlas Capital workspace.</p>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="cf-composer">
+      <div class="cf-composer-input">Reply to borrower or add an internal note…</div>
+      <div class="cf-composer-actions">
+        <button style="font-size: 11px; padding: 5px 10px;"><i class="ti ti-sparkles" aria-hidden="true"></i> Draft with AI</button>
+        <div style="display: flex; gap: 6px;">
+          <button style="font-size: 11px; padding: 5px 10px;">Internal note</button>
+          <button style="font-size: 11px; padding: 5px 12px; background: #0F6E56; color: #E1F5EE; border-color: #0F6E56;">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

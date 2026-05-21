@@ -1,0 +1,315 @@
+"""Intake agent. Runs when a new loan packet arrives.
+
+Responsibilities:
+1. Classify and read each uploaded document
+2. Extract required fields with confidence scoring
+3. Identify missing items vs requirements
+4. Draft a doc-request email to the borrower
+5. Pause via interrupt() for underwriter approval before sending
+"""
+
+from __future__ import annotations
+
+import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import Any, Literal, TypedDict
+
+import structlog
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.graph import END, START, StateGraph
+from langgraph.types import interrupt
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+
+from mkopo.config import get_settings
+from mkopo.db import get_session
+from mkopo.llm_gateway import get_gateway
+from mkopo.models import Document, Extraction, ExtractionStatus, Loan, ReviewTask
+from mkopo.services.audit import Actor, record
+from mkopo.tools.comms import OutboundEmail, get_comms
+from mkopo.tools.extractor import (
+    ExtractedField,
+    ExtractionResult,
+    extract_fields,
+    routing_decision,
+    threshold_for,
+)
+
+logger = structlog.get_logger()
+
+
+REQUIRED_FIELDS = [
+    "borrower_entity",
+    "property_address",
+    "property_type",  # short phrase, e.g. "12-unit multifamily" or "Class B office"
+    "guarantor_list",
+    "annual_noi",
+    "appraised_value",
+    "appraisal_date",
+    "loan_amount",
+]
+
+
+# --- State ---
+
+
+class IntakeState(TypedDict, total=False):
+    """Agent working state. Source of truth for loan stays in the database."""
+
+    loan_id: str
+    extracted_fields: dict[str, ExtractedField]
+    missing_fields: list[str]
+    draft_email: dict[str, str] | None  # subject + body
+    final_email: dict[str, str] | None  # after HITL approval
+    status: Literal["running", "awaiting_approval", "complete", "failed"]
+
+
+# --- Structured outputs for the email drafting step ---
+
+
+class DraftedEmail(BaseModel):
+    subject: str = Field(max_length=120)
+    body_text: str = Field(max_length=4000)
+
+
+# --- Nodes ---
+
+
+async def extract_all_documents(state: IntakeState) -> IntakeState:
+    """Extract required fields from every document on the loan."""
+    loan_id = uuid.UUID(state["loan_id"])
+    extracted: dict[str, ExtractedField] = {}
+
+    async with get_session() as session:
+        docs_stmt = select(Document).where(Document.loan_id == loan_id)
+        documents = (await session.execute(docs_stmt)).scalars().all()
+
+        for doc in documents:
+            # Portfolio scope: documents already carry text in `meta.text_content`.
+            # A production build would run OCR (e.g. pdfplumber, Tesseract) first.
+            doc_text = doc.meta.get("text_content", "")
+            if not doc_text:
+                logger.warning("doc_no_text", document_id=str(doc.id))
+                continue
+
+            result: ExtractionResult = await extract_fields(
+                document_text=doc_text,
+                fields_to_extract=REQUIRED_FIELDS,
+                document_id=doc.id,
+            )
+
+            for field in result.fields:
+                # Keep the highest-confidence answer if multiple docs answer the same field
+                existing = extracted.get(field.field_name)
+                if existing is None or field.confidence > existing.confidence:
+                    extracted[field.field_name] = field
+
+                # Persist extraction with routing decision
+                routing = routing_decision(field)
+                status = (
+                    ExtractionStatus.ACCEPTED
+                    if routing == "accepted"
+                    else ExtractionStatus.QUEUED_FOR_REVIEW
+                )
+                extraction = Extraction(
+                    document_id=doc.id,
+                    field_name=field.field_name,
+                    value=field.value,
+                    confidence=field.confidence,
+                    source_span=field.source_span.model_dump(),
+                    status=status,
+                )
+                session.add(extraction)
+
+                # Confidence gate (DESIGN §7.2): below-threshold extractions
+                # don't just get a status — they enter a human review queue
+                # via a `review_tasks` row. The reason names the delta so the
+                # underwriter knows *why* it's in the queue.
+                if status == ExtractionStatus.QUEUED_FOR_REVIEW:
+                    await session.flush()  # populate extraction.id
+                    threshold = threshold_for(field.field_name)
+                    session.add(
+                        ReviewTask(
+                            extraction_id=extraction.id,
+                            reason=(
+                                f"Low confidence ({field.confidence:.2f}) "
+                                f"below threshold ({threshold:.2f}) for "
+                                f"{field.field_name}"
+                            ),
+                            status="open",
+                        )
+                    )
+
+        await record(
+            session,
+            loan_id=loan_id,
+            actor=Actor.agent("intake"),
+            action="extraction_complete",
+            payload={
+                "n_extracted": len(extracted),
+                "n_required": len(REQUIRED_FIELDS),
+            },
+        )
+
+    return {**state, "extracted_fields": extracted}
+
+
+async def identify_missing(state: IntakeState) -> IntakeState:
+    """Compute what's still needed from the borrower."""
+    extracted = state.get("extracted_fields", {})
+    # Treat low-confidence and missing the same way for messaging — both need follow-up
+    missing = [f for f in REQUIRED_FIELDS if f not in extracted or extracted[f].confidence < 0.7]
+    return {**state, "missing_fields": missing}
+
+
+async def draft_doc_request(state: IntakeState) -> IntakeState:
+    """Draft an email to the borrower listing what's still needed."""
+    missing = state.get("missing_fields", [])
+    if not missing:
+        return {**state, "status": "complete", "draft_email": None}
+
+    settings = get_settings()
+    gateway = get_gateway()
+
+    missing_str = "\n".join(f"- {f.replace('_', ' ').title()}" for f in missing)
+    system = (
+        "You are a professional loan underwriter writing to a borrower. "
+        "Be concise, polite, and specific. Use plain language. "
+        "Do not invent details or commit to terms or timelines beyond what is provided."
+    )
+    user = (
+        f"Draft an email requesting the following items needed to complete underwriting:\n"
+        f"{missing_str}\n\n"
+        f"Tone: professional, friendly. Length: ≤120 words. "
+        f"Subject line should be specific."
+    )
+    drafted = await gateway.call_structured(
+        model=settings.llm_default_model,
+        system=system,
+        user=user,
+        schema=DraftedEmail,
+    )
+    return {
+        **state,
+        "draft_email": {"subject": drafted.subject, "body_text": drafted.body_text},
+        "status": "awaiting_approval",
+    }
+
+
+def request_human_approval(state: IntakeState) -> IntakeState:
+    """Pause execution until an underwriter approves or edits the email.
+
+    The UI surfaces the draft, the user reviews/edits, and resumes with
+    Command(resume={"action": "send"|"cancel", "subject": ..., "body_text": ...}).
+    """
+    draft = state.get("draft_email")
+    if not draft:
+        return {**state, "status": "complete"}
+
+    response = interrupt(
+        {
+            "type": "approve_email",
+            "loan_id": state["loan_id"],
+            "draft": draft,
+            "missing_fields": state.get("missing_fields", []),
+        }
+    )
+
+    if response.get("action") == "cancel":
+        return {**state, "status": "complete", "final_email": None}
+
+    return {
+        **state,
+        "final_email": {
+            "subject": response.get("subject", draft["subject"]),
+            "body_text": response.get("body_text", draft["body_text"]),
+        },
+    }
+
+
+async def send_email(state: IntakeState) -> IntakeState:
+    """Send the approved email via Resend and log the message."""
+    final = state.get("final_email")
+    if not final:
+        return {**state, "status": "complete"}
+
+    loan_id = uuid.UUID(state["loan_id"])
+    comms = get_comms()
+
+    async with get_session() as session:
+        loan_stmt = select(Loan).where(Loan.id == loan_id)
+        loan = (await session.execute(loan_stmt)).scalar_one()
+        borrower_email = loan.meta.get("borrower_email", "")
+        if not borrower_email:
+            logger.error("no_borrower_email", loan_id=str(loan_id))
+            return {**state, "status": "failed"}
+
+        send_result = await comms.send(
+            OutboundEmail(
+                to=borrower_email,
+                subject=final["subject"],
+                body_text=final["body_text"],
+            )
+        )
+
+        await record(
+            session,
+            loan_id=loan_id,
+            actor=Actor.agent("intake"),
+            action="send_email",
+            payload={
+                "subject": final["subject"],
+                "body_text": final["body_text"],
+                "to": borrower_email,
+                "resend_message_id": send_result.message_id,
+                "drafted_by_agent": True,
+            },
+        )
+
+    return {**state, "status": "complete"}
+
+
+# --- Graph ---
+
+
+@asynccontextmanager
+async def build_intake_graph() -> AsyncIterator[Any]:
+    """Yield a compiled intake agent graph with a Postgres checkpointer.
+
+    `AsyncPostgresSaver.from_conn_string` is an async context manager that owns
+    a database connection, so the graph is only valid inside the `async with`.
+    Callers must scope each invocation:
+
+        async with build_intake_graph() as graph:
+            result = await graph.ainvoke(state, config=config)
+    """
+    settings = get_settings()
+
+    builder = StateGraph(IntakeState)
+    builder.add_node("extract", extract_all_documents)
+    builder.add_node("identify_missing", identify_missing)
+    builder.add_node("draft_request", draft_doc_request)
+    builder.add_node("approve", request_human_approval)
+    builder.add_node("send", send_email)
+
+    builder.add_edge(START, "extract")
+    builder.add_edge("extract", "identify_missing")
+    builder.add_edge("identify_missing", "draft_request")
+
+    def route_after_draft(state: IntakeState) -> str:
+        if state.get("status") == "complete":
+            return END
+        return "approve"
+
+    builder.add_conditional_edges(
+        "draft_request", route_after_draft, {END: END, "approve": "approve"}
+    )
+    builder.add_edge("approve", "send")
+    builder.add_edge("send", END)
+
+    # Postgres checkpointer — durable across restarts. Uses the libpq-format
+    # DSN, not the SQLAlchemy one (psycopg rejects the `+psycopg` suffix).
+    async with AsyncPostgresSaver.from_conn_string(settings.database_url_libpq) as checkpointer:
+        await checkpointer.setup()  # idempotent
+        yield builder.compile(checkpointer=checkpointer)

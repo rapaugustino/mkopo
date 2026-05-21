@@ -1,0 +1,21 @@
+id: ex-001
+inputs:
+  document_text: |
+    LOAN APPLICATION — COMMERCIAL BRIDGE FACILITY
+    Submitted: March 14, 2026
+
+    1. BORROWER INFORMATION
+    Legal Name: Atlas Holdings, LLC
+    State of Formation: Delaware
+    Business Address: 1842 South Tacoma Way, Tacoma, WA 98409
+
+    2. LOAN REQUEST
+    Amount: $2,400,000
+    Purpose: Acquisition financing
+expected:
+  borrower_entity: "Atlas Holdings LLC"
+metadata:
+  source: synthetic
+  doc_type: loan_application
+  labeled_by: jdoe@example.com
+  labeled_at: "2026-04-10"

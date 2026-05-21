@@ -1,0 +1,116 @@
+@import "tailwindcss";
+
+/**
+ * Design tokens.
+ *
+ * Mirrors the palette used by the HTML mockups in /prototype so React
+ * components can use the same `var(--color-...)` names. Tailwind v4
+ * `@theme` exposes everything as utilities (e.g. `bg-background-primary`,
+ * `text-text-warning`) AND as raw CSS variables for inline styles.
+ *
+ * Why the palette is shaped this way:
+ *
+ * - Warm neutrals (off-white #FAFAF7 page, #F4F3EE inset, #3D3D3A ink)
+ *   rather than the default cool Tailwind grays. Lender workflows take
+ *   hours; warm gray reads as paper instead of screen.
+ * - One brand accent (`--color-brand`) plus four muted status colours.
+ *   No secondary accents. If something needs a chip, it goes through
+ *   Pill's five variants — not a new hex.
+ * - Status fg/bg pairs are tuned for WCAG AA on `--color-background-primary`.
+ *   See README for the deltas; do not retune one without rechecking.
+ *
+ * If you want to reshape the look, retune here once and the whole app
+ * follows.
+ */
+@theme {
+  /* Brand ------------------------------------------------------------- */
+  --color-brand: #0f6e56;
+  --color-brand-light: #e1f5ee;
+  --color-ink: #3d3d3a;
+  --color-bg: #fafaf7;
+
+  /* Backgrounds ------------------------------------------------------- */
+  --color-background-primary: #ffffff; /* card / surface */
+  --color-background-secondary: #f4f3ee; /* inset / muted */
+
+  --color-background-success: #e1f5ee;
+  --color-background-info: #e0ebf6;
+  --color-background-warning: #fbf1d6;
+  --color-background-danger: #fbe7e7;
+
+  /* Text -------------------------------------------------------------- */
+  --color-text-primary: #3d3d3a;
+  --color-text-secondary: #73726c;
+  --color-text-tertiary: #9c9a92;
+
+  --color-text-success: #0f6e56;
+  --color-text-info: #185fa5;
+  --color-text-warning: #8c6b0e;
+  --color-text-danger: #8c1d18;
+
+  /* Borders ----------------------------------------------------------- */
+  --color-border: #e0dfd6; /* legacy alias */
+  --color-border-tertiary: #e0dfd6;
+
+  /* Radii ------------------------------------------------------------- */
+  --border-radius-sm: 4px;
+  --border-radius-md: 6px;
+  --border-radius-lg: 10px;
+
+  /* Type stacks ------------------------------------------------------- */
+  /* The variables on the left side of the var(...) come from next/font
+     in `layout.tsx`. Each falls back to a system stack if the network
+     font hasn't landed yet, so we never block paint. */
+  --font-sans:
+    var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    sans-serif;
+  --font-serif:
+    var(--font-source-serif), ui-serif, Georgia, "Times New Roman", serif;
+  --font-mono:
+    var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  /* Tabular numerals everywhere by default — every screen shows
+     dollars / ratios / dates that look broken without column-aligned
+     digits, and turning them on globally is cheaper than remembering
+     to add `tabular-nums` to every <td>. */
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "ss01", "cv01";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Editorial typeface for "moments of authority" — the credit decision
+   verdict, the adverse-action letter body, quote blocks in the case
+   file. Read these as if the AI is signing its name to them. */
+.font-editorial {
+  font-family: var(--font-serif);
+  letter-spacing: -0.005em;
+}
+
+/* Hairline rule used inside cards. Slightly warmer than border-tertiary
+   so it doesn't fight content. Use sparingly — most dividers should
+   still be the 0.5px tertiary border on real card edges. */
+.divider-hairline {
+  border-top: 0.5px solid #ebeae3;
+}
+
+/* Apply the brand wordmark's tighter spacing wherever the brand name
+   appears. -0.02em is the same value the prototype uses. */
+.brand-wordmark {
+  letter-spacing: -0.02em;
+  font-variant-numeric: normal; /* "Mkopo" isn't a number */
+}
+
+/* Numbers in card values (KPI tiles, stat tiles) should sit firmly on
+   the baseline. The default leading on 18-20px headings looks airy
+   when the value is two characters; clamp it. */
+.tabular-value {
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  letter-spacing: -0.01em;
+}

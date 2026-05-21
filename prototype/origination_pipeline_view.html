@@ -1,0 +1,132 @@
+<style>
+  .pp-frame { font-family: var(--font-sans); display: flex; flex-direction: column; gap: 12px; }
+  .pp-brand { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); }
+  .pp-brand-l { display: flex; align-items: center; gap: 10px; }
+  .pp-logo { width: 30px; height: 30px; border-radius: 7px; background: #0F6E56; color: #E1F5EE; display: flex; align-items: center; justify-content: center; font-weight: 500; font-size: 13px; letter-spacing: -0.02em; }
+  .pp-brand-name { font-size: 15px; font-weight: 500; margin: 0; }
+  .pp-brand-sub { font-size: 11px; color: var(--color-text-secondary); margin: 0; }
+  .pp-stages { display: grid; grid-template-columns: repeat(5, 1fr); background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); overflow: hidden; }
+  .pp-stage { padding: 12px 14px; border-right: 0.5px solid var(--color-border-tertiary); position: relative; cursor: pointer; }
+  .pp-stage:last-child { border-right: none; }
+  .pp-stage-active { background: var(--color-background-secondary); }
+  .pp-stage-active::after { content: ""; position: absolute; bottom: 0; left: 0; right: 0; height: 2px; background: #0F6E56; }
+  .pp-stage-name { font-size: 11px; color: var(--color-text-secondary); margin: 0 0 6px; display: flex; align-items: center; gap: 5px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .pp-stage-count { font-size: 20px; font-weight: 500; margin: 0; }
+  .pp-stage-trail { font-size: 11px; color: var(--color-text-tertiary); margin: 2px 0 0; }
+  .pp-card { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 4px 14px; }
+  .pp-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .pp-table th { text-align: left; font-weight: 500; color: var(--color-text-secondary); font-size: 11px; padding: 12px 8px; border-bottom: 0.5px solid var(--color-border-tertiary); text-transform: uppercase; letter-spacing: 0.03em; }
+  .pp-table td { padding: 12px 8px; border-bottom: 0.5px solid var(--color-border-tertiary); }
+  .pp-table tr:last-child td { border-bottom: none; }
+  .pp-id { font-weight: 500; color: var(--color-text-info); }
+  .pp-borrower { color: var(--color-text-primary); }
+  .pp-warn { color: var(--color-text-warning); font-weight: 500; }
+  .pp-danger { color: var(--color-text-danger); font-weight: 500; }
+  .pp-ok { color: var(--color-text-secondary); }
+  .pp-risk-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  .pp-avatar-mini { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: var(--color-background-secondary); font-size: 10px; font-weight: 500; color: var(--color-text-secondary); }
+</style>
+
+<h2 class="sr-only">Pipeline overview showing five lifecycle stages with loan counts, and a detail list of the seven loans currently in underwriting.</h2>
+
+<div class="pp-frame">
+
+  <div class="pp-brand">
+    <div class="pp-brand-l">
+      <div class="pp-logo">ML</div>
+      <div>
+        <p class="pp-brand-name">Mortgage Lens</p>
+        <p class="pp-brand-sub">AI-first origination · Atlas Capital workspace</p>
+      </div>
+    </div>
+    <div style="display: flex; gap: 6px; align-items: center;">
+      <button style="font-size: 12px; padding: 6px 10px;"><i class="ti ti-filter" aria-hidden="true"></i> Filter</button>
+      <button style="font-size: 12px; padding: 6px 12px; background: #0F6E56; color: #E1F5EE; border-color: #0F6E56;">New loan</button>
+    </div>
+  </div>
+
+  <div class="pp-stages">
+    <div class="pp-stage">
+      <p class="pp-stage-name"><i class="ti ti-inbox" aria-hidden="true"></i>Intake</p>
+      <p class="pp-stage-count">12</p>
+      <p class="pp-stage-trail">2 missing docs</p>
+    </div>
+    <div class="pp-stage pp-stage-active">
+      <p class="pp-stage-name"><i class="ti ti-microscope" aria-hidden="true"></i>Underwriting</p>
+      <p class="pp-stage-count">7</p>
+      <p class="pp-stage-trail">avg 4.2 days</p>
+    </div>
+    <div class="pp-stage">
+      <p class="pp-stage-name"><i class="ti ti-gavel" aria-hidden="true"></i>Decision</p>
+      <p class="pp-stage-count">3</p>
+      <p class="pp-stage-trail">1 needs review</p>
+    </div>
+    <div class="pp-stage">
+      <p class="pp-stage-name"><i class="ti ti-list-check" aria-hidden="true"></i>Conditions</p>
+      <p class="pp-stage-count">9</p>
+      <p class="pp-stage-trail">awaiting borrower</p>
+    </div>
+    <div class="pp-stage">
+      <p class="pp-stage-name"><i class="ti ti-flag-check" aria-hidden="true"></i>Closing</p>
+      <p class="pp-stage-count">4</p>
+      <p class="pp-stage-trail">$11.2M to fund</p>
+    </div>
+  </div>
+
+  <div class="pp-card">
+    <table class="pp-table">
+      <thead>
+        <tr>
+          <th>Loan</th>
+          <th>Borrower</th>
+          <th style="text-align: right;">Amount</th>
+          <th>Aging</th>
+          <th>Owner</th>
+          <th style="text-align: right;">Risk</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="pp-id">LN-2026-0847</span></td>
+          <td>Atlas Holdings LLC</td>
+          <td style="text-align: right;">$2.4M</td>
+          <td class="pp-warn">3d</td>
+          <td><span class="pp-avatar-mini">JD</span></td>
+          <td style="text-align: right;"><span class="pp-risk-dot" style="background: var(--color-text-danger);"></span><span class="pp-danger">High</span></td>
+        </tr>
+        <tr>
+          <td><span class="pp-id">LN-2026-0851</span></td>
+          <td>Cedar Ridge Partners</td>
+          <td style="text-align: right;">$1.8M</td>
+          <td class="pp-ok">1d</td>
+          <td><span class="pp-avatar-mini">MR</span></td>
+          <td style="text-align: right;"><span class="pp-risk-dot" style="background: var(--color-text-warning);"></span><span class="pp-warn">Med</span></td>
+        </tr>
+        <tr>
+          <td><span class="pp-id">LN-2026-0853</span></td>
+          <td>Bayline Investments</td>
+          <td style="text-align: right;">$3.2M</td>
+          <td class="pp-ok">2d</td>
+          <td><span class="pp-avatar-mini">JD</span></td>
+          <td style="text-align: right;"><span class="pp-risk-dot" style="background: var(--color-text-success);"></span><span class="pp-ok">Low</span></td>
+        </tr>
+        <tr>
+          <td><span class="pp-id">LN-2026-0856</span></td>
+          <td>Northgate RE Group</td>
+          <td style="text-align: right;">$4.1M</td>
+          <td class="pp-danger">8d</td>
+          <td><span class="pp-avatar-mini">SK</span></td>
+          <td style="text-align: right;"><span class="pp-risk-dot" style="background: var(--color-text-warning);"></span><span class="pp-warn">Med</span></td>
+        </tr>
+        <tr>
+          <td><span class="pp-id">LN-2026-0859</span></td>
+          <td>Halcyon Property Co.</td>
+          <td style="text-align: right;">$1.2M</td>
+          <td class="pp-ok">1d</td>
+          <td><span class="pp-avatar-mini">MR</span></td>
+          <td style="text-align: right;"><span class="pp-risk-dot" style="background: var(--color-text-success);"></span><span class="pp-ok">Low</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>

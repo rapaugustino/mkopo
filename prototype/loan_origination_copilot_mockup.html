@@ -1,0 +1,135 @@
+<style>
+  .lo-frame { font-family: var(--font-sans); display: flex; flex-direction: column; gap: 12px; }
+  .lo-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); }
+  .lo-card { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); padding: 14px 16px; }
+  .lo-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .lo-stat { background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 10px 12px; }
+  .lo-stat-label { font-size: 12px; color: var(--color-text-secondary); margin: 0 0 4px; }
+  .lo-stat-val { font-size: 18px; font-weight: 500; margin: 0; }
+  .lo-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .lo-section-title { font-size: 12px; font-weight: 500; color: var(--color-text-secondary); margin: 0 0 10px; display: flex; align-items: center; gap: 6px; }
+  .lo-field { display: flex; align-items: center; justify-content: space-between; padding: 7px 0; border-bottom: 0.5px solid var(--color-border-tertiary); }
+  .lo-field:last-child { border-bottom: none; padding-bottom: 0; }
+  .lo-field-label { font-size: 13px; color: var(--color-text-secondary); display: flex; align-items: center; gap: 8px; }
+  .lo-field-val { font-size: 13px; font-weight: 500; }
+  .lo-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+  .lo-flag { display: flex; gap: 10px; padding: 8px 10px; border-radius: var(--border-radius-md); margin-bottom: 6px; font-size: 12.5px; line-height: 1.4; }
+  .lo-flag:last-child { margin-bottom: 0; }
+  .lo-flag-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+  .lo-cite { display: inline-block; font-size: 10px; font-weight: 500; padding: 1px 5px; border-radius: 4px; background: var(--color-background-info); color: var(--color-text-info); margin: 0 1px; vertical-align: 1px; cursor: pointer; }
+  .lo-chat { background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 10px; margin-top: 2px; }
+  .lo-msg-user { font-size: 13px; color: var(--color-text-primary); margin: 0 0 8px; padding: 8px 10px; background: var(--color-background-primary); border-radius: var(--border-radius-md); border: 0.5px solid var(--color-border-tertiary); }
+  .lo-msg-ai { font-size: 13px; line-height: 1.55; margin: 0; padding: 2px 4px; }
+  .lo-mini-btn { font-size: 11px; padding: 4px 9px; }
+  .lo-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 3px 8px; border-radius: 4px; font-weight: 500; }
+</style>
+
+<h2 class="sr-only">Mockup of an AI-first loan origination workspace showing extracted fields, risk signals, an auto-generated underwriting summary with citations, and an agentic chat panel.</h2>
+
+<div class="lo-frame">
+
+  <div class="lo-header">
+    <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+      <div style="font-size: 15px; font-weight: 500;">LN-2026-0847</div>
+      <span class="lo-badge" style="background: var(--color-background-warning); color: var(--color-text-warning);">
+        <i class="ti ti-progress-check" aria-hidden="true"></i>In review
+      </span>
+      <span style="font-size: 13px; color: var(--color-text-secondary);">Bridge loan · Atlas Holdings LLC</span>
+    </div>
+    <div style="display: flex; gap: 6px;">
+      <button class="lo-mini-btn"><i class="ti ti-history" aria-hidden="true"></i> Audit</button>
+      <button class="lo-mini-btn">Approve</button>
+    </div>
+  </div>
+
+  <div class="lo-stats">
+    <div class="lo-stat">
+      <p class="lo-stat-label">Loan amount</p>
+      <p class="lo-stat-val">$2.4M</p>
+    </div>
+    <div class="lo-stat">
+      <p class="lo-stat-label">LTV</p>
+      <p class="lo-stat-val">68%</p>
+    </div>
+    <div class="lo-stat">
+      <p class="lo-stat-label">DSCR</p>
+      <p class="lo-stat-val">1.42</p>
+    </div>
+    <div class="lo-stat">
+      <p class="lo-stat-label">Doc confidence</p>
+      <p class="lo-stat-val">87%</p>
+    </div>
+  </div>
+
+  <div class="lo-row">
+    <div class="lo-card">
+      <p class="lo-section-title"><i class="ti ti-sparkles" aria-hidden="true"></i>Extracted from packet</p>
+      <div class="lo-field">
+        <span class="lo-field-label"><span class="lo-dot" style="background: var(--color-text-success);"></span>Borrower entity</span>
+        <span class="lo-field-val">Atlas Holdings LLC</span>
+      </div>
+      <div class="lo-field">
+        <span class="lo-field-label"><span class="lo-dot" style="background: var(--color-text-success);"></span>Guarantors</span>
+        <span class="lo-field-val">M. Chen, J. Park</span>
+      </div>
+      <div class="lo-field">
+        <span class="lo-field-label"><span class="lo-dot" style="background: var(--color-text-success);"></span>Property type</span>
+        <span class="lo-field-val">Multifamily, 12 units</span>
+      </div>
+      <div class="lo-field">
+        <span class="lo-field-label"><span class="lo-dot" style="background: var(--color-text-warning);"></span>Annual NOI</span>
+        <span class="lo-field-val">$284,200</span>
+      </div>
+      <div class="lo-field">
+        <span class="lo-field-label"><span class="lo-dot" style="background: var(--color-text-danger);"></span>Appraisal date</span>
+        <span class="lo-field-val" style="color: var(--color-text-danger);">Needs review</span>
+      </div>
+    </div>
+
+    <div class="lo-card">
+      <p class="lo-section-title"><i class="ti ti-alert-triangle" aria-hidden="true"></i>Risk signals</p>
+      <div class="lo-flag" style="background: var(--color-background-danger); color: var(--color-text-danger);">
+        <i class="ti ti-link lo-flag-icon" aria-hidden="true"></i>
+        <div>Guarantor M. Chen is on 3 active loans (concentration $7.1M)</div>
+      </div>
+      <div class="lo-flag" style="background: var(--color-background-warning); color: var(--color-text-warning);">
+        <i class="ti ti-calendar-off lo-flag-icon" aria-hidden="true"></i>
+        <div>Appraisal dated 11 months ago — policy max 6 months</div>
+      </div>
+      <div class="lo-flag" style="background: var(--color-background-info); color: var(--color-text-info);">
+        <i class="ti ti-info-circle lo-flag-icon" aria-hidden="true"></i>
+        <div>DSCR below portfolio median (1.42 vs 1.61)</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="lo-card">
+    <p class="lo-section-title" style="justify-content: space-between;">
+      <span style="display: flex; align-items: center; gap: 6px;"><i class="ti ti-file-text" aria-hidden="true"></i>Underwriting summary</span>
+      <span style="font-size: 11px; color: var(--color-text-tertiary); font-weight: 400;">Generated 2 min ago · cached</span>
+    </p>
+    <p style="font-size: 13px; line-height: 1.65; margin: 0; color: var(--color-text-primary);">
+      Atlas Holdings is requesting $2.4M against a 12-unit multifamily in Tacoma, WA<span class="lo-cite">1</span>. Property NOI of $284,200<span class="lo-cite">2</span> supports a 1.42 DSCR at proposed terms. Sponsor has a 4-year track record with the lender — 8 prior loans, zero delinquencies<span class="lo-cite">3</span>. Two items require underwriter attention: the appraisal is outside policy window<span class="lo-cite">4</span>, and guarantor M. Chen carries material exposure across the portfolio<span class="lo-cite">5</span>.
+    </p>
+  </div>
+
+  <div class="lo-card">
+    <p class="lo-section-title"><i class="ti ti-messages" aria-hidden="true"></i>Ask the file</p>
+    <div class="lo-chat">
+      <div class="lo-msg-user">Show me comparable loans we've closed in Tacoma multifamily above $2M in the last 18 months.</div>
+      <div class="lo-msg-ai">
+        Found 4 comparable closings. Median LTV 64%, median rate 9.25%, all current. Closest comp: <span style="color: var(--color-text-info); border-bottom: 0.5px dotted var(--color-text-info); cursor: pointer;">LN-2024-0612</span> — $2.1M, 14 units, 1.51 DSCR, sponsor still in good standing<span class="lo-cite">6</span>.
+        <div style="margin-top: 10px; display: flex; gap: 6px;">
+          <button class="lo-mini-btn">View comps</button>
+          <button class="lo-mini-btn">Compare to this deal</button>
+        </div>
+      </div>
+    </div>
+    <div style="display: flex; gap: 8px; margin-top: 10px; align-items: center; background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-md); padding: 8px 10px;">
+      <i class="ti ti-search" style="font-size: 14px; color: var(--color-text-tertiary);" aria-hidden="true"></i>
+      <span style="flex: 1; font-size: 13px; color: var(--color-text-tertiary);">Ask anything about this file or the borrower's history…</span>
+      <button class="lo-mini-btn">Send</button>
+    </div>
+  </div>
+
+</div>
