@@ -69,6 +69,10 @@ class ActorType(enum.StrEnum):
     USER = "user"
     AGENT = "agent"
     SYSTEM = "system"
+    # The borrower acting on their own loan via the self-service
+    # portal. Lets the case-file timeline colour-code their events
+    # distinctly from internal underwriter actions.
+    BORROWER = "borrower"
 
 
 class AuditEvent(Base):

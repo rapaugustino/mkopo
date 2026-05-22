@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy import select
 
 from mkopo.deps import CurrentUserDep, DbSessionDep
@@ -46,8 +47,20 @@ async def list_loans(user: CurrentUserDep, db: DbSessionDep) -> list[Loan]:
 
 @router.post("", response_model=LoanOut, status_code=status.HTTP_201_CREATED)
 async def create_loan(payload: LoanCreate, user: CurrentUserDep, db: DbSessionDep) -> Loan:
+    from mkopo.models import LoanClass
+
+    # Validate the loan_class on the boundary — the inbound payload
+    # is a plain string from JSON. Falls back to BUSINESS rather than
+    # raising so a typo doesn't 500; the audit event still records
+    # what the client sent.
+    try:
+        klass = LoanClass(payload.loan_class)
+    except ValueError:
+        klass = LoanClass.BUSINESS
+
     loan = Loan(
         loan_type=payload.loan_type,
+        loan_class=klass,
         amount=payload.amount,
         meta={"borrower_email": payload.borrower_email},
     )
@@ -102,7 +115,87 @@ async def transition(
         await db.commit()
         return loan
     except loan_service.IllegalStageTransitionError as e:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(e)) from e
+        # 422 is the right semantic for "the request is well-formed but
+        # the loan's current state forbids this action". 400 would have
+        # said "your request is malformed" which it isn't.
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e)) from e
+
+
+class AutonomyIn(BaseModel):
+    """PATCH payload for the autonomy toggle. The reason is required —
+    it goes onto the audit event so committee reviewers can see *why*
+    a particular deal was put on or off the autonomous track."""
+
+    level: str  # "assisted" | "autonomous"
+    reason: str
+
+
+@router.patch("/{loan_id}/autonomy", response_model=LoanOut)
+async def set_autonomy(
+    loan_id: uuid.UUID,
+    payload: AutonomyIn,
+    user: CurrentUserDep,
+    db: DbSessionDep,
+) -> Loan:
+    """Switch a loan between ``assisted`` and ``autonomous`` modes.
+
+    Autonomous mode lets the orchestrator chain agents end-to-end
+    (intake → underwriting → decision) without prompting the
+    underwriter at each step. Irreversible HITL gates (sending
+    borrower email, sending the decision package) are still
+    human-only — the toggle does not bypass them.
+
+    The mode change writes an ``autonomy_changed`` audit event so the
+    decision to fast-track (or slow down) a loan is itself part of the
+    auditable record.
+    """
+    from mkopo.models import AutonomyLevel
+
+    if payload.level not in ("assisted", "autonomous"):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Invalid autonomy level: {payload.level}",
+        )
+    loan = await loan_service.get_loan(db, loan_id)
+    if not loan:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Loan not found")
+
+    from_level = (
+        loan.autonomy_level.value
+        if hasattr(loan.autonomy_level, "value")
+        else str(loan.autonomy_level)
+    )
+    loan.autonomy_level = AutonomyLevel(payload.level)
+    await record(
+        db,
+        loan_id=loan_id,
+        actor=Actor.user(user.user_id),
+        action="autonomy_changed",
+        payload={
+            "from": from_level,
+            "to": payload.level,
+            "reason": payload.reason,
+        },
+    )
+    await db.commit()
+    return loan
+
+
+@router.get("/{loan_id}/transitions")
+async def list_allowed_transitions(
+    loan_id: uuid.UUID, user: CurrentUserDep, db: DbSessionDep
+) -> dict[str, str | None]:
+    """Per-stage readiness map: ``{<stage>: null}`` if ready, otherwise
+    ``{<stage>: "<reason>"}``. The UI uses this to disable a transition
+    button before the user clicks it, with the reason as the tooltip.
+
+    Cheap to compute — the prerequisite checks are bounded `SELECT
+    .. LIMIT 1` queries against indexed columns.
+    """
+    loan = await loan_service.get_loan(db, loan_id)
+    if not loan:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Loan not found")
+    return await loan_service.allowed_transitions(db, loan)
 
 
 @router.get("/{loan_id}/extractions", response_model=list[ExtractionOut])
@@ -118,6 +211,56 @@ async def list_extractions(
         .order_by(Extraction.created_at.desc())
     )
     return list((await db.execute(stmt)).scalars().all())
+
+
+@router.get("/{loan_id}/rules")
+async def get_rules_preview(
+    loan_id: uuid.UUID, user: CurrentUserDep, db: DbSessionDep
+) -> dict[str, object]:
+    """Deterministic rules + KPIs for a loan, no LLM call involved.
+
+    The underwriting agent runs ``fetch_and_evaluate`` (rules + KPIs)
+    before its LLM summary node. This endpoint exposes that first half
+    directly so the workspace can render extractions, KPIs, and risk
+    signals at all times — even before the agent has been kicked off.
+    The agent's cited prose is the only thing that requires Run.
+
+    Returns ``{kpis, risk_flags, extractions}`` mirroring the relevant
+    subset of UnderwritingResult.
+    """
+    if not await loan_service.get_loan(db, loan_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Loan not found")
+
+    from mkopo.services.rules_eval import evaluate
+
+    result = await evaluate(db, loan_id)
+    ctx = result.ctx
+    ltv = float(ctx.loan_amount / ctx.appraised_value) if ctx.appraised_value else None
+    dscr = (
+        float(ctx.annual_noi / ctx.annual_debt_service)
+        if ctx.annual_noi and ctx.annual_debt_service
+        else None
+    )
+    debt_yield = float(ctx.annual_noi / ctx.loan_amount) if ctx.annual_noi else None
+    doc_confidence = (
+        sum(result.confidences.values()) / len(result.confidences)
+        if result.confidences
+        else None
+    )
+    return {
+        "kpis": {
+            "loan_amount": str(ctx.loan_amount),
+            "ltv": ltv,
+            "dscr": dscr,
+            "debt_yield": debt_yield,
+            "doc_confidence": doc_confidence,
+            "property_type": ctx.property_type.value
+            if hasattr(ctx.property_type, "value")
+            else str(ctx.property_type),
+        },
+        "risk_flags": [f.model_dump(mode="json") for f in result.flags],
+        "extractions": result.extractions,
+    }
 
 
 @router.post("/{loan_id}/notes", response_model=AuditEventOut, status_code=status.HTTP_201_CREATED)

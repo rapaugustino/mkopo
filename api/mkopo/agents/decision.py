@@ -39,7 +39,7 @@ import structlog
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 
 from mkopo.config import get_settings
 from mkopo.db import get_session
@@ -120,9 +120,43 @@ def _rate_basis_for(loan_type_value: str) -> tuple[float, str, int, str]:
 
 
 async def fetch_and_evaluate(state: DecisionState) -> DecisionState:
-    """Re-evaluate rules from current extractions — same source as underwriting."""
+    """Re-evaluate rules from current extractions — same source as underwriting.
+
+    Pre-flight gate: the decision agent only makes sense once
+    underwriting has run, because its prompt anchors on the cited
+    summary's recommendation. Without an ``underwriting_complete``
+    audit event the LLM would have to guess from raw extractions —
+    expensive and produces low-quality recommendations.
+
+    Marks ``status='needs_underwriting'`` and short-circuits so the
+    UI can guide the user to the underwriting tab first.
+    """
     loan_id = uuid.UUID(state["loan_id"])
     async with get_session() as session:
+        from sqlalchemy import select
+
+        from mkopo.models import AuditEvent
+
+        underwriting_ran = (
+            await session.execute(
+                select(AuditEvent.id)
+                .where(
+                    AuditEvent.loan_id == loan_id,
+                    AuditEvent.action == "underwriting_complete",
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none() is not None
+        if not underwriting_ran:
+            await record(
+                session,
+                loan_id=loan_id,
+                actor=Actor.agent("decision"),
+                action="decision_skipped",
+                payload={"reason": "needs_underwriting"},
+            )
+            return {**state, "status": "needs_underwriting"}
+
         result = await evaluate_rules_against_loan(session, loan_id)
     return {
         **state,
@@ -320,23 +354,26 @@ async def persist(state: DecisionState) -> DecisionState:
                 )
             )
 
-        agent_run = AgentRun(
-            id=decision.agent_run_id,
-            loan_id=loan_id,
-            agent_name="decision",
-            thread_id=f"decision-{loan_id}",
-            status="complete",
-            started_at=Decimal(int(decision.generated_at.timestamp())),
-            payload={
-                "path": decision.path,
-                "confidence": decision.confidence,
-                "verdict": decision.verdict_text,
-                "n_conditions": len(decision.conditions),
-                "has_term_sheet": decision.term_sheet is not None,
-                "has_aal": decision.adverse_action_letter is not None,
-            },
+        # The AgentRun row was created by the streaming layer at the
+        # start of this run; we update it here with the final payload.
+        # UPDATE-by-id instead of INSERT keeps the row's id stable for
+        # any AgentStep rows that already point at it.
+        await session.execute(
+            update(AgentRun)
+            .where(AgentRun.id == decision.agent_run_id)
+            .values(
+                status="complete",
+                started_at=Decimal(int(decision.generated_at.timestamp())),
+                payload={
+                    "path": decision.path,
+                    "confidence": decision.confidence,
+                    "verdict": decision.verdict_text,
+                    "n_conditions": len(decision.conditions),
+                    "has_term_sheet": decision.term_sheet is not None,
+                    "has_aal": decision.adverse_action_letter is not None,
+                },
+            )
         )
-        session.add(agent_run)
 
         await record(
             session,
@@ -373,7 +410,20 @@ async def build_decision_graph() -> AsyncIterator[Any]:
     builder.add_node("persist", persist)
 
     builder.add_edge(START, "fetch_and_evaluate")
-    builder.add_edge("fetch_and_evaluate", "draft_decision")
+
+    def route_after_eval(state: DecisionState) -> str:
+        """Pre-flight short-circuit. If underwriting hasn't run yet
+        we skip the LLM draft — its prompt anchors on the cited
+        summary, which doesn't exist yet."""
+        if state.get("status") == "needs_underwriting":
+            return END
+        return "draft_decision"
+
+    builder.add_conditional_edges(
+        "fetch_and_evaluate",
+        route_after_eval,
+        {END: END, "draft_decision": "draft_decision"},
+    )
     builder.add_edge("draft_decision", "persist")
     builder.add_edge("persist", END)
 

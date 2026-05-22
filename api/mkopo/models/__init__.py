@@ -18,13 +18,23 @@ from mkopo.models.document import (
 )
 from mkopo.models.embedding import DocumentChunk
 from mkopo.models.eval import LLMCall, TaskRun
-from mkopo.models.loan import VALID_TRANSITIONS, AgentRun, Loan, LoanStage, LoanType
+from mkopo.models.loan import (
+    VALID_TRANSITIONS,
+    AgentRun,
+    AgentStep,
+    AutonomyLevel,
+    Loan,
+    LoanClass,
+    LoanStage,
+    LoanType,
+)
 from mkopo.models.party import LoanParty, Party, PartyRole, PartyType
 from mkopo.models.user import User
 
 __all__ = [
     "ActorType",
     "AgentRun",
+    "AgentStep",
     "AuditEvent",
     "Base",
     "Condition",

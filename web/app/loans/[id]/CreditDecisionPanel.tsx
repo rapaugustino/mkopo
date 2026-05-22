@@ -18,6 +18,7 @@ import {
   type DecisionPath,
   type DecisionResult,
 } from "@/lib/api";
+import { toast } from "sonner";
 import { humanizeStatus } from "@/lib/humanize";
 import { useAgentRun } from "@/lib/useAgentRun";
 import { AgentProgress } from "@/app/components/AgentProgress";
@@ -330,6 +331,17 @@ export function CreditDecisionPanel({ loanId }: Props) {
           queryClient.invalidateQueries({ queryKey: ["loan", loanId, "conditions"] }),
           queryClient.invalidateQueries({ queryKey: ["loan", loanId, "audit"] }),
         ]);
+        // Pre-flight gate fired (e.g. underwriting hasn't run yet) —
+        // show the friendly reason instead of a generic "no result".
+        if (ev.skip_reason) {
+          toast.message("Decision didn't run", {
+            description: ev.skip_reason,
+          });
+        } else if (data) {
+          toast.success("Decision drafted", {
+            description: `${PATH_META[data.path].label} · ${Math.round(data.confidence * 100)}% confidence`,
+          });
+        }
       },
     });
 
@@ -370,6 +382,8 @@ export function CreditDecisionPanel({ loanId }: Props) {
           title="Decision agent"
           nodes={agentRun.nodes}
           error={agentRun.error}
+          errorDetail={agentRun.errorDetail}
+          skipReason={agentRun.skipReason}
         />
       )}
 
@@ -476,8 +490,8 @@ export function CreditDecisionPanel({ loanId }: Props) {
                 !result.term_sheet)) && (
               <p className="rounded bg-[var(--color-background-warning)] px-3 py-2 text-xs text-[var(--color-text-warning)]">
                 You&apos;ve selected a path the AI didn&apos;t draft for
-                (recommendation was <strong>{result.path}</strong>). Re-run the
-                agent or override manually before sending.
+                (recommendation was <strong>{PATH_META[result.path].label}</strong>).
+                Re-run the agent or override manually before sending.
               </p>
             )}
 

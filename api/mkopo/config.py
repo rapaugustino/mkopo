@@ -29,11 +29,19 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     # LLM
+    #
+    # Model identifiers use the dated form (``claude-<family>-4-5-<YYYYMMDD>``)
+    # for two reasons: (1) it's the form Anthropic guarantees is
+    # available, the unsuffixed alias points at whichever date is
+    # current and can shift under you; (2) the eval harness pins the
+    # judge model — if the judge moves quarter to quarter, scores
+    # stop being comparable. Override per-deployment via .env when a
+    # newer model lands.
     anthropic_api_key: str
-    llm_default_model: str = "claude-sonnet-4-6"
-    llm_heavy_model: str = "claude-opus-4-6"
+    llm_default_model: str = "claude-sonnet-4-5-20250929"
+    llm_heavy_model: str = "claude-opus-4-5-20251115"
     llm_fast_model: str = "claude-haiku-4-5-20251001"
-    llm_judge_model: str = "claude-opus-4-6"
+    llm_judge_model: str = "claude-opus-4-5-20251115"
 
     # Embeddings (OpenAI)
     #
@@ -46,8 +54,16 @@ class Settings(BaseSettings):
     embeddings_dimensions: int = 1024
 
     # Email
+    #
+    # ``resend_from_address`` MUST be on a domain verified in Resend
+    # (DNS records published, status: verified). The ubunifutech.com
+    # domain is the canonical sender for Mkopo deployments. To use a
+    # different domain in your own deployment:
+    #   1. Verify the domain on https://resend.com/domains
+    #   2. Set RESEND_FROM_ADDRESS to a mailbox on it
+    #   3. Configure the inbound webhook (DEPLOY.md §Email).
     resend_api_key: str = ""
-    resend_from_address: str = "noreply@mkopo.io"
+    resend_from_address: str = "mkopo@ubunifutech.com"
     resend_from_name: str = "Mkopo"
     resend_webhook_secret: str = ""
 

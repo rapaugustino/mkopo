@@ -20,6 +20,7 @@ from anthropic import AsyncAnthropic
 from anthropic.types import Message as AnthropicMessage
 from pydantic import BaseModel, ValidationError
 
+from mkopo.agents.context import current_thread_id
 from mkopo.config import get_settings
 from mkopo.db import get_session
 from mkopo.models.eval import LLMCall
@@ -124,6 +125,20 @@ class LLMGateway:
                     error=last_error[:500],
                 )
                 if attempt == max_retries:
+                    # Pydantic's str(e) is the full multi-line pretty-
+                    # printed validation error. The short reason gets
+                    # the count + first field; the long detail keeps
+                    # the whole thing so operators can see exactly
+                    # which fields failed and how.
+                    err_count = len(e.errors()) if hasattr(e, "errors") else 1
+                    first_field = ".".join(
+                        str(p) for p in (e.errors()[0].get("loc", ()) if hasattr(e, "errors") and e.errors() else ())
+                    ) or "?"
+                    short_reason = (
+                        f"Schema validation failed ({err_count} "
+                        f"{'error' if err_count == 1 else 'errors'}, "
+                        f"first at {first_field})"
+                    )
                     await self._record_call(
                         call_id=call_id,
                         model=model,
@@ -134,6 +149,8 @@ class LLMGateway:
                         status="schema_failed",
                         attempt=attempt,
                         elapsed_seconds=time.monotonic() - started_at,
+                        error_reason=short_reason,
+                        error_detail=last_error,
                     )
                     raise LLMCallFailedError(
                         f"LLM output failed schema validation after {attempt + 1} attempts",
@@ -144,7 +161,27 @@ class LLMGateway:
 
             except Exception as e:
                 logger.exception("llm_call_error", call_id=call_id, model=model)
+                # Preserve the inner error message — many SDK errors
+                # have an empty ``str(e)`` but a useful ``repr(e)`` or
+                # ``.message`` attribute. Try the richer accessors first
+                # so the downstream LLMCallFailedError carries something
+                # the UI can show. Without this, the user sees a generic
+                # "LLM call errored after N attempts" with no clue why.
+                inner = (
+                    getattr(e, "message", None)
+                    or str(e)
+                    or repr(e)
+                    or e.__class__.__name__
+                )
+                last_error = str(inner)
                 if attempt == max_retries:
+                    # Short reason = exception class + inner message;
+                    # long detail = repr() which carries SDK-level
+                    # structured info (status code, request id, etc.)
+                    # — useful for distinguishing 401-auth from 429-
+                    # rate-limited from 500-server-error in the
+                    # observability inspector.
+                    short_reason = f"{e.__class__.__name__}: {last_error}"
                     await self._record_call(
                         call_id=call_id,
                         model=model,
@@ -155,11 +192,13 @@ class LLMGateway:
                         status="error",
                         attempt=attempt,
                         elapsed_seconds=time.monotonic() - started_at,
+                        error_reason=short_reason,
+                        error_detail=repr(e),
                     )
                     raise LLMCallFailedError(
-                        f"LLM call errored after {attempt + 1} attempts",
+                        f"LLM call errored after {attempt + 1} attempts: {last_error}",
                         attempts=attempt + 1,
-                        last_error=str(e),
+                        last_error=last_error,
                     ) from e
 
         raise LLMCallFailedError("Unreachable", attempts=0, last_error="")  # for type checker
@@ -213,6 +252,8 @@ class LLMGateway:
         elapsed_seconds: float,
         input_tokens: int | None = None,
         output_tokens: int | None = None,
+        error_reason: str | None = None,
+        error_detail: str | None = None,
     ) -> None:
         """Persist one LLM call to ``llm_calls`` and log via structlog.
 
@@ -223,6 +264,10 @@ class LLMGateway:
 
         ``system_prompt_hash`` is sha256 so we can group by prompt
         without storing potentially sensitive prompt content.
+
+        ``error_reason`` / ``error_detail`` populate on failure rows so
+        the observability inspector can show *why* a call broke. Both
+        stay ``None`` for successful calls.
         """
         system_hash = hashlib.sha256(system.encode("utf-8")).hexdigest()
 
@@ -239,6 +284,7 @@ class LLMGateway:
             elapsed_seconds=round(elapsed_seconds, 3),
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            error_reason=error_reason,
         )
 
         try:
@@ -253,11 +299,28 @@ class LLMGateway:
                         status=status,
                         schema_name=schema_name,
                         attempt=attempt,
+                        error_reason=_truncate(error_reason, 256),
+                        error_detail=_truncate(error_detail, 4096),
+                        # ContextVar — populated when this call is
+                        # made inside ``agent_run_context``. Lets the
+                        # observability UI group calls per run.
+                        thread_id=current_thread_id(),
                     )
                 )
         except Exception:
             # Don't let observability break the calling agent.
             logger.exception("llm_call_persist_failed", call_id=call_id)
+
+
+def _truncate(s: str | None, max_len: int) -> str | None:
+    """Clamp a string to ``max_len`` characters, appending an ellipsis
+    when the original was longer so the consumer can tell it was cut.
+    Returns ``None`` unchanged so the column stays null on success."""
+    if s is None:
+        return None
+    if len(s) <= max_len:
+        return s
+    return s[: max_len - 1] + "…"
 
 
 # Module-level singleton — import this everywhere

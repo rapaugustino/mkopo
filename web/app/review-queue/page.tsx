@@ -1,14 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { IconListSearch } from "@tabler/icons-react";
+import { IconListSearch, IconX } from "@tabler/icons-react";
 import { api, type ReviewTask } from "@/lib/api";
 import { humanizeField } from "@/lib/humanize";
 import { BrandHeader } from "@/app/components/BrandHeader";
 import { DocSourceViewer } from "@/app/components/DocSourceViewer";
 import { Pill, type PillVariant } from "@/app/components/Pill";
+import { Skeleton } from "@/app/components/Skeleton";
 
 /** Bucket the reason string into a tag for visual scanning.
  *
@@ -44,13 +46,29 @@ function ConfidenceBadge({ pct }: { pct: number }) {
 
 export default function ReviewQueuePage() {
   const [activeTask, setActiveTask] = useState<ReviewTask | null>(null);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  // Optional ``?field=annual_noi`` deep-link from the eval dashboard.
+  // The eval page sends operators here when a field's accuracy drifts
+  // below threshold — pre-filtering the queue lets them investigate
+  // without trawling through unrelated tasks.
+  const fieldFilter = searchParams.get("field");
 
   const tasksQuery = useQuery<ReviewTask[], Error>({
     queryKey: ["review-tasks", "open"],
     queryFn: () => api.listReviewTasks("open"),
   });
 
-  const tasks = tasksQuery.data ?? [];
+  const allTasks = tasksQuery.data ?? [];
+  const tasks = useMemo(
+    () =>
+      fieldFilter
+        ? allTasks.filter((t) => t.extraction.field_name === fieldFilter)
+        : allTasks,
+    [allTasks, fieldFilter],
+  );
+
+  const clearFieldFilter = () => router.replace("/review-queue");
 
   return (
     <div className="flex flex-col gap-3">
@@ -67,14 +85,44 @@ export default function ReviewQueuePage() {
           </div>
         }
         title="Review queue"
-        sub={`${tasks.length} item${tasks.length === 1 ? "" : "s"} awaiting human review`}
+        sub={`${tasks.length} item${tasks.length === 1 ? "" : "s"} awaiting human review${fieldFilter ? ` · filtered by field` : ""}`}
       />
+
+      {/* Active-filter chip — only renders when a ``?field=`` deep
+          link is in play. Clicking the X clears the filter and
+          drops the query param. Mirrors the pipeline view's filter
+          UX so the visual language is consistent. */}
+      {fieldFilter && (
+        <div className="flex items-center gap-2 rounded-md bg-[var(--color-background-info)] px-3 py-2 text-[12px] text-[var(--color-text-info)]">
+          <span className="font-medium">Field:</span>
+          <span>{humanizeField(fieldFilter)}</span>
+          <button
+            type="button"
+            onClick={clearFieldFilter}
+            className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] hover:bg-[var(--color-background-primary)]"
+            aria-label="Clear field filter"
+          >
+            <IconX size={11} />
+            Clear
+          </button>
+        </div>
+      )}
 
       <div className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-3">
         {tasksQuery.isPending && (
-          <p className="px-2 py-6 text-center text-sm text-[var(--color-text-tertiary)]">
-            Loading…
-          </p>
+          <div className="flex flex-col gap-3 px-2 py-4">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="flex items-center gap-4">
+                <Skeleton width="w-16" height="h-5" shape="sm" />
+                <Skeleton width="w-28" height="h-3" />
+                <Skeleton width="w-32" height="h-3" />
+                <Skeleton width="w-40" height="h-3" />
+                <div className="ml-auto">
+                  <Skeleton width="w-16" height="h-7" />
+                </div>
+              </div>
+            ))}
+          </div>
         )}
         {tasksQuery.error && (
           <p className="px-2 py-6 text-center text-sm text-[var(--color-text-danger)]">

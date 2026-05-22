@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { IconSparkles } from "@tabler/icons-react";
+import { motion } from "motion/react";
 import type { IntakeInterrupt } from "@/lib/api";
 import { humanizeField } from "@/lib/humanize";
 import { Pill } from "@/app/components/Pill";
@@ -27,15 +28,22 @@ interface Props {
  * surfaces.
  */
 export function IntakeApprovalModal({ interrupt, onSend, onCancel, onClose }: Props) {
-  const [subject, setSubject] = useState(interrupt.draft.subject);
-  const [bodyText, setBodyText] = useState(interrupt.draft.body_text);
+  // Defensive defaults: in practice the backend always sends a
+  // populated draft when it fires an interrupt, but the modal renders
+  // inside a higher-up `pendingInterrupt &&` guard that gets the raw
+  // SSE payload — so an unexpected wire-format change shouldn't crash
+  // the whole loan page. Surfaces a graceful empty state instead.
+  const draftSubject = interrupt.draft?.subject ?? "";
+  const draftBody = interrupt.draft?.body_text ?? "";
+  const [subject, setSubject] = useState(draftSubject);
+  const [bodyText, setBodyText] = useState(draftBody);
   const [submitting, setSubmitting] = useState<null | "send" | "cancel">(null);
   const [error, setError] = useState<string | null>(null);
 
   // Reset edits if the modal is reopened with a fresh draft
   useEffect(() => {
-    setSubject(interrupt.draft.subject);
-    setBodyText(interrupt.draft.body_text);
+    setSubject(interrupt.draft?.subject ?? "");
+    setBodyText(interrupt.draft?.body_text ?? "");
     setError(null);
   }, [interrupt]);
 
@@ -57,17 +65,26 @@ export function IntakeApprovalModal({ interrupt, onSend, onCancel, onClose }: Pr
   };
 
   const edited =
-    subject !== interrupt.draft.subject || bodyText !== interrupt.draft.body_text;
+    subject !== (interrupt.draft?.subject ?? "") ||
+    bodyText !== (interrupt.draft?.body_text ?? "");
 
   return (
-    <div
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.14 }}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="approval-title"
       onClick={onClose}
     >
-      <div
+      <motion.div
+        initial={{ opacity: 0, y: 8, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 4, scale: 0.99 }}
+        transition={{ duration: 0.18, ease: "easeOut" }}
         className="w-full max-w-2xl overflow-hidden rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
@@ -113,7 +130,7 @@ export function IntakeApprovalModal({ interrupt, onSend, onCancel, onClose }: Pr
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
               disabled={submitting !== null}
-              className="rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-white px-3 py-2 text-[13px] focus:border-[var(--color-brand)] focus:outline-none disabled:opacity-50"
+              className="form-input"
             />
           </label>
           <label className="flex flex-col gap-1">
@@ -125,7 +142,7 @@ export function IntakeApprovalModal({ interrupt, onSend, onCancel, onClose }: Pr
               onChange={(e) => setBodyText(e.target.value)}
               disabled={submitting !== null}
               rows={10}
-              className="resize-y rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-white px-3 py-2 font-mono text-[12px] leading-relaxed focus:border-[var(--color-brand)] focus:outline-none disabled:opacity-50"
+              className="form-input-mono resize-y"
             />
           </label>
           {edited && (
@@ -157,7 +174,7 @@ export function IntakeApprovalModal({ interrupt, onSend, onCancel, onClose }: Pr
             {submitting === "send" ? "Sending…" : "Send"}
           </PrimaryButton>
         </footer>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }

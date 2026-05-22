@@ -215,6 +215,10 @@ const AUDIT_ACTION_LABEL: Record<string, string> = {
   review_task_created: "Review queued",
   review_task_resolved: "Review resolved",
   loan_created: "Loan created",
+  borrower_applied: "Borrower applied via portal",
+  borrower_document_uploaded: "Borrower uploaded a document",
+  autonomy_changed: "Autonomy mode changed",
+  orchestrator_advanced: "Orchestrator advanced stage",
 };
 
 export const humanizeAuditAction = (a: string | null | undefined): string =>

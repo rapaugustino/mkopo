@@ -34,13 +34,22 @@ import structlog
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from mkopo.config import get_settings
 from mkopo.db import get_session
 from mkopo.llm_gateway import get_gateway
 from mkopo.models import AgentRun, Loan
-from mkopo.rules.policy import DSCR_FLOORS, REQUIRED_DOCS, PropertyType, has_blocking_failures
+from mkopo.rules.policy import (
+    DSCR_FLOORS,
+    POLICY_MAX_DTI_PERSONAL,
+    POLICY_MAX_LTI_PERSONAL,
+    POLICY_MIN_FICO,
+    REQUIRED_DOCS,
+    REQUIRED_DOCS_PERSONAL,
+    PropertyType,
+    has_blocking_failures,
+)
 from mkopo.schemas import (
     RiskFlag,
     UnderwritingKPIs,
@@ -59,6 +68,7 @@ logger = structlog.get_logger()
 
 class UnderwritingState(TypedDict, total=False):
     loan_id: str
+    loan_class: str  # "business" | "personal" — drives prompt + rule pack
     extractions: dict[str, str]  # field_name -> value (accepted only)
     rule_outcomes: list[RiskFlag]
     kpis: UnderwritingKPIs | None
@@ -76,6 +86,87 @@ class _DraftedUnderwriting(BaseModel):
     rationale: str = Field(max_length=800)
 
 
+# --- Prompts -------------------------------------------------------------
+#
+# Two persona/system prompts: one for commercial loans (DSCR, LTV,
+# property collateral, sponsor entity) and one for personal/consumer
+# loans (DTI, FICO, employment, no collateral). Keeping them separate
+# beats a "covers both" prompt that reads like neither — the LLM picks
+# up on the persona and writes more credibly when it's not asked to
+# code-switch mid-paragraph.
+
+_COMMERCIAL_SYSTEM_PROMPT = (
+    "You are an experienced commercial loan underwriter writing for a "
+    "credit committee. You produce factual, concise, citation-backed "
+    "summaries. Hard rules:\n"
+    "1. You MUST cite the field names you rely on in each section's "
+    "   `citations` array (e.g. 'annual_noi', 'appraised_value').\n"
+    "2. You do NOT invent values — if a field is missing, say so.\n"
+    "3. You do NOT compute or assert pass/fail on policy rules — the "
+    "   rules engine has already done that. You may *describe* what it "
+    "   found, but the verdict belongs to the engine.\n"
+    "4. You do NOT name a recommendation that contradicts the engine's "
+    "   blocking failures — if the engine blocks the deal, your only "
+    "   options are 'decline' or 'request_more_info'.\n"
+)
+
+_PERSONAL_SYSTEM_PROMPT = (
+    "You are an experienced consumer-credit underwriter writing for a "
+    "personal-loan adjudication queue. You produce factual, concise, "
+    "citation-backed summaries. Hard rules:\n"
+    "1. You MUST cite the field names you rely on in each section's "
+    "   `citations` array (e.g. 'annual_income', 'credit_score').\n"
+    "2. You do NOT invent values — if a field is missing, say so.\n"
+    "3. You do NOT compute or assert pass/fail on policy rules — the "
+    "   rules engine has already done that.\n"
+    "4. Personal loans are unsecured — your language should reflect "
+    "   that DTI, FICO band, and employment stability are the primary "
+    "   signals; there is no appraisal or collateral coverage to lean on.\n"
+    "5. You do NOT name a recommendation that contradicts the engine's "
+    "   blocking failures.\n"
+)
+
+
+def _commercial_kpi_block(kpis: UnderwritingKPIs) -> str:
+    """Format the KPI bullet list for a commercial-loan prompt."""
+    parts = [
+        f"- loan_amount: ${float(kpis.loan_amount):,.0f}",
+        f"- property_type: {kpis.property_type}",
+    ]
+    parts.append(f"- LTV: {kpis.ltv:.1%}" if kpis.ltv is not None else "- LTV: unknown")
+    parts.append(f"- DSCR: {kpis.dscr:.2f}" if kpis.dscr is not None else "- DSCR: unknown")
+    parts.append(
+        f"- Debt yield: {kpis.debt_yield:.2%}"
+        if kpis.debt_yield is not None
+        else "- Debt yield: unknown"
+    )
+    return "\n".join(parts) + "\n"
+
+
+def _personal_kpi_block(kpis: UnderwritingKPIs) -> str:
+    """Format the KPI bullet list for a personal-loan prompt."""
+    parts = [f"- loan_amount: ${float(kpis.loan_amount):,.0f}"]
+    parts.append(
+        f"- DTI: {kpis.dti:.1%}" if kpis.dti is not None else "- DTI: unknown"
+    )
+    parts.append(
+        f"- LTI (loan / annual income): {kpis.lti:.1%}"
+        if kpis.lti is not None
+        else "- LTI: unknown"
+    )
+    if kpis.credit_score is not None:
+        band = f" ({kpis.credit_band})" if kpis.credit_band else ""
+        parts.append(f"- FICO: {kpis.credit_score}{band}")
+    else:
+        parts.append("- FICO: unknown")
+    parts.append(
+        f"- Employment: {kpis.years_employment:.1f} yrs"
+        if kpis.years_employment is not None
+        else "- Employment tenure: unknown"
+    )
+    return "\n".join(parts) + "\n"
+
+
 # --- Nodes ---
 
 
@@ -85,34 +176,111 @@ async def fetch_and_evaluate(state: UnderwritingState) -> UnderwritingState:
     Both underwriting and decision agents route through
     `services.rules_eval.evaluate` so the engine remains the single
     source of truth across agents.
+
+    Pre-flight gate: if there are no accepted (or human-overridden)
+    extractions on this loan, the rules engine has nothing to evaluate
+    against and the LLM summary would be uselessly generic. Short-
+    circuit with ``status='needs_extractions'`` so downstream nodes
+    skip and the UI can guide the user to run intake or accept fields
+    in the review queue.
     """
     loan_id = uuid.UUID(state["loan_id"])
     async with get_session() as session:
+        # Inspect the extractions table first — cheaper than running
+        # the full rule pass when we already know the inputs are empty.
+        from sqlalchemy import select
+
+        from mkopo.models import Document, Extraction, ExtractionStatus
+
+        has_inputs = (
+            await session.execute(
+                select(Extraction.id)
+                .join(Document)
+                .where(
+                    Document.loan_id == loan_id,
+                    Extraction.status.in_(
+                        (ExtractionStatus.ACCEPTED, ExtractionStatus.OVERRIDDEN)
+                    ),
+                )
+                .limit(1)
+            )
+        ).scalar_one_or_none() is not None
+        if not has_inputs:
+            await record(
+                session,
+                loan_id=loan_id,
+                actor=Actor.agent("underwriting"),
+                action="underwriting_skipped",
+                payload={"reason": "needs_extractions"},
+            )
+            return {**state, "status": "needs_extractions"}
+
         result = await evaluate_rules_against_loan(session, loan_id)
 
-    # Compute KPIs from the engine's typed context.
+    # Compute KPIs from the engine's typed context. The KPI strip in the
+    # UI branches on ``loan_class`` — business loans render the commercial
+    # tiles (LTV / DSCR / debt-yield); personal loans render the
+    # consumer-credit tiles (DTI / LTI / FICO / employment). We populate
+    # whichever side applies and leave the other null.
     ctx = result.ctx
-    ltv = float(ctx.loan_amount / ctx.appraised_value) if ctx.appraised_value else None
-    dscr = (
-        float(ctx.annual_noi / ctx.annual_debt_service)
-        if ctx.annual_noi and ctx.annual_debt_service
-        else None
+    loan_class_value = (
+        result.loan.loan_class.value
+        if hasattr(result.loan.loan_class, "value")
+        else str(result.loan.loan_class)
     )
-    debt_yield = float(ctx.annual_noi / ctx.loan_amount) if ctx.annual_noi else None
     doc_confidence = (
         sum(result.confidences.values()) / len(result.confidences) if result.confidences else None
     )
-    kpis = UnderwritingKPIs(
-        loan_amount=ctx.loan_amount,
-        ltv=ltv,
-        dscr=dscr,
-        debt_yield=debt_yield,
-        doc_confidence=doc_confidence,
-        property_type=ctx.property_type.value,
-    )
+
+    if loan_class_value == "personal":
+        # Personal tile set.
+        monthly_income = (
+            ctx.annual_income / Decimal(12)
+            if ctx.annual_income and ctx.annual_income > 0
+            else None
+        )
+        dti = (
+            float(ctx.monthly_debt_payments / monthly_income)
+            if monthly_income and ctx.monthly_debt_payments is not None
+            else None
+        )
+        lti = (
+            float(ctx.loan_amount / ctx.annual_income)
+            if ctx.annual_income and ctx.annual_income > 0
+            else None
+        )
+        from mkopo.rules.policy import _credit_band  # local: avoids cycles
+
+        kpis = UnderwritingKPIs(
+            loan_amount=ctx.loan_amount,
+            dti=dti,
+            lti=lti,
+            credit_score=ctx.credit_score,
+            credit_band=_credit_band(ctx.credit_score) if ctx.credit_score is not None else None,
+            years_employment=float(ctx.years_employment) if ctx.years_employment else None,
+            doc_confidence=doc_confidence,
+        )
+    else:
+        # Commercial tile set — the original computation, unchanged.
+        ltv = float(ctx.loan_amount / ctx.appraised_value) if ctx.appraised_value else None
+        dscr = (
+            float(ctx.annual_noi / ctx.annual_debt_service)
+            if ctx.annual_noi and ctx.annual_debt_service
+            else None
+        )
+        debt_yield = float(ctx.annual_noi / ctx.loan_amount) if ctx.annual_noi else None
+        kpis = UnderwritingKPIs(
+            loan_amount=ctx.loan_amount,
+            ltv=ltv,
+            dscr=dscr,
+            debt_yield=debt_yield,
+            property_type=ctx.property_type.value,
+            doc_confidence=doc_confidence,
+        )
 
     return {
         **state,
+        "loan_class": loan_class_value,
         "extractions": result.extractions,
         "rule_outcomes": result.flags,
         "kpis": kpis,
@@ -134,40 +302,52 @@ async def draft_summary(state: UnderwritingState) -> UnderwritingState:
         f"- {f.rule_id} ({f.severity}, {'PASS' if f.passed else 'FAIL'}): {f.message}"
         for f in flags
     )
-    kpi_block = (
-        (
-            f"- loan_amount: ${float(kpis.loan_amount):,.0f}\n"
-            f"- property_type: {kpis.property_type}\n"
-            f"- LTV: {kpis.ltv:.1%}\n"
-            if kpis.ltv
-            else "- LTV: unknown\n"
-        )
-        + (f"- DSCR: {kpis.dscr:.2f}\n" if kpis.dscr else "- DSCR: unknown\n")
-        + (
-            f"- Debt yield: {kpis.debt_yield:.2%}\n"
-            if kpis.debt_yield
-            else "- Debt yield: unknown\n"
-        )
-    )
 
-    system = (
-        "You are an experienced commercial loan underwriter writing for a "
-        "credit committee. You produce factual, concise, citation-backed "
-        "summaries. Hard rules:\n"
-        "1. You MUST cite the field names you rely on in each section's "
-        "   `citations` array (e.g. 'annual_noi', 'appraised_value').\n"
-        "2. You do NOT invent values — if a field is missing, say so.\n"
-        "3. You do NOT compute or assert pass/fail on policy rules — the "
-        "   rules engine has already done that. You may *describe* what it "
-        "   found, but the verdict belongs to the engine.\n"
-        "4. You do NOT name a recommendation that contradicts the engine's "
-        "   blocking failures — if the engine blocks the deal, your only "
-        "   options are 'decline' or 'request_more_info'.\n"
-    )
+    # Branch on loan class. Personal and commercial loans have entirely
+    # different headline metrics, persona language, and policy backdrop;
+    # one prompt that "covers both" reads like neither so we keep them
+    # separate. Loan class lands in state from evaluate_rules.
+    loan_class = state.get("loan_class", "business")
+    is_personal = loan_class == "personal"
+
+    if is_personal:
+        kpi_block = _personal_kpi_block(kpis)
+        system = _PERSONAL_SYSTEM_PROMPT
+        sections_hint = (
+            "Produce 3–4 sections covering: Applicant & employment, "
+            "Income & debt capacity (DTI / LTI), Credit profile (FICO + band), "
+            "Risks. Each section is 1–3 sentences."
+        )
+        policy_footer = (
+            f"DTI cap: {POLICY_MAX_DTI_PERSONAL:.0%}. "
+            f"LTI ceiling: {POLICY_MAX_LTI_PERSONAL:.0%}. "
+            f"FICO floor: {POLICY_MIN_FICO}. "
+            f"Required doc types: {sorted(REQUIRED_DOCS_PERSONAL)}."
+        )
+    else:
+        kpi_block = _commercial_kpi_block(kpis)
+        system = _COMMERCIAL_SYSTEM_PROMPT
+        sections_hint = (
+            "Produce 3–5 sections covering: Borrower & sponsorship, "
+            "Property & collateral, Financials (NOI, DSCR, debt yield), "
+            "Risks. Each section is 1–3 sentences."
+        )
+        # Fall back to OTHER if the property_type string drifted — keeps
+        # the prompt from crashing on an unmapped string.
+        try:
+            prop = PropertyType(kpis.property_type)
+        except ValueError:
+            prop = PropertyType.OTHER
+        policy_footer = (
+            f"DSCR floor for {prop.value}: {DSCR_FLOORS[prop]}. "
+            f"Required doc types: {sorted(REQUIRED_DOCS)}."
+        )
 
     has_blocking = any(not f.passed and f.severity == "block" for f in flags)
     has_warn = any(not f.passed and f.severity == "warn" for f in flags)
-    has_missing = any(f.rule_id == "doc_completeness" and not f.passed for f in flags)
+    # The personal pack uses a different doc-completeness rule id.
+    doc_rule_id = "personal_doc_completeness" if is_personal else "doc_completeness"
+    has_missing = any(f.rule_id == doc_rule_id and not f.passed for f in flags)
     if has_blocking:
         recommendation_hint = (
             "At least one BLOCKING rule failed. Recommend 'decline' unless the "
@@ -184,17 +364,15 @@ async def draft_summary(state: UnderwritingState) -> UnderwritingState:
         recommendation_hint = "All rules pass — recommend 'proceed_to_decision'."
 
     user = (
-        "Underwrite this loan for committee review. Produce 3–5 sections covering: "
-        "Borrower & sponsorship, Property & collateral, Financials (NOI, DSCR, "
-        "debt yield), Risks. Each section is 1–3 sentences.\n\n"
+        f"Underwrite this {'personal' if is_personal else 'commercial real-estate'} "
+        f"loan for committee review. {sections_hint}\n\n"
         f"Key metrics:\n{kpi_block}\n"
         f"Extractions accepted by intake (use these — cite by field_name):\n"
         f"{extractions_block or '(none)'}\n\n"
         f"Rule engine outcomes (do not restate; reference in the rationale if "
         f"useful):\n{rules_block or '(none)'}\n\n"
         f"Recommendation guidance: {recommendation_hint}\n\n"
-        f"DSCR floor for {kpis.property_type}: {DSCR_FLOORS[PropertyType(kpis.property_type)]}. "
-        f"Required doc types: {sorted(REQUIRED_DOCS)}."
+        f"{policy_footer}"
     )
 
     drafted: _DraftedUnderwriting = await gateway.call_structured(
@@ -311,24 +489,29 @@ async def persist(state: UnderwritingState) -> UnderwritingState:
         # comparable-loans kNN can find this loan as a neighbor.
         await embed_loan_summary(session, loan_id, corpus)
 
-        agent_run = AgentRun(
-            id=summary.agent_run_id,
-            loan_id=loan_id,
-            agent_name="underwriting",
-            thread_id=f"underwriting-{loan_id}",
-            status="complete",
-            started_at=Decimal(int(summary.generated_at.timestamp())),
-            payload={
-                "recommendation": summary.recommendation,
-                "risk_band": risk_band,
-                "n_sections": len(summary.sections),
-                "n_flags": len(summary.risk_flags),
-                "has_blocking_failures": has_blocking_failures(
-                    [_outcome_from_flag(f) for f in summary.risk_flags]
-                ),
-            },
+        # The AgentRun row is created by the streaming layer at the
+        # start of the run (status="running"); we update it here with
+        # the final payload + flip the status to "complete". UPDATE-
+        # by-id instead of INSERT avoids the duplicate-pk error and
+        # keeps the row's ``id`` stable for any AgentStep rows that
+        # already point at it.
+        await session.execute(
+            update(AgentRun)
+            .where(AgentRun.id == summary.agent_run_id)
+            .values(
+                status="complete",
+                started_at=Decimal(int(summary.generated_at.timestamp())),
+                payload={
+                    "recommendation": summary.recommendation,
+                    "risk_band": risk_band,
+                    "n_sections": len(summary.sections),
+                    "n_flags": len(summary.risk_flags),
+                    "has_blocking_failures": has_blocking_failures(
+                        [_outcome_from_flag(f) for f in summary.risk_flags]
+                    ),
+                },
+            )
         )
-        session.add(agent_run)
 
         await record(
             session,
@@ -369,7 +552,23 @@ async def build_underwriting_graph() -> AsyncIterator[Any]:
     builder.add_node("persist", persist)
 
     builder.add_edge(START, "fetch_and_evaluate")
-    builder.add_edge("fetch_and_evaluate", "draft_summary")
+
+    def route_after_eval(state: UnderwritingState) -> str:
+        """Pre-flight short-circuit. When ``fetch_and_evaluate`` detects
+        no extractions to underwrite, skip the LLM summary step
+        entirely — drafting a summary of nothing wastes tokens and
+        leaves the user with a generic 'cannot determine' paragraph
+        they have to read to discover what they should have known up
+        front."""
+        if state.get("status") == "needs_extractions":
+            return END
+        return "draft_summary"
+
+    builder.add_conditional_edges(
+        "fetch_and_evaluate",
+        route_after_eval,
+        {END: END, "draft_summary": "draft_summary"},
+    )
     builder.add_edge("draft_summary", "persist")
     builder.add_edge("persist", END)
 

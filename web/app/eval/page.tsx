@@ -1,8 +1,10 @@
 "use client";
 
 import { useMemo } from "react";
+import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { IconChartLine, IconRefresh } from "@tabler/icons-react";
+import { IconChartLine, IconListSearch, IconRefresh } from "@tabler/icons-react";
+import { toast } from "sonner";
 import {
   api,
   type EvalFieldRow,
@@ -180,6 +182,14 @@ function FieldBar({ row }: { row: EvalFieldRow }) {
   const acc = row.production_accuracy;
   const bar = colourForAccuracy(acc);
   const width = acc == null ? 0 : Math.max(2, Math.round(acc * 100));
+  // The eval task_name is shaped ``extraction.<field>`` so the review
+  // queue can filter by the bare field name. Strip the prefix.
+  const bareField = row.field_name.replace(/^extraction\./, "");
+  // Drifting = production materially below golden. We surface a
+  // direct "Investigate" link to the filtered review queue when
+  // that's the case, so the operator can see the actual extractions
+  // that contributed to the drop instead of staring at a number.
+  const isDrifting = row.delta != null && row.delta <= -0.03;
   return (
     <div className="flex items-center gap-3 text-xs">
       <span
@@ -195,6 +205,15 @@ function FieldBar({ row }: { row: EvalFieldRow }) {
         />
       </div>
       <span className="w-[44px] text-right font-medium">{PCT(acc)}</span>
+      {/* Sample size — flagged in the audit as missing from the per-
+          field row. Now visible inline so an operator can tell
+          "92% on 4 items" (noise) from "92% on 800 items" (signal). */}
+      <span
+        className="w-[56px] text-right text-[11px] tabular-nums text-[var(--color-text-tertiary)]"
+        title="Production sample size (last accepted/overridden extractions)"
+      >
+        {row.production_n != null ? `n=${row.production_n}` : "—"}
+      </span>
       {row.delta != null && (
         <span
           className="w-[80px] text-right text-[11px]"
@@ -211,6 +230,22 @@ function FieldBar({ row }: { row: EvalFieldRow }) {
           {(row.delta * 100).toFixed(1)}pp vs golden
         </span>
       )}
+      {/* "Investigate" deep-link. Only renders on drifting rows so it
+          doesn't add visual noise to the healthy ones. Lands the
+          operator in the review queue with the field filter
+          pre-applied — closes the loop between "field is drifting"
+          and "here are the specific extractions to look at". */}
+      <span className="w-[110px] text-right">
+        {isDrifting ? (
+          <Link
+            href={`/review-queue?field=${encodeURIComponent(bareField)}`}
+            className="inline-flex items-center gap-1 text-[11px] text-[var(--color-text-info)] hover:underline"
+          >
+            <IconListSearch size={11} />
+            Investigate
+          </Link>
+        ) : null}
+      </span>
     </div>
   );
 }
@@ -235,12 +270,20 @@ export default function EvalDashboardPage() {
 
   const refresh = useMutation({
     mutationFn: () => api.refreshDrift(),
-    onSuccess: () =>
-      Promise.all([
+    onSuccess: async (result) => {
+      await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["eval-summary"] }),
         queryClient.invalidateQueries({ queryKey: ["eval-fields"] }),
         queryClient.invalidateQueries({ queryKey: ["eval-trend", 30] }),
-      ]),
+      ]);
+      toast.success("Drift monitor ran", {
+        description: `Wrote ${result.fields_written} production field${result.fields_written === 1 ? "" : "s"}.`,
+      });
+    },
+    onError: (e) =>
+      toast.error("Drift monitor failed", {
+        description: e instanceof Error ? e.message : String(e),
+      }),
   });
 
   const summary = summaryQuery.data;
@@ -295,17 +338,9 @@ export default function EvalDashboardPage() {
         }
       />
 
-      {refresh.error && (
-        <p className="rounded bg-[var(--color-background-danger)] px-3 py-2 text-xs text-[var(--color-text-danger)]">
-          {refresh.error.message}
-        </p>
-      )}
-      {refresh.data && (
-        <p className="rounded bg-[var(--color-background-secondary)] px-3 py-2 text-xs text-[var(--color-text-secondary)]">
-          Drift monitor wrote {refresh.data.fields_written} field
-          {refresh.data.fields_written === 1 ? "" : "s"} just now.
-        </p>
-      )}
+      {/* Success / failure feedback for the manual refresh goes through
+          the toast system now — see Providers. The inline banners that
+          used to live here duplicated that signal. */}
 
       <div className="grid grid-cols-4 gap-2">
         <div className="rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)]">

@@ -28,15 +28,20 @@ export interface Borrower {
   party_type: string;
 }
 
+export type AutonomyLevel = "assisted" | "autonomous";
+export type LoanClass = "business" | "personal";
+
 export interface Loan {
   id: string;
   reference: string;
   stage: LoanStage;
   loan_type: string;
+  loan_class: LoanClass;
   amount: string;
   status_detail: string | null;
   risk_band: RiskBand | null;
   stage_entered_at: string;
+  autonomy_level: AutonomyLevel;
   owner: Owner | null;
   borrower: Borrower | null;
   guarantors: Borrower[];
@@ -114,11 +119,27 @@ export interface UnderwritingSection {
 
 export interface UnderwritingKPIs {
   loan_amount: string;
-  ltv: number | null;
-  dscr: number | null;
-  debt_yield: number | null;
-  doc_confidence: number | null;
-  property_type: string;
+
+  // Commercial tile set — populated when loan_class === "business".
+  // Fields are optional (``?:``) because either side can be absent —
+  // a personal-loan KPI block omits commercial fields entirely; a
+  // cached response written before the schema split won't carry the
+  // personal fields. Callers should always test with ``!= null``
+  // (catches both ``null`` and ``undefined``).
+  ltv?: number | null;
+  dscr?: number | null;
+  debt_yield?: number | null;
+  property_type?: string;
+
+  // Personal-loan tile set — populated when loan_class === "personal".
+  dti?: number | null;
+  lti?: number | null;
+  credit_score?: number | null;
+  credit_band?: string | null;
+  years_employment?: number | null;
+
+  // Shared across both classes.
+  doc_confidence?: number | null;
 }
 
 export interface UnderwritingResult {
@@ -129,6 +150,15 @@ export interface UnderwritingResult {
   rationale: string;
   generated_at: string;
   agent_run_id: string;
+}
+
+/** Deterministic-only subset of UnderwritingResult — what the rules
+ *  engine and KPI computation produce without the LLM summary node.
+ *  Returned by `GET /loans/{id}/rules`. */
+export interface RulesPreview {
+  kpis: UnderwritingKPIs;
+  risk_flags: RiskFlag[];
+  extractions: Record<string, string>;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -338,11 +368,126 @@ export interface EvalRefreshResult {
   fields_written: number;
 }
 
+// ---- Documents (Phase H) ----
+
+export interface LoanDocument {
+  id: string;
+  filename: string;
+  doc_type: string;
+  content_type: string;
+  size_bytes: number;
+  created_at: string;
+  extract: {
+    method?: "decode" | "pypdf" | "skipped" | string;
+    page_count?: number;
+    pages_with_text?: number;
+    pages_needing_ocr?: number;
+    char_count?: number;
+  };
+}
+
+export interface UploadResult {
+  document_id: string;
+  storage_uri: string;
+  chunks_embedded: number;
+  extract: LoanDocument["extract"];
+}
+
+// ---- Observability (Phase J) ----
+
+export interface LLMCallRow {
+  id: string;
+  created_at: string;
+  model: string;
+  schema_name: string | null;
+  status: string;
+  attempt: number;
+  elapsed_seconds: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  system_prompt_hash: string;
+  /** Short one-line failure summary. Null for successful calls. */
+  error_reason?: string | null;
+}
+
+/** Full detail for one LLM call, with same-prompt neighbours.
+ *  Returned by ``GET /observability/llm/{id}``; the drawer renders
+ *  the long-form ``error_detail`` and the related-calls list. */
+export interface LLMCallDetail extends LLMCallRow {
+  error_detail: string | null;
+  related: LLMCallRow[];
+}
+
+export interface ModelStats {
+  model: string;
+  calls: number;
+  error_rate: number | null;
+  retry_rate: number | null;
+  p50_seconds: number | null;
+  p95_seconds: number | null;
+}
+
+export interface LLMSummary {
+  window_hours: number;
+  total_calls: number;
+  error_rate: number | null;
+  schema_fail_rate: number | null;
+  p50_seconds: number | null;
+  p95_seconds: number | null;
+  by_model: ModelStats[];
+  recent: LLMCallRow[];
+}
+
+export interface AgentRunRow {
+  id: string;
+  created_at: string;
+  agent_name: string;
+  thread_id: string;
+  status: string;
+  loan_id: string;
+}
+
+/** One LangGraph node execution inside an agent run.
+ *  Status: "ok" (ran), "skipped" (pre-flight gate), "interrupt"
+ *  (paused for human approval), "failed" (raised). */
+export interface AgentStepRow {
+  id: string;
+  created_at: string;
+  node: string;
+  status: "ok" | "skipped" | "interrupt" | "failed" | string;
+  summary: string | null;
+  elapsed_ms: number | null;
+  payload: Record<string, unknown>;
+}
+
+/** Full trace for one agent run: row + step list + same-thread LLM calls.
+ *  Returned by ``GET /observability/agents/{id}``. */
+export interface AgentRunDetail {
+  id: string;
+  created_at: string;
+  agent_name: string;
+  thread_id: string;
+  status: string;
+  loan_id: string;
+  payload: Record<string, unknown>;
+  steps: AgentStepRow[];
+  llm_calls: LLMCallRow[];
+}
+
+export interface AgentSummary {
+  window_hours: number;
+  total_runs: number;
+  by_agent: Record<string, number>;
+  by_status: Record<string, number>;
+  recent: AgentRunRow[];
+}
+
 export const api = {
   listLoans: () => request<Loan[]>("/loans"),
   getLoan: (id: string) => request<Loan>(`/loans/${id}`),
   getAuditEvents: (id: string) => request<AuditEvent[]>(`/loans/${id}/audit`),
   getExtractions: (id: string) => request<Extraction[]>(`/loans/${id}/extractions`),
+  getRulesPreview: (id: string) => request<RulesPreview>(`/loans/${id}/rules`),
   getComparables: (id: string) =>
     request<ComparableLoan[]>(`/loans/${id}/comparables`),
   askLoan: (id: string, question: string) =>
@@ -375,9 +520,47 @@ export const api = {
       body: JSON.stringify({ value, notes }),
     }),
   getPartyProfile: (id: string) => request<PartyProfile>(`/parties/${id}/profile`),
+  // ---- Documents ----
+  listDocuments: (loanId: string) =>
+    request<LoanDocument[]>(`/loans/${loanId}/documents`),
+  transitionStage: (loanId: string, to_stage: LoanStage, reason: string) =>
+    request<Loan>(`/loans/${loanId}/transition`, {
+      method: "POST",
+      body: JSON.stringify({ to_stage, reason }),
+    }),
+  getAllowedTransitions: (loanId: string) =>
+    request<Record<string, string | null>>(`/loans/${loanId}/transitions`),
+  setAutonomy: (loanId: string, level: AutonomyLevel, reason: string) =>
+    request<Loan>(`/loans/${loanId}/autonomy`, {
+      method: "PATCH",
+      body: JSON.stringify({ level, reason }),
+    }),
+  uploadDocument: async (loanId: string, file: File): Promise<UploadResult> => {
+    // FormData with file payload — different from JSON requests, so we
+    // hit fetch directly rather than the `request<T>()` helper (which
+    // forces Content-Type: application/json).
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${API_URL}/api/v1/loans/${loanId}/documents`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${DEV_TOKEN}` },
+      body: form,
+    });
+    if (!res.ok) throw new Error(`Upload ${res.status}: ${await res.text()}`);
+    return (await res.json()) as UploadResult;
+  },
   // ---- Eval ----
   getEvalSummary: () => request<EvalSummary>(`/eval/summary`),
   getEvalFields: () => request<EvalFieldRow[]>(`/eval/fields`),
   getEvalTrend: (days = 30) => request<EvalTrend>(`/eval/trend?days=${days}`),
   refreshDrift: () => request<EvalRefreshResult>(`/eval/refresh`, { method: "POST" }),
+  // ---- Observability ----
+  getLLMObservability: (hours = 24) =>
+    request<LLMSummary>(`/observability/llm?hours=${hours}`),
+  getLLMCallDetail: (callId: string) =>
+    request<LLMCallDetail>(`/observability/llm/${callId}`),
+  getAgentsObservability: (hours = 24) =>
+    request<AgentSummary>(`/observability/agents?hours=${hours}`),
+  getAgentRunDetail: (runId: string) =>
+    request<AgentRunDetail>(`/observability/agents/${runId}`),
 };

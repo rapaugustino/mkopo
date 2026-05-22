@@ -32,6 +32,15 @@ class Actor:
     def system(cls) -> Actor:
         return cls(ActorType.SYSTEM, "system")
 
+    @classmethod
+    def borrower(cls, email: str) -> Actor:
+        """The borrower acting on their own loan via the self-service
+        portal. We key by email since the borrower portal doesn't
+        require an internal user account — this is enough to dedupe
+        the actor across multiple events.
+        """
+        return cls(ActorType.BORROWER, email)
+
 
 async def record(
     session: AsyncSession,

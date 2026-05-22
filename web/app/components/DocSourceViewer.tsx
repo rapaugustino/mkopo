@@ -4,15 +4,14 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   IconCheck,
-  IconChevronLeft,
-  IconChevronRight,
   IconEdit,
-  IconExternalLink,
   IconFileText,
   IconX,
 } from "@tabler/icons-react";
+import { toast } from "sonner";
 import { api, type ExtractionSource } from "@/lib/api";
 import { humanizeExtractionStatus, humanizeField } from "@/lib/humanize";
+import { IconButton } from "./IconButton";
 import { Pill } from "./Pill";
 import { PrimaryButton } from "./PrimaryButton";
 import { SecondaryButton } from "./SecondaryButton";
@@ -96,18 +95,32 @@ export function DocSourceViewer({ taskId, onClose }: Props) {
 
   const accept = useMutation({
     mutationFn: () => api.acceptReviewTask(taskId),
-    onSuccess: async () => {
+    onSuccess: async (task) => {
       await queryClient.invalidateQueries({ queryKey: ["review-tasks"] });
+      toast.success("Extraction accepted", {
+        description: `${task.loan.reference} · ${humanizeField(task.extraction.field_name)} confirmed.`,
+      });
       onClose();
     },
+    onError: (e) =>
+      toast.error("Accept failed", {
+        description: e instanceof Error ? e.message : String(e),
+      }),
   });
 
   const override = useMutation({
     mutationFn: (value: string) => api.overrideReviewTask(taskId, value),
-    onSuccess: async () => {
+    onSuccess: async (task) => {
       await queryClient.invalidateQueries({ queryKey: ["review-tasks"] });
+      toast.success("Extraction overridden", {
+        description: `${task.loan.reference} · new value saved. Counts as ground truth for the next eval cycle.`,
+      });
       onClose();
     },
+    onError: (e) =>
+      toast.error("Override failed", {
+        description: e instanceof Error ? e.message : String(e),
+      }),
   });
 
   const source = sourceQuery.data;
@@ -138,34 +151,12 @@ export function DocSourceViewer({ taskId, onClose }: Props) {
               )}
             </span>
           </div>
-          <div className="flex items-center gap-1">
-            <button
-              className="rounded p-1 hover:bg-[var(--color-background-primary)]"
-              disabled
-              title="Multi-page nav is decorative for the synthetic corpus"
-            >
-              <IconChevronLeft size={14} />
-            </button>
-            <button
-              className="rounded p-1 hover:bg-[var(--color-background-primary)]"
-              disabled
-            >
-              <IconChevronRight size={14} />
-            </button>
-            <button
-              className="flex items-center gap-1 rounded px-2 py-1 hover:bg-[var(--color-background-primary)]"
-              disabled
-            >
-              <IconExternalLink size={12} /> Full doc
-            </button>
-            <button
-              onClick={onClose}
-              aria-label="Close"
-              className="rounded p-1 hover:bg-[var(--color-background-primary)]"
-            >
-              <IconX size={14} />
-            </button>
-          </div>
+          {/* Single Close affordance. The decorative prev/next/"Full
+              doc" trio that used to live here was permanently disabled
+              against the synthetic corpus — dead UI flagged in the
+              audit, removed. When we ship real multi-page documents
+              they'll come back as IconButtons. */}
+          <IconButton label="Close" Icon={IconX} onClick={onClose} />
         </div>
 
         {/* Split: doc on left, meta on right */}
@@ -235,7 +226,7 @@ export function DocSourceViewer({ taskId, onClose }: Props) {
                       value={overrideValue}
                       onChange={(e) => setOverrideValue(e.target.value)}
                       autoFocus
-                      className="w-full rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-2.5 py-1.5 text-[13px] focus:border-[var(--color-brand)] focus:outline-none"
+                      className="form-input-on-card"
                     />
                   </div>
                 )}

@@ -17,7 +17,18 @@ from sqlalchemy import text
 
 from mkopo.config import get_settings
 from mkopo.db import get_engine
-from mkopo.routers import agents, documents, evals, loans, parties, review, webhooks
+from mkopo.routers import (
+    agents,
+    borrower_portal,
+    documents,
+    evals,
+    loans,
+    observability,
+    parties,
+    review,
+    webhooks,
+)
+from mkopo.startup_check import run_startup_checks
 
 
 def _configure_logging() -> None:
@@ -38,7 +49,13 @@ def _configure_logging() -> None:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     _configure_logging()
     logger = structlog.get_logger()
-    logger.info("app_starting", environment=get_settings().environment)
+    settings = get_settings()
+    logger.info("app_starting", environment=settings.environment)
+
+    # Print the integration-status banner before anything else so a
+    # fresh deployer sees missing config on first boot rather than
+    # debugging a "500 Internal Server Error" from a downstream call.
+    run_startup_checks(settings)
 
     # Telemetry — must come after the engine is created (it instruments it).
     from mkopo.telemetry import setup_telemetry
@@ -113,4 +130,6 @@ app.include_router(agents.router, prefix="/api/v1")
 app.include_router(parties.router, prefix="/api/v1")
 app.include_router(review.router, prefix="/api/v1")
 app.include_router(evals.router, prefix="/api/v1")
+app.include_router(observability.router, prefix="/api/v1")
+app.include_router(borrower_portal.router, prefix="/api/v1")
 app.include_router(webhooks.router, prefix="/api/v1")

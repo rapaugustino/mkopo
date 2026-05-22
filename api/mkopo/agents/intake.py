@@ -39,7 +39,23 @@ from mkopo.tools.extractor import (
 logger = structlog.get_logger()
 
 
-REQUIRED_FIELDS = [
+# Required-field lists branch by loan class.
+#
+# Commercial real-estate intake needs the borrower entity name,
+# property collateral facts (address, type, NOI, appraised value,
+# appraisal age), guarantors, and loan size — the inputs to DSCR /
+# LTV / debt yield.
+#
+# Personal-loan intake needs the borrower individual name, SSN
+# last-4, employer, annual income, outstanding debt, credit score,
+# loan purpose, and loan amount — the inputs to DTI / FICO floor.
+#
+# A loan's ``loan_class`` selects the list. Until full personal-loan
+# rule support lands, the personal list is used for required-field
+# detection only; the underwriting agent and rules engine still run
+# the commercial path. That's the current honest scope — see the
+# DESIGN doc §Loan classes.
+REQUIRED_FIELDS_BUSINESS = [
     "borrower_entity",
     "property_address",
     "property_type",  # short phrase, e.g. "12-unit multifamily" or "Class B office"
@@ -49,6 +65,33 @@ REQUIRED_FIELDS = [
     "appraisal_date",
     "loan_amount",
 ]
+
+REQUIRED_FIELDS_PERSONAL = [
+    "borrower_name",
+    "ssn_last4",
+    "employer",
+    "annual_income",
+    "outstanding_debt",
+    "credit_score",
+    "loan_purpose",
+    "loan_amount",
+]
+
+
+def required_fields_for(loan_class: str | None) -> list[str]:
+    """Return the required-fields list for a loan class.
+
+    ``None`` and unknown values fall back to the business list so
+    pre-class loans behave exactly as they did before.
+    """
+    if loan_class == "personal":
+        return REQUIRED_FIELDS_PERSONAL
+    return REQUIRED_FIELDS_BUSINESS
+
+
+# Backwards-compatibility alias — anything that imported the symbol
+# before the class branch gets the business list.
+REQUIRED_FIELDS = REQUIRED_FIELDS_BUSINESS
 
 
 # --- State ---
@@ -77,13 +120,42 @@ class DraftedEmail(BaseModel):
 
 
 async def extract_all_documents(state: IntakeState) -> IntakeState:
-    """Extract required fields from every document on the loan."""
+    """Extract required fields from every document on the loan.
+
+    Pre-flight gate: if there are no documents at all, short-circuit
+    here with ``status='needs_documents'``. The intake agent's downstream
+    nodes (``identify_missing`` → ``draft_request``) would otherwise
+    spend an LLM call drafting a borrower email asking for *every*
+    required field — which the borrower can't act on because they
+    don't even know what they uploaded. The right human action is to
+    upload a packet first; the agent should say so plainly and exit
+    rather than burning tokens drafting an email that's pure noise.
+    """
     loan_id = uuid.UUID(state["loan_id"])
     extracted: dict[str, ExtractedField] = {}
 
     async with get_session() as session:
         docs_stmt = select(Document).where(Document.loan_id == loan_id)
         documents = (await session.execute(docs_stmt)).scalars().all()
+
+        if not documents:
+            await record(
+                session,
+                loan_id=loan_id,
+                actor=Actor.agent("intake"),
+                action="intake_skipped",
+                payload={"reason": "no_documents"},
+            )
+            return {
+                **state,
+                "extracted_fields": {},
+                "status": "needs_documents",
+            }
+
+        # Documents exist but at least one might be image-only PDF
+        # with no extractable text yet. We continue — the per-doc
+        # text check inside the loop handles those cases. The point
+        # of the gate above is the "no packet at all" path.
 
         for doc in documents:
             # Portfolio scope: documents already carry text in `meta.text_content`.
@@ -294,7 +366,22 @@ async def build_intake_graph() -> AsyncIterator[Any]:
     builder.add_node("send", send_email)
 
     builder.add_edge(START, "extract")
-    builder.add_edge("extract", "identify_missing")
+
+    def route_after_extract(state: IntakeState) -> str:
+        """Pre-flight check. If extraction found no documents at all,
+        the agent short-circuits — there's no point drafting an email
+        asking the borrower to re-supply the entire packet when they
+        haven't uploaded anything yet. The human action is to upload
+        first."""
+        if state.get("status") == "needs_documents":
+            return END
+        return "identify_missing"
+
+    builder.add_conditional_edges(
+        "extract",
+        route_after_extract,
+        {END: END, "identify_missing": "identify_missing"},
+    )
     builder.add_edge("identify_missing", "draft_request")
 
     def route_after_draft(state: IntakeState) -> str:

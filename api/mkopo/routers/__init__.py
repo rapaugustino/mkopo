@@ -5,6 +5,26 @@
 import it directly via `from mkopo.routers.auth import ...`.
 """
 
-from mkopo.routers import agents, documents, evals, loans, parties, review, webhooks
+from mkopo.routers import (
+    agents,
+    borrower_portal,
+    documents,
+    evals,
+    loans,
+    observability,
+    parties,
+    review,
+    webhooks,
+)
 
-__all__ = ["agents", "documents", "evals", "loans", "parties", "review", "webhooks"]
+__all__ = [
+    "agents",
+    "borrower_portal",
+    "documents",
+    "evals",
+    "loans",
+    "observability",
+    "parties",
+    "review",
+    "webhooks",
+]

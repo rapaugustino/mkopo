@@ -41,12 +41,29 @@ If you'd rather use your own credentials, edit `DATABASE_URL` and `DATABASE_URL_
 
 ```bash
 cd api
-cp .env.example .env                # then fill in ANTHROPIC_API_KEY (and RESEND_API_KEY if you want emails)
+cp .env.example .env
 uv sync --extra dev
 uv run alembic upgrade head
 uv run python scripts/seed.py
+uv run python scripts/seed_eval_baseline.py    # optional: golden baseline for the eval dashboard
 uv run uvicorn mkopo.main:app --reload
 ```
+
+**Six env vars matter** in `api/.env`. The app boots either way and the
+startup banner reports which ones are wired vs degraded:
+
+| Var | What it unlocks | If unset |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | Every agent + the LLM gateway | Agents will fail to run |
+| `OPENAI_API_KEY` | RAG ("Ask the file") + comparable-loans kNN | Those features are disabled |
+| `RESEND_API_KEY` | Outbound email from the intake agent | Email send fails at the final node |
+| `RESEND_FROM_ADDRESS` | Mailbox on a Resend-verified domain (default: `mkopo@ubunifutech.com`) | Resend rejects the send |
+| `RESEND_WEBHOOK_SECRET` | Authenticates inbound borrower replies | Inbound webhook accepts without auth (dev only) |
+| `STORAGE_BACKEND` | `local` (default) or `s3` for document storage | Local filesystem under `./var/storage` |
+
+For the S3 backend also set `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
+`AWS_REGION`, and `S3_BUCKET`. The boot-time check prints exactly which
+ones are missing.
 
 ### 3. Worker (optional — only needed for the background intake job)
 

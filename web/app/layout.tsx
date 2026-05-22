@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, JetBrains_Mono, Source_Serif_4 } from "next/font/google";
 import "./globals.css";
-import { GlobalNav } from "./components/GlobalNav";
+import { AppShell } from "./components/AppShell";
 import { Providers } from "./providers";
 
 /**
@@ -53,44 +53,20 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${inter.variable} ${sourceSerif.variable} ${jetbrains.variable}`}
+      suppressHydrationWarning
     >
-      <body>
+      {/* `suppressHydrationWarning` on <body> is the canonical fix for
+          browser extensions (Grammarly, LanguageTool, Honey, Dashlane,
+          1Password) that inject attributes like `data-new-gr-c-s-check-loaded`
+          before React hydrates. The suppression is scoped to *this
+          element's own attributes* — children still hydrate and validate
+          normally. See https://react.dev/link/hydration-mismatch */}
+      <body suppressHydrationWarning>
         <Providers>
-          {/* Brand bar. The 1px brand-light strip below the nav is the
-              app's quietest brand cue: visible only when you look for
-              it, but consistent on every screen — that's the kind of
-              detail that separates a real product from a vibe. */}
-          <nav
-            className="border-b-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-4 py-3"
-            style={{
-              boxShadow: "inset 0 -1px 0 var(--color-brand-light)",
-            }}
-          >
-            <div className="mx-auto flex max-w-7xl items-center gap-6">
-              <div className="flex items-center gap-3">
-                <div
-                  className="flex h-8 w-8 items-center justify-center rounded-md text-[13px] font-semibold"
-                  style={{
-                    background: "var(--color-brand)",
-                    color: "var(--color-brand-light)",
-                    letterSpacing: "-0.04em",
-                  }}
-                >
-                  MK
-                </div>
-                <div className="flex items-baseline gap-2">
-                  <span className="brand-wordmark text-[15px] font-medium">
-                    Mkopo Lens
-                  </span>
-                  <span className="text-[11px] text-[var(--color-text-tertiary)]">
-                    AI-first origination
-                  </span>
-                </div>
-              </div>
-              <GlobalNav />
-            </div>
-          </nav>
-          <main className="mx-auto max-w-7xl px-4 py-6">{children}</main>
+          {/* AppShell renders the internal navigation chrome on all
+              routes except the borrower portal (/apply/*), which has
+              its own minimal layout in app/apply/layout.tsx. */}
+          <AppShell>{children}</AppShell>
         </Providers>
       </body>
     </html>

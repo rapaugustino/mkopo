@@ -21,6 +21,10 @@ class PartyIn(BaseModel):
 
 class LoanCreate(BaseModel):
     loan_type: LoanType
+    # Defaults to business since that's the original target market.
+    # The borrower portal and the internal new-loan modal both surface
+    # an explicit picker, so this default rarely applies in practice.
+    loan_class: str = "business"
     amount: Decimal = Field(gt=0)
     borrower_email: EmailStr
     parties: list[PartyIn] = []
@@ -58,6 +62,14 @@ class LoanOut(BaseModel):
     status_detail: str | None
     risk_band: str | None
     stage_entered_at: datetime
+    # 'assisted' | 'autonomous' — see AutonomyLevel docstring for what
+    # each implies. We surface it on every read so the UI can render
+    # the right toggle state without an extra fetch.
+    autonomy_level: str = "assisted"
+    # 'business' (commercial real estate) | 'personal' (consumer).
+    # Drives which fields the underwriting agent treats as required
+    # and which rules engine path runs.
+    loan_class: str = "business"
     owner: OwnerOut | None
     borrower: BorrowerOut | None
     guarantors: list[BorrowerOut] = []
@@ -66,8 +78,21 @@ class LoanOut(BaseModel):
 
 
 class StageTransitionIn(BaseModel):
+    """Payload for ``POST /loans/{id}/transition``.
+
+    The reason is required (min 3 chars) because stage transitions are
+    the moments where humans take responsibility for a decision —
+    "moved to underwriting because all docs in" or "declined: DSCR
+    1.08 vs 1.30 floor". An empty reason leaves the auditor with
+    nothing to read; the rules engine and intake agent can articulate
+    *their* reasons in their audit payloads, but the human transition
+    has to articulate the human one. Validation here is belt-and-
+    braces — the frontend's StageActionModal disables the button
+    below 3 chars, and the API rejects anything thinner too.
+    """
+
     to_stage: LoanStage
-    reason: str
+    reason: str = Field(min_length=3, max_length=2000)
 
 
 class ExtractionOut(BaseModel):
@@ -136,16 +161,34 @@ class RiskFlag(BaseModel):
 class UnderwritingKPIs(BaseModel):
     """Headline numbers for the workspace tile strip.
 
-    Computed deterministically from extractions + loan amount. The LLM does
-    not produce these — it cites them.
+    Computed deterministically from extractions + loan amount. The LLM
+    does not produce these — it cites them.
+
+    Two KPI families co-exist on the same model so the frontend can keep
+    a single shape and just pick the right tile set based on the loan's
+    class. Commercial fields (LTV / DSCR / debt-yield / property type)
+    populate for business loans; personal fields (DTI / LTI / FICO /
+    employment) populate for personal loans. The unused side stays
+    ``None`` so the UI knows what to render and what to hide.
     """
 
     loan_amount: Decimal
-    ltv: float | None  # 0–1, e.g. 0.68 = 68%
-    dscr: float | None  # e.g. 1.42
-    debt_yield: float | None  # 0–1
-    doc_confidence: float | None  # 0–1, average accepted-extraction confidence
-    property_type: str  # value of PropertyType
+
+    # --- Commercial KPIs -----------------------------------------------
+    ltv: float | None = None  # 0–1, e.g. 0.68 = 68%
+    dscr: float | None = None  # e.g. 1.42
+    debt_yield: float | None = None  # 0–1
+    property_type: str = "other"  # value of PropertyType
+
+    # --- Personal-loan KPIs --------------------------------------------
+    dti: float | None = None  # 0–1
+    lti: float | None = None  # 0–1
+    credit_score: int | None = None
+    credit_band: str | None = None  # "exceptional" / "very good" / ...
+    years_employment: float | None = None
+
+    # --- Shared ---------------------------------------------------------
+    doc_confidence: float | None = None  # 0–1, average accepted-extraction confidence
 
 
 class UnderwritingResult(BaseModel):

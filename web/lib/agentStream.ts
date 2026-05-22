@@ -44,18 +44,37 @@ export interface InterruptEvent {
 }
 
 /** Final event of every run. `result` carries whatever the synchronous
- *  endpoint used to return so existing call sites keep working. */
+ *  endpoint used to return so existing call sites keep working.
+ *  ``skip_reason`` is set when the run short-circuited at a pre-flight
+ *  gate (e.g. no documents uploaded yet). */
 export interface DoneEvent {
   type: "done";
   thread_id: string;
   status: string;
   interrupt: Record<string, unknown> | null;
   result: unknown;
+  skip_reason?: string | null;
+}
+
+/** Emitted right before ``done`` when the run short-circuited at a
+ *  pre-flight gate. Carries the friendly reason the frontend should
+ *  render in place of a generic completion summary. */
+export interface SkippedEvent {
+  type: "skipped";
+  status: string;
+  reason: string;
 }
 
 export interface ErrorEvent {
   type: "error";
+  /** Backwards-compatible single-line message. */
   message: string;
+  /** New richer fields — backend can now attribute the failure to a
+   *  specific node and split the user-facing reason from the gory
+   *  technical detail. */
+  node?: string | null;
+  reason?: string;
+  detail?: string;
 }
 
 export type AgentEvent =
@@ -63,6 +82,7 @@ export type AgentEvent =
   | NodeCompleteEvent
   | InterruptEvent
   | DoneEvent
+  | SkippedEvent
   | ErrorEvent;
 
 // ---- SSE parser ---------------------------------------------------------
@@ -102,11 +122,25 @@ function parseFrame(frame: string): AgentEvent | null {
       return { type: "interrupt", payload: payload as Record<string, unknown> };
     case "done":
       return { type: "done", ...(payload as Omit<DoneEvent, "type">) };
-    case "error":
+    case "skipped":
+      return { type: "skipped", ...(payload as Omit<SkippedEvent, "type">) };
+    case "error": {
+      const data = payload as {
+        message?: string;
+        reason?: string;
+        detail?: string;
+        node?: string | null;
+      };
       return {
         type: "error",
-        message: (payload as { message?: string }).message ?? "unknown error",
+        // Prefer the structured reason; fall back to message for
+        // backwards compatibility with older backend builds.
+        message: data.reason ?? data.message ?? "unknown error",
+        reason: data.reason,
+        detail: data.detail,
+        node: data.node ?? null,
       };
+    }
     default:
       return null;
   }

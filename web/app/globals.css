@@ -114,3 +114,121 @@ body {
   line-height: 1;
   letter-spacing: -0.01em;
 }
+
+/* Skeleton loading shimmer. The gradient slides left-to-right over a
+   warm gray base. We deliberately pick a slow (1.8s) cycle and a tight
+   highlight band (35% of the width) — fast pulse + wide highlight reads
+   as "is something broken?", subtle sweep reads as "the data is on its
+   way." Use via the <Skeleton /> primitive in components. */
+.mkopo-skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--color-background-secondary);
+}
+.mkopo-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.55) 50%,
+    transparent 100%
+  );
+  transform: translateX(-100%);
+  animation: mkopo-skeleton-shimmer 1.8s ease-in-out infinite;
+}
+@keyframes mkopo-skeleton-shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* Agent-progress pulse — emanates a soft ring from the active step's
+   icon so the eye is drawn to where the run currently is. Brief and
+   subtle; the opacity decay does the heavy lifting. */
+@keyframes mkopo-agent-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(24, 95, 165, 0.32);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(24, 95, 165, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(24, 95, 165, 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mkopo-skeleton::after {
+    animation: none;
+  }
+}
+
+/* --- Form controls -------------------------------------------------------
+ *
+ * One canonical input/select/textarea look used everywhere. Lives here
+ * (not inside any component's <style jsx>) so modals, side panels, and
+ * the borrower portal share the exact same chrome — previously each
+ * modal reimplemented the same border/padding/focus combination in
+ * inline Tailwind, and the variants drifted.
+ *
+ * Variants:
+ * - .form-input          — solid white background. Default; use inside
+ *                          cards that sit on the secondary surface.
+ * - .form-input-on-card  — uses --color-background-primary instead of
+ *                          white. Use inside surfaces that are already
+ *                          --color-background-primary so the input sits
+ *                          flush instead of glowing brighter than its
+ *                          container (e.g. the timeline composer).
+ * - .form-input-mono     — monospace, smaller. For drafted-email body
+ *                          editing where character grids matter.
+ *
+ * All three share the same focus ring so the interactive language is
+ * the same regardless of context.
+ */
+.form-input,
+.form-input-on-card,
+.form-input-mono {
+  border-radius: 6px;
+  border: 0.5px solid var(--color-border-tertiary);
+  padding: 0.5rem 0.75rem;
+  font-size: 13px;
+  color: var(--color-text-primary);
+  outline: none;
+  width: 100%;
+}
+.form-input {
+  background: white;
+}
+.form-input-on-card {
+  background: var(--color-background-primary);
+}
+.form-input-mono {
+  background: white;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.form-input:focus,
+.form-input-on-card:focus,
+.form-input-mono:focus {
+  border-color: var(--color-brand);
+  box-shadow: 0 0 0 3px rgba(15, 110, 86, 0.08);
+}
+.form-input:disabled,
+.form-input-on-card:disabled,
+.form-input-mono:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.form-input::placeholder,
+.form-input-on-card::placeholder,
+.form-input-mono::placeholder {
+  color: var(--color-text-tertiary);
+}
+/* select-only nudge — the default browser caret looks heavy at 13px,
+   so add a small right-padding to keep text from kissing it. */
+select.form-input,
+select.form-input-on-card {
+  padding-right: 1.75rem;
+}

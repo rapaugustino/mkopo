@@ -3,7 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { IconChartLine, IconLayoutGrid, IconListSearch } from "@tabler/icons-react";
+import {
+  IconActivity,
+  IconChartLine,
+  IconLayoutGrid,
+  IconListSearch,
+} from "@tabler/icons-react";
 import { api, type ReviewTask } from "@/lib/api";
 
 interface NavItem {
@@ -18,6 +23,7 @@ const NAV: NavItem[] = [
   { href: "/", label: "Pipeline", Icon: IconLayoutGrid, exact: true },
   { href: "/review-queue", label: "Review queue", Icon: IconListSearch },
   { href: "/eval", label: "Eval", Icon: IconChartLine },
+  { href: "/observability", label: "Observability", Icon: IconActivity },
 ];
 
 /**

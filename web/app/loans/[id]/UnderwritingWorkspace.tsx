@@ -16,11 +16,13 @@ import {
   type Extraction,
   type RiskFlag,
   type RiskSeverity,
+  type RulesPreview,
   type UnderwritingKPIs,
   type UnderwritingRecommendation,
   type UnderwritingResult,
   type UnderwritingSection,
 } from "@/lib/api";
+import { toast } from "sonner";
 import { humanizeField, humanizePropertyType } from "@/lib/humanize";
 import { useAgentRun } from "@/lib/useAgentRun";
 import { AgentProgress } from "@/app/components/AgentProgress";
@@ -102,21 +104,68 @@ function KpiTile({
 }
 
 function KpiStrip({ kpis }: { kpis: UnderwritingKPIs }) {
+  // Branch on which side of the KPI block is populated. Personal loans
+  // get DTI/LTI/FICO tiles; business loans keep LTV/DSCR. The schema
+  // leaves the other side null, so "do we have a credit score?" is a
+  // reliable discriminator — no need to thread loan_class through.
+  //
+  // ``!= null`` (loose) — not ``!== null`` — because the field may be
+  // absent entirely (``undefined``) on cached responses written before
+  // the personal-KPI fields shipped, or when the rules-preview endpoint
+  // omits fields it doesn't compute. ``foo != null`` matches both
+  // ``null`` and ``undefined``; the strict variant only matches
+  // ``null`` and crashed on the optional-chaining-less access below.
+  const isPersonal =
+    kpis.credit_score != null || kpis.dti != null || kpis.lti != null;
+
+  if (isPersonal) {
+    return (
+      <div className="grid grid-cols-4 gap-2">
+        <KpiTile label="Loan amount" value={formatMoney(kpis.loan_amount)} />
+        <KpiTile
+          label="DTI"
+          value={kpis.dti != null ? `${Math.round(kpis.dti * 100)}%` : "—"}
+          trend={kpis.lti != null ? `LTI ${Math.round(kpis.lti * 100)}%` : undefined}
+        />
+        <KpiTile
+          label="FICO"
+          value={kpis.credit_score != null ? String(kpis.credit_score) : "—"}
+          trend={kpis.credit_band ?? undefined}
+        />
+        <KpiTile
+          label="Employment"
+          value={
+            kpis.years_employment != null
+              ? `${kpis.years_employment.toFixed(1)} yrs`
+              : "—"
+          }
+          trend={
+            kpis.doc_confidence != null
+              ? `Docs ${Math.round(kpis.doc_confidence * 100)}%`
+              : undefined
+          }
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="grid grid-cols-4 gap-2">
       <KpiTile label="Loan amount" value={formatMoney(kpis.loan_amount)} />
       <KpiTile
         label="LTV"
-        value={kpis.ltv !== null ? `${Math.round(kpis.ltv * 100)}%` : "—"}
+        value={kpis.ltv != null ? `${Math.round(kpis.ltv * 100)}%` : "—"}
       />
       <KpiTile
         label="DSCR"
-        value={kpis.dscr !== null ? kpis.dscr.toFixed(2) : "—"}
+        value={kpis.dscr != null ? kpis.dscr.toFixed(2) : "—"}
       />
       <KpiTile
         label="Doc confidence"
         value={
-          kpis.doc_confidence !== null ? `${Math.round(kpis.doc_confidence * 100)}%` : "—"
+          kpis.doc_confidence != null
+            ? `${Math.round(kpis.doc_confidence * 100)}%`
+            : "—"
         }
       />
     </div>
@@ -278,6 +327,17 @@ export function UnderwritingWorkspace({ loanId }: Props) {
     queryFn: () => api.getExtractions(loanId),
   });
 
+  // Deterministic rules + KPIs — runs without the LLM, so the
+  // workspace can render extractions, KPIs, and risk signals
+  // immediately on tab entry. Re-fetched whenever the LLM-driven
+  // underwriting agent completes (the agent may write new
+  // extractions which shift the inputs).
+  const rulesQuery = useQuery<RulesPreview, Error>({
+    queryKey: ["loan", loanId, "rules"],
+    queryFn: () => api.getRulesPreview(loanId),
+    staleTime: 30_000,
+  });
+
   const underwritingQuery = useQuery<UnderwritingResult | null, Error>({
     queryKey: ["loan", loanId, "underwriting"],
     queryFn: async () => null,
@@ -301,8 +361,31 @@ export function UnderwritingWorkspace({ loanId }: Props) {
           queryClient.invalidateQueries({ queryKey: ["loan", loanId] }),
           queryClient.invalidateQueries({ queryKey: ["loan", loanId, "audit"] }),
           queryClient.invalidateQueries({ queryKey: ["loan", loanId, "extractions"] }),
+          queryClient.invalidateQueries({ queryKey: ["loan", loanId, "rules"] }),
           queryClient.invalidateQueries({ queryKey: ["loans"] }),
         ]);
+        // Pre-flight gate fired — surface the friendly reason. The
+        // banner inside AgentProgress shows the long-form copy; the
+        // toast gives it a chance even if the workspace tab isn't
+        // scrolled into view.
+        if (ev.skip_reason) {
+          toast.message("Underwriting didn't run", {
+            description: ev.skip_reason,
+          });
+        } else if (result) {
+          const failing = result.risk_flags.filter((f) => !f.passed).length;
+          // Use the shared RECOMMENDATION_COPY map so the toast reads
+          // "Proceed to decision · 1 rule failing" instead of leaking
+          // the raw enum ("proceed_to_decision").
+          const label =
+            RECOMMENDATION_COPY[result.recommendation]?.label ??
+            result.recommendation;
+          toast.success("Underwriting complete", {
+            description: `${label} · ${failing} rule${
+              failing === 1 ? "" : "s"
+            } failing`,
+          });
+        }
       },
     });
 
@@ -318,6 +401,13 @@ export function UnderwritingWorkspace({ loanId }: Props) {
   }, [extractionsQuery.data]);
 
   const result = underwritingQuery.data;
+  const rules = rulesQuery.data;
+  // KPIs + risk flags: prefer the agent's result (which carries its own
+  // captured snapshot) when available; otherwise fall back to the live
+  // deterministic preview. Both shapes are the same so the renderer
+  // doesn't branch.
+  const liveKpis = result?.kpis ?? rules?.kpis ?? null;
+  const liveFlags = result?.risk_flags ?? rules?.risk_flags ?? [];
   const citedFields = useMemo(() => {
     const s = new Set<string>();
     for (const section of result?.sections ?? []) {
@@ -355,77 +445,88 @@ export function UnderwritingWorkspace({ loanId }: Props) {
           title="Underwriting agent"
           nodes={agentRun.nodes}
           error={agentRun.error}
+          errorDetail={agentRun.errorDetail}
+          skipReason={agentRun.skipReason}
         />
       )}
 
-      {!result && !agentRun.isRunning && agentRun.nodes.length === 0 && (
-        <div className="rounded-lg border-[0.5px] border-dashed border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] p-8 text-center">
-          <p className="text-sm text-[var(--color-text-secondary)]">
-            No underwriting run yet for this loan. Click{" "}
-            <strong>Run underwriting agent</strong> to generate a cited summary
-            and policy check.
-          </p>
-        </div>
-      )}
+      {/* KPI strip — always rendered when we have rules data, even
+          before the agent has been clicked. Reflects the live deterministic
+          state of the loan, so the workspace is never empty. */}
+      {liveKpis && <KpiStrip kpis={liveKpis} />}
 
-      {result && (
-        <>
-          {/* KPI strip */}
-          <KpiStrip kpis={result.kpis} />
-
-          {/* Recommendation banner */}
-          {(() => {
-            const r = RECOMMENDATION_COPY[result.recommendation];
-            return (
-              <div
-                className="rounded-lg border-[0.5px] p-4"
-                style={{
-                  background: r.bg,
-                  borderColor: "var(--color-border-tertiary)",
-                }}
-              >
-                <div className="flex items-baseline justify-between gap-3">
-                  <p className="text-[13px] font-medium" style={{ color: r.fg }}>
-                    {r.label}
-                  </p>
-                  <p
-                    className="text-[10px] uppercase tracking-wider"
-                    style={{ color: r.fg }}
-                  >
-                    AI recommendation · {humanizePropertyType(result.kpis.property_type)}
-                  </p>
-                </div>
-                <p
-                  className="mt-1 text-xs leading-relaxed"
-                  style={{ color: r.fg }}
-                >
-                  {r.description}
+      {/* AI recommendation banner — only when the LLM-driven agent has
+          produced one. This is the "AI work" surface; everything else
+          on the page is the deterministic underlay. */}
+      {result &&
+        (() => {
+          const r = RECOMMENDATION_COPY[result.recommendation];
+          return (
+            <div
+              className="rounded-lg border-[0.5px] p-4"
+              style={{
+                background: r.bg,
+                borderColor: "var(--color-border-tertiary)",
+              }}
+            >
+              <div className="flex items-baseline justify-between gap-3">
+                <p className="text-[13px] font-medium" style={{ color: r.fg }}>
+                  {r.label}
                 </p>
                 <p
-                  className="mt-2 text-[13px] leading-relaxed"
+                  className="text-[10px] uppercase tracking-wider"
                   style={{ color: r.fg }}
                 >
-                  {result.rationale}
+                  AI recommendation · {humanizePropertyType(result.kpis.property_type)}
                 </p>
               </div>
-            );
-          })()}
-
-          {/* Extractions + Risk signals, two columns */}
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-            <div className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-4 py-3">
-              <SectionLabel Icon={IconSparkles}>Extracted from packet</SectionLabel>
-              <ExtractionsList
-                extractionByField={extractionByField}
-                citedFields={citedFields}
-              />
+              <p className="mt-1 text-xs leading-relaxed" style={{ color: r.fg }}>
+                {r.description}
+              </p>
+              <p className="mt-2 text-[13px] leading-relaxed" style={{ color: r.fg }}>
+                {result.rationale}
+              </p>
             </div>
-            <div className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-4 py-3">
-              <SectionLabel Icon={IconAlertTriangle}>Risk signals</SectionLabel>
-              <RiskSignals flags={result.risk_flags} />
-            </div>
-          </div>
+          );
+        })()}
 
+      {/* Extractions + Risk signals — always-on. The right column
+          shows whatever the rules engine evaluates to right now; the
+          left column shows the per-field extractions with confidence
+          dots. Both update when the agent run completes, but neither
+          requires it. */}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-4 py-3">
+          <SectionLabel Icon={IconSparkles}>Extracted from packet</SectionLabel>
+          <ExtractionsList
+            extractionByField={extractionByField}
+            citedFields={citedFields}
+          />
+        </div>
+        <div className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-4 py-3">
+          <SectionLabel Icon={IconAlertTriangle}>
+            Risk signals
+            {!result && liveFlags.length > 0 && (
+              <span className="ml-1.5 text-[10px] font-normal text-[var(--color-text-tertiary)]">
+                · rules only · run agent for cited summary
+              </span>
+            )}
+          </SectionLabel>
+          {liveFlags.length > 0 ? (
+            <RiskSignals flags={liveFlags} />
+          ) : (
+            <p className="text-[12px] text-[var(--color-text-tertiary)]">
+              No risk flags yet — upload a document and run intake to populate
+              the rule inputs.
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* The LLM-drafted cited summary lives below the deterministic
+          panels. This is the only block that requires Run. */}
+      {result && (
+        <>
           {/* Cited summary */}
           <div className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-4 py-3">
             <SectionLabel
@@ -452,14 +553,16 @@ export function UnderwritingWorkspace({ loanId }: Props) {
             </div>
           </div>
 
-          {/* Q&A + comparable loans — wired to RAG and kNN over embeddings */}
-          <AskTheFile loanId={loanId} />
-
           <p className="text-[10px] text-[var(--color-text-tertiary)]">
             agent_run {result.agent_run_id.slice(0, 8)} · cached on this view
           </p>
         </>
       )}
+
+      {/* AskTheFile lives outside the LLM-output gate — it operates
+          purely on the document RAG store, so it's useful even before
+          underwriting has been run. */}
+      <AskTheFile loanId={loanId} />
     </div>
   );
 }

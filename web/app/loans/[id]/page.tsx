@@ -1,33 +1,85 @@
 "use client";
 
 import Link from "next/link";
-import { use, useState } from "react";
+import { use, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { IconFileText, IconFolder, IconSparkles } from "@tabler/icons-react";
+import {
+  IconArrowLeft,
+  IconChevronLeft,
+  IconChevronRight,
+  IconSparkles,
+} from "@tabler/icons-react";
+import { toast } from "sonner";
 import { api, type AuditEvent, type IntakeInterrupt, type Loan } from "@/lib/api";
-import { humanizeLoanType, humanizePartyType } from "@/lib/humanize";
+import { humanizeLoanType, humanizePartyType, titleCase } from "@/lib/humanize";
 import { useAgentRun } from "@/lib/useAgentRun";
 import { AgentProgress } from "@/app/components/AgentProgress";
 import { BrandHeader } from "@/app/components/BrandHeader";
 import { PrimaryButton } from "@/app/components/PrimaryButton";
 import { SecondaryButton } from "@/app/components/SecondaryButton";
+import { Skeleton } from "@/app/components/Skeleton";
 import { StagePill } from "@/app/components/StagePill";
+import { AutonomyToggle } from "./AutonomyToggle";
 import { CaseFileTimeline } from "./CaseFileTimeline";
 import { CreditDecisionPanel } from "./CreditDecisionPanel";
+import { LoanTrace } from "./LoanTrace";
+import { DocsPanel } from "./DocsPanel";
 import { IntakeApprovalModal } from "./IntakeApprovalModal";
+import { StageActions } from "./StageActions";
 import { UnderwritingWorkspace } from "./UnderwritingWorkspace";
 
 interface PageProps {
   params: Promise<{ id: string }>;
 }
 
-type Tab = "activity" | "underwriting" | "decision";
+type Tab = "activity" | "underwriting" | "decision" | "trace";
 const TABS: { id: Tab; label: string }[] = [
   { id: "activity", label: "Activity" },
   { id: "underwriting", label: "Underwriting" },
   { id: "decision", label: "Decision" },
+  // Auditor-facing — agent-by-agent lineage with step traces and LLM
+  // calls. Distinct from "Activity", which is the human-language
+  // narrative; Trace is the technical receipt.
+  { id: "trace", label: "Trace" },
 ];
+
+/** Outline icon-only button used for prev/next loan navigation in the
+ *  header. Renders as disabled (greyed, no hover) when ``href`` is null
+ *  so the visual remains stable at the edges of the list. */
+function NavArrow({
+  href,
+  Icon,
+  label,
+}: {
+  href: string | null;
+  Icon: React.ComponentType<{ size?: number }>;
+  label: string;
+}) {
+  const base =
+    "flex h-7 w-7 items-center justify-center rounded-md border-[0.5px] border-[var(--color-border-tertiary)]";
+  if (!href) {
+    return (
+      <span
+        aria-label={label}
+        title={label}
+        className={`${base} cursor-not-allowed bg-[var(--color-background-primary)] text-[var(--color-text-tertiary)] opacity-50`}
+      >
+        <Icon size={13} />
+      </span>
+    );
+  }
+  return (
+    <Link
+      href={href}
+      aria-label={label}
+      title={label}
+      className={`${base} bg-[var(--color-background-primary)] text-[var(--color-text-secondary)] hover:bg-[var(--color-background-secondary)] hover:text-[var(--color-text-primary)]`}
+    >
+      <Icon size={13} />
+    </Link>
+  );
+}
 
 /** Guarantors render as small clickable chips below the header.
  *
@@ -42,13 +94,63 @@ function GuarantorChips({ loan }: { loan: Loan }) {
       {loan.guarantors.map((g) => (
         <Link
           key={g.id}
-          href={`/parties/${g.id}`}
+          // ``?from=loan:<id>`` lets the party page render a breadcrumb
+          // back to the originating case file. Without it the user
+          // lands on the inspector with no way to retrace context — the
+          // browser's back button works but isn't a UI affordance.
+          href={`/parties/${g.id}?from=loan:${loan.id}`}
           title={`${humanizePartyType(g.party_type)} · view profile`}
           className="rounded-full border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-2 py-0.5 font-medium text-[var(--color-text-info)] hover:bg-[var(--color-background-secondary)]"
         >
           {g.name}
         </Link>
       ))}
+    </div>
+  );
+}
+
+/**
+ * Loading shell that matches the case-file layout: header strip, two
+ * tab rows, then content blocks for the docs panel and timeline. We
+ * mirror the rendered shape rather than showing a spinner so the page
+ * doesn't visibly reflow when the data lands.
+ */
+function LoanDetailSkeleton() {
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-4 py-3">
+        <div className="flex flex-col gap-1.5">
+          <Skeleton width="w-64" height="h-4" />
+          <Skeleton width="w-80" height="h-3" />
+        </div>
+        <div className="flex gap-1.5">
+          <Skeleton width="w-16" height="h-7" />
+          <Skeleton width="w-20" height="h-7" />
+          <Skeleton width="w-36" height="h-7" />
+        </div>
+      </div>
+      <div className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-4 py-3">
+        <Skeleton width="w-28" height="h-3" />
+        <div className="mt-3 flex flex-col gap-2">
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} width="w-full" height="h-8" />
+          ))}
+        </div>
+      </div>
+      <div className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-4 py-3">
+        <Skeleton width="w-24" height="h-3" />
+        <div className="mt-3 flex flex-col gap-3">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="flex items-start gap-3">
+              <Skeleton width="w-7" height="h-7" shape="full" />
+              <div className="flex-1 space-y-1.5">
+                <Skeleton width="w-1/3" height="h-3" />
+                <Skeleton width="w-3/4" height="h-3" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -79,6 +181,86 @@ export default function LoanPage({ params }: PageProps) {
     queryFn: () => api.getAuditEvents(id),
   });
 
+  // Use the cached pipeline list (populated when the user came from the
+  // pipeline view) to compute prev/next loan navigation. If the cache
+  // is empty (user landed here directly), prev/next render disabled —
+  // we don't speculatively fetch the whole list just to power two arrows.
+  const loansList = useQuery<Loan[], Error>({
+    queryKey: ["loans"],
+    queryFn: () => api.listLoans(),
+    staleTime: 60_000,
+  });
+  const { prevLoanId, nextLoanId, positionLabel } = useMemo(() => {
+    const all = loansList.data ?? [];
+    const idx = all.findIndex((l) => l.id === id);
+    if (idx === -1) {
+      return { prevLoanId: null, nextLoanId: null, positionLabel: "" };
+    }
+    return {
+      prevLoanId: idx > 0 ? all[idx - 1]!.id : null,
+      nextLoanId: idx < all.length - 1 ? all[idx + 1]!.id : null,
+      positionLabel: `${idx + 1} of ${all.length}`,
+    };
+  }, [loansList.data, id]);
+
+  // Keyboard shortcuts. We attach to window once on mount and ignore
+  // every event whose target is an input/textarea/select/contenteditable
+  // so typing in the composer or the new-loan modal isn't hijacked.
+  //
+  //   1 / 2 / 3  — switch to Activity / Underwriting / Decision tabs
+  //   [          — previous loan in the pipeline order
+  //   ]          — next loan
+  //   Esc        — back to the pipeline
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.tagName === "SELECT" ||
+          t.isContentEditable)
+      ) {
+        return;
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      switch (e.key) {
+        case "1":
+          setTab("activity");
+          break;
+        case "2":
+          setTab("underwriting");
+          break;
+        case "3":
+          setTab("decision");
+          break;
+        case "4":
+          setTab("trace");
+          break;
+        case "[":
+          if (prevLoanId) router.push(`/loans/${prevLoanId}`);
+          break;
+        case "]":
+          if (nextLoanId) router.push(`/loans/${nextLoanId}`);
+          break;
+        case "Escape":
+          // Only escape if no modal/popover is "on top" — they have their
+          // own handlers and will preventDefault before we get here.
+          router.push("/");
+          break;
+        default:
+          return;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // setTab is closed over but defined every render; harmless and the
+    // alternative is converting it to useCallback, which would just
+    // shift the dependency churn.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prevLoanId, nextLoanId, router]);
+
   const invalidateLoan = () =>
     Promise.all([
       queryClient.invalidateQueries({ queryKey: ["loan", id] }),
@@ -93,16 +275,32 @@ export default function LoanPage({ params }: PageProps) {
   const startIntake = () =>
     intakeRun.run({
       path: `/loans/${id}/agents/intake/run`,
-      onInterrupt: (payload) =>
-        // The stream's interrupt payload IS the IntakeInterrupt shape
-        // the backend used to return synchronously — cast and surface.
-        setPendingInterrupt(payload as unknown as IntakeInterrupt),
+      onInterrupt: (payload) => {
+        setPendingInterrupt(payload as unknown as IntakeInterrupt);
+        toast.message("Intake paused for review", {
+          description: "Underwriter approval required for the drafted email.",
+        });
+      },
       onDone: async (ev) => {
         await invalidateLoan();
-        if (ev.status === "complete") {
-          setStatusMsg("Intake complete — nothing missing, no email needed.");
+        // Pre-flight gate fired — the agent politely declined to run
+        // because something is missing. Surface the friendly reason
+        // (no underscores, full sentence) instead of a generic toast.
+        if (ev.skip_reason) {
+          toast.message("Intake didn't run", {
+            description: ev.skip_reason,
+          });
+          setStatusMsg(null);
+        } else if (ev.status === "complete") {
+          setStatusMsg(null);
+          toast.success("Intake complete", {
+            description: "Packet is complete — no borrower outreach needed.",
+          });
         } else if (ev.status !== "awaiting_approval") {
-          setStatusMsg(`Intake finished — status: ${ev.status}.`);
+          // Status reads as a snake_case enum on the wire — humanise it
+          // so the toast says "Intake finished — Needs Documents" not
+          // "needs_documents".
+          toast.warning(`Intake finished — ${titleCase(ev.status)}`);
         }
       },
     });
@@ -117,7 +315,10 @@ export default function LoanPage({ params }: PageProps) {
       body: { action: "send", subject, body_text: bodyText },
       onDone: async () => {
         await invalidateLoan();
-        setStatusMsg("Email sent — see audit log below.");
+        setStatusMsg(null);
+        toast.success("Email sent to borrower", {
+          description: subject.slice(0, 80),
+        });
       },
     });
   };
@@ -127,7 +328,10 @@ export default function LoanPage({ params }: PageProps) {
       body: { action: "cancel" },
       onDone: async () => {
         await invalidateLoan();
-        setStatusMsg("Draft cancelled — no email was sent.");
+        setStatusMsg(null);
+        toast.message("Draft cancelled", {
+          description: "No email was sent. The loan stays in intake.",
+        });
       },
     });
   };
@@ -139,10 +343,11 @@ export default function LoanPage({ params }: PageProps) {
   if (error && !loan) {
     return <p className="text-sm text-[var(--color-text-danger)]">Error: {error.message}</p>;
   }
-  if (!loan) return <p className="text-sm">Loading…</p>;
+  if (!loan) return <LoanDetailSkeleton />;
 
   const ownerLine = loan.owner ? ` · ${loan.owner.name} (owner)` : "";
-  const subTitle = `${humanizeLoanType(loan.loan_type)} loan · $${Number(loan.amount).toLocaleString()}${ownerLine}`;
+  const classLabel = loan.loan_class === "personal" ? "Personal" : "Business";
+  const subTitle = `${classLabel} · ${humanizeLoanType(loan.loan_type)} loan · $${Number(loan.amount).toLocaleString()}${ownerLine}`;
 
   return (
     <div className="flex flex-col gap-4">
@@ -157,11 +362,41 @@ export default function LoanPage({ params }: PageProps) {
           </span>
         }
         sub={subTitle}
-        badge={<StagePill stage={loan.stage} />}
+        badge={
+          <span className="flex items-center gap-1.5">
+            <StagePill stage={loan.stage} />
+            <AutonomyToggle loan={loan} />
+          </span>
+        }
         actions={
           <>
-            <SecondaryButton Icon={IconFolder}>Docs</SecondaryButton>
-            <SecondaryButton Icon={IconFileText}>Open file</SecondaryButton>
+            {/* Back-to-pipeline + prev/next loan nav. This is the
+                core "moving around without thinking about it" affordance —
+                replaces the previous dead Docs/Open-file buttons. */}
+            <Link
+              href="/"
+              className="flex items-center gap-1.5 rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-2.5 py-1.5 text-[12px] text-[var(--color-text-primary)] hover:bg-[var(--color-background-secondary)]"
+              title="Back to pipeline (Esc)"
+            >
+              <IconArrowLeft size={13} />
+              Pipeline
+            </Link>
+            <div className="flex items-center gap-0.5">
+              <NavArrow
+                href={prevLoanId ? `/loans/${prevLoanId}` : null}
+                Icon={IconChevronLeft}
+                label="Previous loan ([)"
+              />
+              <span className="px-1 text-[11px] text-[var(--color-text-tertiary)]">
+                {positionLabel}
+              </span>
+              <NavArrow
+                href={nextLoanId ? `/loans/${nextLoanId}` : null}
+                Icon={IconChevronRight}
+                label="Next loan (])"
+              />
+            </div>
+
             {/* "Run intake" is the demo's main "kick off the agent"
                 affordance. Only relevant while the loan is still in
                 intake — past that point the workspace tab has its own
@@ -176,6 +411,10 @@ export default function LoanPage({ params }: PageProps) {
                 {intakeRun.isRunning ? "Running intake…" : "Run intake"}
               </PrimaryButton>
             )}
+            {/* Stage advance / decline. Renders nothing for terminal
+                stages (servicing, declined) and for `decision` (the
+                decision tab's action bar owns that). */}
+            <StageActions loanId={id} currentStage={loan.stage} />
           </>
         }
       />
@@ -191,6 +430,8 @@ export default function LoanPage({ params }: PageProps) {
           title={resumeRun.nodes.length > 0 ? "Sending borrower email" : "Intake agent"}
           nodes={resumeRun.nodes.length > 0 ? resumeRun.nodes : intakeRun.nodes}
           error={resumeRun.error ?? intakeRun.error}
+          errorDetail={resumeRun.errorDetail ?? intakeRun.errorDetail}
+          skipReason={resumeRun.skipReason ?? intakeRun.skipReason}
         />
       )}
 
@@ -227,9 +468,15 @@ export default function LoanPage({ params }: PageProps) {
         })}
       </nav>
 
-      {activeTab === "activity" && <CaseFileTimeline loanId={id} events={events} />}
+      {activeTab === "activity" && (
+        <>
+          <DocsPanel loanId={id} />
+          <CaseFileTimeline loanId={id} events={events} />
+        </>
+      )}
       {activeTab === "underwriting" && <UnderwritingWorkspace loanId={id} />}
       {activeTab === "decision" && <CreditDecisionPanel loanId={id} />}
+      {activeTab === "trace" && <LoanTrace loanId={id} />}
 
       {pendingInterrupt && (
         <IntakeApprovalModal

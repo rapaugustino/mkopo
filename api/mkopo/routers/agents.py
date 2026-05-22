@@ -26,6 +26,11 @@ from fastapi.responses import StreamingResponse
 from langgraph.types import Command
 
 from mkopo.agents import build_decision_graph, build_intake_graph, build_underwriting_graph
+from mkopo.agents.orchestrator import (
+    maybe_chain_after_decision,
+    maybe_chain_after_intake,
+    maybe_chain_after_underwriting,
+)
 from mkopo.agents.streaming import (
     DECISION_NODES,
     INTAKE_NODES,
@@ -70,6 +75,12 @@ async def run_intake(loan_id: uuid.UUID, user: CurrentUserDep) -> StreamingRespo
     thread_id = f"intake-{loan_id}"
     config = {"configurable": {"thread_id": thread_id}}
 
+    async def _after(state: dict[str, object], seen_interrupt: bool) -> None:
+        if seen_interrupt:
+            return  # email approval gate — orchestrator stays out.
+        completed = str(state.get("status") or "")
+        await maybe_chain_after_intake(loan_id, completed_with=completed)
+
     return _stream(
         stream_graph_run(
             build_graph=build_intake_graph,
@@ -77,11 +88,14 @@ async def run_intake(loan_id: uuid.UUID, user: CurrentUserDep) -> StreamingRespo
             initial_input={"loan_id": str(loan_id), "status": "running"},
             config=config,
             thread_id=thread_id,
+            loan_id=loan_id,
+            agent_name="intake",
             # Intake's "result" the frontend cares about is the interrupt
             # payload; the full state contains lots of internal scratch
             # we don't want to serialise.
             extract_result=lambda s: {"status": s.get("status")},
             extract_interrupt=_peek_intake_interrupt,
+            on_complete=_after,
         )
     )
 
@@ -113,6 +127,8 @@ async def resume_intake(
             initial_input=Command(resume=resume_value),
             config=config,
             thread_id=thread_id,
+            loan_id=loan_id,
+            agent_name="intake",
             extract_result=lambda s: {"status": s.get("status")},
         )
     )
@@ -149,6 +165,9 @@ async def run_underwriting(
     thread_id = f"underwriting-{loan_id}"
     config = {"configurable": {"thread_id": thread_id}}
 
+    async def _after(_state: dict[str, object], _interrupt: bool) -> None:
+        await maybe_chain_after_underwriting(loan_id)
+
     return _stream(
         stream_graph_run(
             build_graph=build_underwriting_graph,
@@ -156,7 +175,10 @@ async def run_underwriting(
             initial_input={"loan_id": str(loan_id)},
             config=config,
             thread_id=thread_id,
+            loan_id=loan_id,
+            agent_name="underwriting",
             extract_result=_extract_underwriting_result,
+            on_complete=_after,
         )
     )
 
@@ -189,6 +211,9 @@ async def run_decision(
     thread_id = f"decision-{loan_id}"
     config = {"configurable": {"thread_id": thread_id}}
 
+    async def _after(_state: dict[str, object], _interrupt: bool) -> None:
+        await maybe_chain_after_decision(loan_id)
+
     return _stream(
         stream_graph_run(
             build_graph=build_decision_graph,
@@ -196,7 +221,10 @@ async def run_decision(
             initial_input={"loan_id": str(loan_id)},
             config=config,
             thread_id=thread_id,
+            loan_id=loan_id,
+            agent_name="decision",
             extract_result=_extract_decision_result,
+            on_complete=_after,
         )
     )
 

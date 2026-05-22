@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mkopo.models import Document, Extraction, ExtractionStatus, Loan
-from mkopo.rules.policy import PropertyType, RuleContext, run_rules
+from mkopo.rules.policy import PropertyType, RuleContext, run_rules_for
 from mkopo.schemas import RiskFlag
 from mkopo.services.concentration import guarantor_exposure_for_loan
 
@@ -41,6 +41,27 @@ def _to_decimal(value: str) -> Decimal | None:
         return Decimal(value.replace(",", "").replace("$", "").strip())
     except (InvalidOperation, AttributeError):
         return None
+
+
+def _to_int(value: object) -> int | None:
+    """Coerce ``meta``-sourced ints (JSON numbers come back as int/float,
+    strings if hand-edited) into a clean ``int``. Returns ``None`` on
+    anything unparseable so the personal rules emit a "warn" outcome
+    rather than blow up."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):  # ``isinstance(True, int)`` is True — guard.
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError:
+            return None
+    return None
 
 
 def _to_date(value: str) -> date | None:
@@ -114,6 +135,18 @@ async def evaluate(session: AsyncSession, loan_id: uuid.UUID) -> EvaluationResul
 
     guarantor_exposure = await guarantor_exposure_for_loan(session, loan_id)
 
+    # Personal-loan inputs land in ``loan.meta`` (the borrower portal
+    # writes them there; see routers/borrower_portal.py). The commercial
+    # extraction schema doesn't model income/credit-score fields, so
+    # meta is the canonical source for the personal rule pack. Reads
+    # are guarded — missing values fall through to ``None`` and the
+    # rules emit "warn" outcomes rather than crashing.
+    meta = loan.meta or {}
+    annual_income = _to_decimal(str(meta.get("annual_income", "")))
+    monthly_debt_payments = _to_decimal(str(meta.get("monthly_debt_payments", "")))
+    credit_score = _to_int(meta.get("credit_score"))
+    years_employment = _to_decimal(str(meta.get("years_employment", "")))
+
     ctx = RuleContext(
         loan_amount=loan.amount,
         appraised_value=appraised_value,
@@ -123,8 +156,17 @@ async def evaluate(session: AsyncSession, loan_id: uuid.UUID) -> EvaluationResul
         guarantor_total_exposure=guarantor_exposure,
         documents_present=present,
         property_type=property_type,
+        annual_income=annual_income,
+        monthly_debt_payments=monthly_debt_payments,
+        credit_score=credit_score,
+        years_employment=years_employment,
     )
-    outcomes = run_rules(ctx)
+    # Wire-value of LoanClass — ``.value`` is the string the rules
+    # module expects ("business" / "personal").
+    loan_class_value = (
+        loan.loan_class.value if hasattr(loan.loan_class, "value") else str(loan.loan_class)
+    )
+    outcomes = run_rules_for(loan_class_value, ctx)
     flags = [
         RiskFlag(
             rule_id=o.rule_id,

@@ -63,12 +63,16 @@ class LLMCall(Base):
     by prompt without storing potentially sensitive prompt content.
     ``schema_name`` is the name of the Pydantic model used for
     structured-output gating, or ``None`` for free-form completions.
+    ``error_reason`` and ``error_detail`` are populated on failure
+    rows so the observability inspector can show *why* a call broke
+    instead of just "status=error". Both stay null on success.
     """
 
     __tablename__ = "llm_calls"
     __table_args__ = (
         Index("ix_llm_calls_created", "created_at"),
         Index("ix_llm_calls_model_created", "model", "created_at"),
+        Index("ix_llm_calls_thread_created", "thread_id", "created_at"),
     )
 
     model: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -79,3 +83,16 @@ class LLMCall(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     schema_name: Mapped[str | None] = mapped_column(String(128))
     attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Failure forensics. ``error_reason`` is the short one-line summary
+    # (the API exception class, the validation error count, etc.) and
+    # is safe to show in the observability table. ``error_detail`` is
+    # the longer message — full validation error pretty-print, or the
+    # API error body — for the drill-in drawer. Both ``None`` on success.
+    error_reason: Mapped[str | None] = mapped_column(String(256))
+    error_detail: Mapped[str | None] = mapped_column(String(4096))
+    # LangGraph thread id of the agent run that issued this call, when
+    # the call happened inside one. Populated via a ContextVar in
+    # ``mkopo.agents.context`` so the gateway never has to thread it
+    # through call signatures. ``None`` for ad-hoc calls outside an
+    # agent run (eval CI, smoke tests, manual scripts).
+    thread_id: Mapped[str | None] = mapped_column(String(128))
