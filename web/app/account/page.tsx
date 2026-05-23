@@ -211,10 +211,15 @@ function ContactInfoCard() {
   const [name, setName] = useState(auth.user?.name ?? "");
 
   // Re-sync the local field whenever the auth user updates (e.g.
-  // after a successful save).
-  useEffect(() => {
+  // after a successful save). React-19 "set state during render with a
+  // guard" pattern avoids the cascading-render warning from
+  // react-hooks/set-state-in-effect — and it commits the new value in
+  // a single paint rather than flashing the old value first.
+  const [seenUser, setSeenUser] = useState(auth.user);
+  if (seenUser !== auth.user) {
+    setSeenUser(auth.user);
     setName(auth.user?.name ?? "");
-  }, [auth.user]);
+  }
 
   const save = useMutation({
     mutationFn: () =>

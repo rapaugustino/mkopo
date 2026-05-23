@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { IconSparkles } from "@tabler/icons-react";
 import { motion } from "motion/react";
 import type { IntakeInterrupt } from "@/lib/api";
@@ -40,12 +40,18 @@ export function IntakeApprovalModal({ interrupt, onSend, onCancel, onClose }: Pr
   const [submitting, setSubmitting] = useState<null | "send" | "cancel">(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Reset edits if the modal is reopened with a fresh draft
-  useEffect(() => {
-    setSubject(interrupt.draft?.subject ?? "");
-    setBodyText(interrupt.draft?.body_text ?? "");
+  // Reset edits when the modal is reopened with a fresh draft. Using
+  // the React-19 "set state during render with a guard" pattern rather
+  // than useEffect — it avoids the cascading-render warning the
+  // react-hooks/set-state-in-effect lint rule catches, and the user
+  // sees the new draft in one paint instead of a flicker.
+  const [seenDraft, setSeenDraft] = useState(interrupt.draft);
+  if (seenDraft !== interrupt.draft) {
+    setSeenDraft(interrupt.draft);
+    setSubject(draftSubject);
+    setBodyText(draftBody);
     setError(null);
-  }, [interrupt]);
+  }
 
   const handle = async (action: "send" | "cancel") => {
     setError(null);

@@ -51,7 +51,6 @@ from botocore.exceptions import ClientError
 
 from mkopo.config import get_settings
 
-
 PUBLIC_ACCESS_BLOCK = {
     "BlockPublicAcls": True,
     "IgnorePublicAcls": True,
@@ -182,7 +181,7 @@ async def ensure_access_logging(s3, bucket: str, region: str) -> None:
     }
     try:
         await s3.put_bucket_policy(Bucket=log_bucket, Policy=json.dumps(log_policy))
-        print(f"   log bucket policy applied")
+        print("   log bucket policy applied")
     except ClientError as e:
         print(f"   log bucket policy failed: {e.response['Error']['Code']}")
         return

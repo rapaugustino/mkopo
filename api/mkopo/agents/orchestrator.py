@@ -82,6 +82,7 @@ async def maybe_chain_after_underwriting(loan_id: uuid.UUID) -> None:
         # Inspect the latest underwriting_complete audit event to read
         # the recommendation — it's stamped onto the payload.
         from sqlalchemy import desc, select
+
         from mkopo.models import AuditEvent
 
         latest = (

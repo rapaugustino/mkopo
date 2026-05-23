@@ -300,7 +300,11 @@ class SearchLoansArgs(BaseModel):
     )
     stage: str | None = Field(
         default=None,
-        description="Optional filter — one of intake/underwriting/decision/conditions/closing/approved/servicing/declined/withdrawn.",
+        description=(
+            "Optional filter — one of "
+            "intake/underwriting/decision/conditions/closing/"
+            "approved/servicing/declined/withdrawn."
+        ),
     )
     limit: int = Field(default=10, ge=1, le=50)
 

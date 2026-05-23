@@ -162,9 +162,12 @@ class LLMGateway:
                     # the whole thing so operators can see exactly
                     # which fields failed and how.
                     err_count = len(e.errors()) if hasattr(e, "errors") else 1
-                    first_field = ".".join(
-                        str(p) for p in (e.errors()[0].get("loc", ()) if hasattr(e, "errors") and e.errors() else ())
-                    ) or "?"
+                    first_loc = (
+                        e.errors()[0].get("loc", ())
+                        if hasattr(e, "errors") and e.errors()
+                        else ()
+                    )
+                    first_field = ".".join(str(p) for p in first_loc) or "?"
                     short_reason = (
                         f"Schema validation failed ({err_count} "
                         f"{'error' if err_count == 1 else 'errors'}, "
@@ -279,7 +282,7 @@ class LLMGateway:
         max_tokens: int = 4096,
         temperature: float = 0.2,
         call_id: str | None = None,
-    ) -> "ToolUseResponse":
+    ) -> ToolUseResponse:
         """Multi-turn chat with Anthropic tool-use.
 
         Returns a :class:`ToolUseResponse` carrying:

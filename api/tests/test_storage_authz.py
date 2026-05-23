@@ -31,7 +31,6 @@ from mkopo.services.storage import (
     _loan_id_from_key,
 )
 
-
 # ---- key parser ---------------------------------------------------------
 
 

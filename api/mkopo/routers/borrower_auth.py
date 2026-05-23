@@ -24,15 +24,29 @@ email is acknowledged, and only because the UX otherwise breaks.
 
 from __future__ import annotations
 
-from datetime import datetime
+import uuid
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Response, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from mkopo.config import get_settings
 from mkopo.deps import CurrentBorrowerDep, DbSessionDep
-from mkopo.models import User
+from mkopo.models import (
+    AuditEvent,
+    Document,
+    Loan,
+    LoanParty,
+    LoanStage,
+    Party,
+    PartyRole,
+    User,
+)
+from mkopo.routers.borrower_portal import _next_step_for_borrower
+from mkopo.services.audit import Actor, record
 from mkopo.services.auth_service import (
     SESSION_COOKIE,
     consume_magic_link,
@@ -41,6 +55,8 @@ from mkopo.services.auth_service import (
     mint_magic_link,
     verify_password,
 )
+from mkopo.services.loans import IllegalStageTransitionError, transition_stage
+from mkopo.tools.comms import send_magic_link_email
 
 router = APIRouter(prefix="/borrower-auth", tags=["borrower-auth"])
 
@@ -155,17 +171,20 @@ def _dev_link_for_response(plain_token: str, purpose: str) -> str | None:
 
 @router.post("/signup", status_code=status.HTTP_201_CREATED)
 async def signup(
-    payload: SignupRequest, response: Response, db: DbSessionDep
+    payload: SignupRequest,
+    response: Response,
+    background_tasks: BackgroundTasks,
+    db: DbSessionDep,
 ) -> MeResponse:
     """Create a borrower account.
 
     Side effects:
       - Inserts a ``users`` row with ``role='borrower'``.
-      - Issues a session cookie immediately (no email-verify gate
-        for this product — verification is a soft signal, not a
-        hard one).
-      - We don't auto-send a verify email here; that's a follow-up
-        endpoint the UI can hit when it wants to.
+      - Issues a session cookie immediately (no email-verify gate —
+        verification is a soft signal we use to mark a contact as
+        confirmed, not a hard gate that blocks sign-in).
+      - Fires a one-shot ``email_verify`` magic link in the
+        background so the borrower can confirm their address.
 
     Duplicate emails return 409 — this is the one spot we'd
     acknowledge that a user exists, because the UX otherwise breaks.
@@ -189,7 +208,22 @@ async def signup(
     )
     db.add(user)
     await db.flush()
+    # Email-verify magic link — opportunistic. If Resend isn't
+    # configured the helper logs + skips, so signup still works in dev.
+    minted = await mint_magic_link(db, user=user, purpose="email_verify")
     await db.commit()
+
+    settings = get_settings()
+    full_url = _magic_link_url(minted.plain_token, "email_verify")
+    background_tasks.add_task(
+        send_magic_link_email,
+        to=user.email,
+        url=full_url,
+        purpose="email_verify",
+        expires_minutes=settings.magic_link_ttl_seconds // 60,
+        recipient_name=user.name,
+    )
+
     _set_session_cookie(response, user)
     return _me(user)
 
@@ -222,7 +256,9 @@ async def login(
 
 @router.post("/magic-link/request", response_model=MagicLinkIssued)
 async def request_magic_link(
-    payload: MagicLinkRequest, db: DbSessionDep
+    payload: MagicLinkRequest,
+    background_tasks: BackgroundTasks,
+    db: DbSessionDep,
 ) -> MagicLinkIssued:
     """Send a one-shot login link to the supplied email.
 
@@ -230,9 +266,9 @@ async def request_magic_link(
     on file — this is the standard anti-enumeration pattern. The
     user gets a useful response either way.
 
-    In dev we include the URL in the response so test scripts can
-    follow the link without an inbox. In production the URL ships
-    via email only; the response just confirms acceptance.
+    In dev we additionally include the URL in the response so test
+    scripts can follow the link without an inbox. In production the
+    URL ships via email only; the response just confirms acceptance.
     """
     email = payload.email.lower().strip()
     user = (
@@ -246,9 +282,20 @@ async def request_magic_link(
 
     minted = await mint_magic_link(db, user=user, purpose="login")
     await db.commit()
-    # TODO(phase1b): send the link via Resend so the borrower
-    # actually receives an email. For now the URL is logged + (in
-    # dev only) returned in the response body so testing is easy.
+
+    settings = get_settings()
+    full_url = _magic_link_url(minted.plain_token, "login")
+    # Fire-and-forget — Resend's network call shouldn't block the
+    # response. ``send_magic_link_email`` is non-raising; a hiccup
+    # is logged, the user can request another link.
+    background_tasks.add_task(
+        send_magic_link_email,
+        to=user.email,
+        url=full_url,
+        purpose="login",
+        expires_minutes=settings.magic_link_ttl_seconds // 60,
+        recipient_name=user.name,
+    )
     return MagicLinkIssued(
         magic_link_url=_dev_link_for_response(minted.plain_token, "login")
     )
@@ -276,9 +323,7 @@ async def consume_login_link(
                 status.HTTP_401_UNAUTHORIZED, "Magic link is invalid or expired"
             )
         if user.email_verified_at is None:
-            from datetime import UTC, datetime as dt
-
-            user.email_verified_at = dt.now(UTC)
+            user.email_verified_at = datetime.now(UTC)
 
     await db.commit()
     _set_session_cookie(response, user)
@@ -287,7 +332,9 @@ async def consume_login_link(
 
 @router.post("/password-reset/request", response_model=MagicLinkIssued)
 async def request_password_reset(
-    payload: MagicLinkRequest, db: DbSessionDep
+    payload: MagicLinkRequest,
+    background_tasks: BackgroundTasks,
+    db: DbSessionDep,
 ) -> MagicLinkIssued:
     """Send a password-reset link. Same anti-enumeration semantics
     as the login magic-link request endpoint."""
@@ -300,6 +347,17 @@ async def request_password_reset(
 
     minted = await mint_magic_link(db, user=user, purpose="password_reset")
     await db.commit()
+
+    settings = get_settings()
+    full_url = _magic_link_url(minted.plain_token, "password_reset")
+    background_tasks.add_task(
+        send_magic_link_email,
+        to=user.email,
+        url=full_url,
+        purpose="password_reset",
+        expires_minutes=settings.magic_link_ttl_seconds // 60,
+        recipient_name=user.name,
+    )
     return MagicLinkIssued(
         magic_link_url=_dev_link_for_response(minted.plain_token, "password_reset")
     )
@@ -374,8 +432,6 @@ async def my_loans(
     Powers the ``/account`` landing page after login. Replacement
     for "where do I go after signing in?".
     """
-    from mkopo.models import Loan, LoanParty, Party, PartyRole
-
     rows = (
         await db.execute(
             select(Loan)
@@ -389,10 +445,6 @@ async def my_loans(
             .order_by(Loan.created_at.desc())
         )
     ).scalars().all()
-
-    # Import inline to dodge a circular: borrower_portal also wants
-    # to share this copy eventually.
-    from mkopo.routers.borrower_portal import _next_step_for_borrower
 
     return [
         MyLoanRow(
@@ -449,8 +501,8 @@ async def update_contact(
 
 
 async def _assert_loan_owned_by(
-    db: "AsyncSession", loan_id: uuid.UUID, user: User
-) -> "Loan":
+    db: AsyncSession, loan_id: uuid.UUID, user: User
+) -> Loan:
     """Load the loan and confirm the signed-in borrower owns it.
 
     Same email-keyed check borrower_portal uses, lifted here so the
@@ -458,8 +510,6 @@ async def _assert_loan_owned_by(
     HTTP 404 if the loan doesn't exist; HTTP 403 if it does but the
     user isn't the borrower party.
     """
-    from mkopo.models import Loan, LoanParty, Party, PartyRole
-
     loan = (
         await db.execute(select(Loan).where(Loan.id == loan_id))
     ).scalar_one_or_none()
@@ -512,10 +562,6 @@ async def withdraw_loan(
     erasure but never re-opened. If the borrower changes their mind
     they file a new application.
     """
-    from mkopo.models import LoanStage
-    from mkopo.services.audit import Actor
-    from mkopo.services.loans import IllegalStageTransitionError, transition_stage
-
     loan = await _assert_loan_owned_by(db, loan_id, user)
 
     try:
@@ -533,8 +579,6 @@ async def withdraw_loan(
 
     await db.commit()
     await db.refresh(loan)
-
-    from mkopo.routers.borrower_portal import _next_step_for_borrower
 
     return MyLoanRow(
         loan_id=str(loan.id),
@@ -599,9 +643,6 @@ async def update_loan_fields(
     decision agent is re-run. The borrower can edit freely; the
     system enforces re-underwriting at the right gate.
     """
-    from mkopo.models import LoanStage
-    from mkopo.services.audit import Actor, record
-
     loan = await _assert_loan_owned_by(db, loan_id, user)
 
     # Refuse mutations on terminal/post-funding stages — borrowers
@@ -661,17 +702,6 @@ async def export_my_data(
     Phase 2 endpoint uses, so the export can't leak someone else's
     data even if the borrower's user row were corrupted.
     """
-    from datetime import UTC, datetime as dt
-
-    from mkopo.models import (
-        AuditEvent,
-        Document,
-        Loan,
-        LoanParty,
-        Party,
-        PartyRole,
-    )
-
     loans = (
         await db.execute(
             select(Loan)
@@ -745,7 +775,7 @@ async def export_my_data(
         )
 
     return {
-        "generated_at": dt.now(UTC).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "user": {
             "id": str(user.id),
             "email": user.email,
@@ -801,19 +831,13 @@ async def request_erasure(
     successful response — their session cookie is still valid but
     the next ``/me`` call will see ``deleted_at`` and refuse.
     """
-    from datetime import UTC, datetime as dt, timedelta
-
-    from mkopo.config import get_settings
-    from mkopo.models import Loan, LoanParty, LoanStage, Party, PartyRole
-    from mkopo.services.audit import Actor, record
-
     if not payload.confirm:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             "Confirmation is required to request erasure.",
         )
 
-    now = dt.now(UTC)
+    now = datetime.now(UTC)
 
     # Soft-delete the user row.
     user.deleted_at = now
@@ -857,17 +881,18 @@ async def request_erasure(
 
     await db.commit()
 
-    # Clear the session cookie so subsequent requests reauth.
-    # (The borrower's account is soft-deleted; require_borrower
-    # will refuse any further /me calls regardless of the cookie.)
-    _ = get_settings  # quiet the unused-import linter
+    # The borrower's account is now soft-deleted; ``require_borrower``
+    # will refuse any further ``/me`` calls regardless of whether the
+    # session cookie is still on disk on the client. The frontend
+    # should log the user out on receiving this response.
+    latest_retention = max(
+        (loan.retention_until for loan in loans if loan.retention_until),
+        default=None,
+    )
     return {
         "ok": True,
         "loans_affected": len(loans),
-        "retention_until_max": max(
-            (l.retention_until for l in loans if l.retention_until),
-            default=None,
-        ).isoformat() if loans else None,
+        "retention_until_max": latest_retention.isoformat() if latest_retention else None,
         "message": (
             "Your account and applications have been marked for erasure. "
             "We're required to keep the records on file until the regulatory "

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   IconAlertTriangle,
@@ -345,13 +345,18 @@ export function CreditDecisionPanel({ loanId }: Props) {
       },
     });
 
-  // Default the selected path to whatever's in the latest result, if any.
+  // Default the selected path to whatever's in the latest result, if
+  // any. React-19 "set state during render with a guard" — the
+  // alternative useEffect form causes a cascading render, which the
+  // react-hooks/set-state-in-effect lint flags.
   const result = decisionQuery.data;
-  useEffect(() => {
+  const [seenResult, setSeenResult] = useState(result);
+  if (seenResult !== result) {
+    setSeenResult(result);
     if (result && selectedPath == null) {
       setSelectedPath(result.path);
     }
-  }, [result, selectedPath]);
+  }
 
   return (
     <div className="flex flex-col gap-3">

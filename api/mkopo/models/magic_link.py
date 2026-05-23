@@ -60,4 +60,4 @@ class MagicLink(Base):
     # NULL`` is the "burned" marker.
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    user: Mapped["User"] = relationship(lazy="joined")
+    user: Mapped[User] = relationship(lazy="joined")

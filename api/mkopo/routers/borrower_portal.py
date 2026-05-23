@@ -31,6 +31,7 @@ from typing import Any
 from fastapi import APIRouter, File, HTTPException, Response, UploadFile, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from mkopo.deps import CurrentBorrowerDep, DbSessionDep
 from mkopo.models import (
@@ -315,7 +316,7 @@ async def borrower_apply(
 
 
 async def _assert_borrower_owns_loan(
-    db: "AsyncSession", loan: Loan, user_email: str
+    db: AsyncSession, loan: Loan, user_email: str
 ) -> None:
     """Refuse the request if the signed-in borrower isn't the loan's
     borrower party.
@@ -496,5 +497,8 @@ def _next_step_for_borrower(stage: LoanStage) -> str:
     if stage == LoanStage.SERVICING:
         return "Your loan has closed and is now being serviced."
     if stage == LoanStage.DECLINED:
-        return "Your application has been declined. You should have received a notification by email with the reason."
+        return (
+            "Your application has been declined. You should have received "
+            "a notification by email with the reason."
+        )
     return "We're reviewing your application."

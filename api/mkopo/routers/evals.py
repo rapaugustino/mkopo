@@ -19,7 +19,7 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter
 from pydantic import BaseModel
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, select
 
 from mkopo.deps import CurrentUserDep, DbSessionDep
 from mkopo.models.eval import LLMCall, TaskRun

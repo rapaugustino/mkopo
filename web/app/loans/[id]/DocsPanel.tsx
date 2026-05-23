@@ -29,10 +29,19 @@ function formatSize(bytes: number): string {
   return `${bytes} B`;
 }
 
-function fileIcon(contentType: string): React.ComponentType<{ size?: number }> {
-  if (contentType === "application/pdf") return IconFileTypePdf;
-  if (contentType.startsWith("text/")) return IconFileTypeTxt;
-  return IconFile;
+// Real component (not a factory returning a component type) — React
+// doesn't have to re-create a component during render, and the
+// react-hooks/static-components lint passes.
+function FileTypeIcon({
+  contentType,
+  size = 14,
+}: {
+  contentType: string;
+  size?: number;
+}) {
+  if (contentType === "application/pdf") return <IconFileTypePdf size={size} />;
+  if (contentType.startsWith("text/")) return <IconFileTypeTxt size={size} />;
+  return <IconFile size={size} />;
 }
 
 function relativeTime(iso: string): string {
@@ -50,7 +59,6 @@ function relativeTime(iso: string): string {
 // ---- row ------------------------------------------------------------------
 
 function DocRow({ doc }: { doc: LoanDocument }) {
-  const Icon = fileIcon(doc.content_type);
   const ocrPages = doc.extract.pages_needing_ocr ?? 0;
   const totalPages = doc.extract.page_count;
   return (
@@ -63,7 +71,7 @@ function DocRow({ doc }: { doc: LoanDocument }) {
             color: "var(--color-text-secondary)",
           }}
         >
-          <Icon size={14} />
+          <FileTypeIcon contentType={doc.content_type} size={14} />
         </span>
         <div className="min-w-0">
           <p className="truncate font-medium">{doc.filename}</p>

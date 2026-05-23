@@ -69,32 +69,46 @@ function paletteFor(
   return "system";
 }
 
-function iconFor(intent: EventIntent, actor: ActorType) {
+// Render the right icon for (intent, actor). Implemented as a real
+// component (not a factory returning a component reference) so React
+// doesn't see a new "component" being created on every render — the
+// react-hooks/static-components lint passes, and the icon's identity
+// is stable across renders that don't change the relevant props.
+function IntentIcon({
+  intent,
+  actor,
+  size,
+}: {
+  intent: EventIntent;
+  actor: ActorType;
+  size: number;
+}) {
+  const px = Math.round(size);
   switch (intent) {
     case "alert":
-      return IconAlertTriangle;
+      return <IconAlertTriangle size={px} />;
     case "send":
-      return IconSend;
+      return <IconSend size={px} />;
     case "reply":
-      return IconMailOpened;
+      return <IconMailOpened size={px} />;
     case "assign":
-      return IconUserPlus;
+      return <IconUserPlus size={px} />;
     case "extract":
-      return IconSparkles;
+      return <IconSparkles size={px} />;
     case "summarise":
-      return IconFileText;
+      return <IconFileText size={px} />;
     case "decide":
-      return IconGavel;
+      return <IconGavel size={px} />;
     case "note":
-      return IconNote;
+      return <IconNote size={px} />;
     case "intake":
-      return IconMailForward;
+      return <IconMailForward size={px} />;
     default:
       // Fall back by actor type
-      if (actor === "agent") return IconSparkles;
-      if (actor === "user") return IconSend;
-      if (actor === "borrower") return IconMailOpened;
-      return IconMailForward;
+      if (actor === "agent") return <IconSparkles size={px} />;
+      if (actor === "user") return <IconSend size={px} />;
+      if (actor === "borrower") return <IconMailOpened size={px} />;
+      return <IconMailForward size={px} />;
   }
 }
 
@@ -106,7 +120,6 @@ interface Props {
 
 export function ActorIcon({ actor, intent = "default", size = 28 }: Props) {
   const palette = PALETTE[paletteFor(actor, intent)];
-  const Icon = iconFor(intent, actor);
   return (
     <div
       className="flex shrink-0 items-center justify-center rounded-full"
@@ -117,7 +130,7 @@ export function ActorIcon({ actor, intent = "default", size = 28 }: Props) {
         color: palette.fg,
       }}
     >
-      <Icon size={Math.round(size * 0.5)} />
+      <IntentIcon intent={intent} actor={actor} size={size * 0.5} />
     </div>
   );
 }

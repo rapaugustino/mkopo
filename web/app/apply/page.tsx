@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
@@ -156,17 +156,24 @@ export default function ApplyPage() {
   // page (they have at most one in-flight application in the
   // demo's data model) and let Phase 2's "My applications"
   // dashboard handle multi-application UX.
-  useEffect(() => {
-    if (auth.status === "authed" && auth.user) {
-      setForm((f) => ({
-        ...f,
-        borrower_email: f.borrower_email || auth.user!.email,
-        borrower_name: f.borrower_name || auth.user!.name,
-        // Already-authed users don't set a password here.
-        borrower_password: "",
-      }));
-    }
-  }, [auth.status, auth.user]);
+  // Pre-fill name/email when a signed-in borrower lands on /apply.
+  // React-19 "set state during render with a guard" — no effect, so
+  // no cascading-render warning, and the user sees their pre-filled
+  // form on the first paint instead of a flicker.
+  const [seenAuthUser, setSeenAuthUser] = useState(
+    auth.status === "authed" ? auth.user : null,
+  );
+  const currentAuthUser = auth.status === "authed" ? auth.user : null;
+  if (currentAuthUser && currentAuthUser !== seenAuthUser) {
+    setSeenAuthUser(currentAuthUser);
+    setForm((f) => ({
+      ...f,
+      borrower_email: f.borrower_email || currentAuthUser.email,
+      borrower_name: f.borrower_name || currentAuthUser.name,
+      // Already-authed users don't set a password here.
+      borrower_password: "",
+    }));
+  }
 
   // Live completeness assessment. Mirrors what the intake agent will
   // do server-side — gives the borrower a sense of "I'm 60% there"

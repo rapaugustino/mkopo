@@ -288,7 +288,7 @@ def _sse(event: str, data: Any) -> bytes:
     the spec, so we ensure ``json.dumps`` emits single-line output.
     """
     payload = json.dumps(data, default=str, separators=(",", ":"))
-    return f"event: {event}\ndata: {payload}\n\n".encode("utf-8")
+    return f"event: {event}\ndata: {payload}\n\n".encode()
 
 
 # Type alias for the graph-context-manager builder functions

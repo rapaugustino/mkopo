@@ -256,9 +256,13 @@ async def transition_stage(
 
     from_stage = loan.stage
     if to_stage not in VALID_TRANSITIONS.get(from_stage, set()):
+        allowed = (
+            sorted(s.value for s in VALID_TRANSITIONS.get(from_stage, set()))
+            or "none (terminal)"
+        )
         raise IllegalStageTransitionError(
             f"Cannot move from {from_stage.value} to {to_stage.value}. "
-            f"Allowed next stages: {sorted(s.value for s in VALID_TRANSITIONS.get(from_stage, set())) or 'none (terminal)'}."
+            f"Allowed next stages: {allowed}."
         )
 
     if not skip_prereqs:

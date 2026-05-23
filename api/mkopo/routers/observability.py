@@ -25,7 +25,8 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status as http_status
+from fastapi import APIRouter, HTTPException
+from fastapi import status as http_status
 from pydantic import BaseModel
 from sqlalchemy import desc, func, select
 

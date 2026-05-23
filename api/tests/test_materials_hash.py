@@ -27,7 +27,6 @@ os.environ.setdefault("DATABASE_URL_SYNC", "postgresql://x/y")
 
 from mkopo.services.materials_hash import HASH_VERSION, hash_payload
 
-
 # ---- baseline payload ---------------------------------------------------
 
 
@@ -188,13 +187,10 @@ class TestInsensitivity:
         # The payload builder only emits decision-feeding fields. If
         # any caller accidentally fed an extra key (a timestamp, a
         # cache id), it shouldn't make it into the hash. This test
-        # protects against that drift by hashing only the canonical
-        # fields — extra fields here mean a broader hash than spec'd.
-        a = hash_payload(_baseline_payload())
-        # We don't add extra keys upstream; if someone does, the hash
-        # would change deterministically — that's the safe direction.
-        # This is really an assertion about the schema: only the
-        # nine baseline keys belong in the hash.
+        # is really an assertion about the schema: only the nine
+        # baseline keys belong in the hash. If a new key gets added
+        # upstream the hash changes deterministically — safe direction
+        # — but we still want this guard so the addition is intentional.
         assert set(_baseline_payload().keys()) == {
             "v",
             "loan_id",

@@ -93,8 +93,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Resolve cookie → user on mount. No dependencies — fires once.
+  // Resolve cookie → user on mount. This is the canonical "sync
+  // React with an external system" use of useEffect — the cookie is
+  // outside React's data model, so kicking off the /me fetch is
+  // exactly what effects exist for. The setState inside refresh()
+  // happens after the fetch resolves, not synchronously in the effect.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refresh();
   }, [refresh]);
 

@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel
@@ -148,7 +148,6 @@ def to_anthropic_tools(tools: list[Tool]) -> list[dict[str, Any]]:
 # each tool keeps borrower vs staff scoped at the lookup boundary.
 from mkopo.agents.tools import borrower as _borrower  # noqa: E402,F401
 from mkopo.agents.tools import staff as _staff  # noqa: E402,F401
-
 
 __all__ = [
     "Tool",

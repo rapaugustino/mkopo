@@ -59,14 +59,16 @@ export default function ReviewQueuePage() {
     queryFn: () => api.listReviewTasks("open"),
   });
 
-  const allTasks = tasksQuery.data ?? [];
-  const tasks = useMemo(
-    () =>
-      fieldFilter
-        ? allTasks.filter((t) => t.extraction.field_name === fieldFilter)
-        : allTasks,
-    [allTasks, fieldFilter],
-  );
+  // Move the `?? []` fallback inside useMemo so the dependency is the
+  // stable query reference, not a fresh `[]` on every render — the
+  // linter rightly flagged the old form as "deps change every render".
+  const queryData = tasksQuery.data;
+  const tasks = useMemo(() => {
+    const all = queryData ?? [];
+    return fieldFilter
+      ? all.filter((t) => t.extraction.field_name === fieldFilter)
+      : all;
+  }, [queryData, fieldFilter]);
 
   const clearFieldFilter = () => router.replace("/review-queue");
 
