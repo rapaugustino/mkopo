@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
 import {
@@ -14,7 +15,20 @@ import {
 import { motion } from "motion/react";
 import { toast } from "sonner";
 
+import { useAuth } from "@/app/borrower/AuthProvider";
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+/**
+ * Marker error thrown by the apply mutation when the backend returns
+ * 409 (email already on file). The onError handler matches on this
+ * to route the user to /login instead of showing a generic error.
+ */
+class ApplyConflictError extends Error {
+  constructor() {
+    super("An account with that email already exists");
+  }
+}
 
 type LoanType = "bridge" | "permanent" | "construction" | "refinance";
 type LoanClass = "business" | "personal";
@@ -26,6 +40,11 @@ interface FormState {
   purpose: string;
   borrower_name: string;
   borrower_email: string;
+  // Password for new applicants — backend creates the borrower
+  // account atomically with the loan. Empty string for already-
+  // signed-in users (we pre-fill name+email and hide the password
+  // field) and for "passwordless / magic-link only" intent.
+  borrower_password: string;
   borrower_type: "entity" | "person";
   guarantor_name: string;
   guarantor_email: string;
@@ -47,6 +66,7 @@ const EMPTY: FormState = {
   purpose: "",
   borrower_name: "",
   borrower_email: "",
+  borrower_password: "",
   borrower_type: "entity",
   guarantor_name: "",
   guarantor_email: "",
@@ -120,14 +140,38 @@ const LOAN_TYPE_OPTIONS_PERSONAL: { value: LoanType; label: string; hint: string
 
 export default function ApplyPage() {
   const router = useRouter();
+  const auth = useAuth();
   const [form, setForm] = useState<FormState>(EMPTY);
   const update = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
 
+  // If the user is already signed in, prefill their email + name
+  // and hide the password field. Submitting the form for a logged-
+  // in user would 409 on the backend (email exists) — we don't
+  // surface that path here; we just route them through /signup
+  // which already exists. Actually, simpler: a signed-in user
+  // clicking /apply should be making a *second* application —
+  // their email is already on file, so the application has to
+  // attach to them somehow. For now we route them to the status
+  // page (they have at most one in-flight application in the
+  // demo's data model) and let Phase 2's "My applications"
+  // dashboard handle multi-application UX.
+  useEffect(() => {
+    if (auth.status === "authed" && auth.user) {
+      setForm((f) => ({
+        ...f,
+        borrower_email: f.borrower_email || auth.user!.email,
+        borrower_name: f.borrower_name || auth.user!.name,
+        // Already-authed users don't set a password here.
+        borrower_password: "",
+      }));
+    }
+  }, [auth.status, auth.user]);
+
   // Live completeness assessment. Mirrors what the intake agent will
   // do server-side — gives the borrower a sense of "I'm 60% there"
   // without any LLM call, and surfaces missing pieces immediately.
-  const checklist = useMemo(() => checkCompleteness(form), [form]);
+  const checklist = useMemo(() => checkCompleteness(form, auth.status === "authed"), [form, auth.status]);
 
   const submit = useMutation({
     mutationFn: async () => {
@@ -155,6 +199,10 @@ export default function ApplyPage() {
             form.loan_class === "personal" ? "person" : form.borrower_type,
           email: form.borrower_email || null,
         },
+        // Backend creates the borrower account atomically with the
+        // loan when this is set. Skipped for already-signed-in
+        // users (they get the 409 path, handled in onError).
+        borrower_password: form.borrower_password || null,
         guarantors: form.guarantor_name
           ? [
               {
@@ -171,8 +219,17 @@ export default function ApplyPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
+        // Cookie ships along — needed so signed-in users get their
+        // session refreshed (the apply endpoint sets a fresh cookie
+        // for new borrowers and ignores it for existing ones).
+        credentials: "include",
       });
       if (!res.ok) {
+        // 409 = email already has an account. Surface a clear
+        // "please sign in first" toast in onError below.
+        if (res.status === 409) {
+          throw new ApplyConflictError();
+        }
         throw new Error(`Application failed (${res.status}): ${await res.text()}`);
       }
       return (await res.json()) as {
@@ -183,19 +240,64 @@ export default function ApplyPage() {
       };
     },
     onSuccess: (result) => {
+      // The backend set the session cookie for a new borrower; flag
+      // the auth provider so the next /me-driven view shows them
+      // signed in without a roundtrip.
+      void auth.refresh();
       toast.success(`Application submitted — ${result.reference}`);
       router.push(`/apply/${result.loan_id}`);
     },
-    onError: (e) =>
+    onError: (e) => {
+      if (e instanceof ApplyConflictError) {
+        // 409: email exists. The right next step is "sign in,
+        // then come back" — we route them to /login with the
+        // application's email prefilled and ?next=/apply so they
+        // land back here.
+        toast.error("That email already has an account", {
+          description:
+            "Sign in first, then we'll attach this application to your account.",
+          action: {
+            label: "Sign in",
+            onClick: () =>
+              router.push(
+                `/login?next=${encodeURIComponent("/apply")}&email=${encodeURIComponent(form.borrower_email)}`,
+              ),
+          },
+        });
+        return;
+      }
       toast.error("Couldn't submit application", {
         description: e instanceof Error ? e.message : String(e),
-      }),
+      });
+    },
   });
 
   const ready = checklist.filter((c) => c.required).every((c) => c.satisfied);
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Signed-in banner. Shows up only for borrowers who already
+          have an account and arrived at /apply for a second loan
+          or by deep-linking. Quick way for them to sign out and
+          start a different account if they really meant to. */}
+      {auth.status === "authed" && auth.user && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-[var(--color-background-info)] px-3 py-2 text-[12px] text-[var(--color-text-info)]">
+          <span>
+            Signed in as <strong>{auth.user.email}</strong> — this
+            application will attach to your account.
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              void auth.logout();
+            }}
+            className="text-[11.5px] underline opacity-80 hover:opacity-100"
+          >
+            Sign out and start fresh
+          </button>
+        </div>
+      )}
+
       {/* Hero / explainer. Sets expectations and explains the dual
           surface so the borrower understands what's happening when
           their information lands on the lender's side. */}
@@ -208,6 +310,18 @@ export default function ApplyPage() {
           AI to read your packet and flag anything missing — you&apos;ll
           get an email if we need more information.
         </p>
+        {auth.status !== "authed" && (
+          <p className="mt-2 text-[12px] text-[var(--color-text-secondary)]">
+            Already have an account?{" "}
+            <Link
+              href={`/login?next=${encodeURIComponent("/apply")}`}
+              className="font-medium text-[var(--color-text-info)] hover:underline"
+            >
+              Sign in
+            </Link>
+            .
+          </p>
+        )}
         <p className="mt-3 flex items-center gap-1.5 text-[11px] text-[var(--color-text-tertiary)]">
           <IconLockSquare size={11} />
           Your information is stored privately. You can come back to this
@@ -357,8 +471,31 @@ export default function ApplyPage() {
                   : "contact@atlasholdings.example"
               }
               className="form-input"
+              disabled={auth.status === "authed"}
             />
           </Field>
+          {/* Password field — only for new applicants. Already-
+              signed-in users skip it; the backend won't 409 on
+              their own email because their loan attaches via the
+              session cookie (Phase 2 dashboard work makes the
+              multi-loan UX nicer; for now the page just routes
+              them to the new loan's status). */}
+          {auth.status !== "authed" && (
+            <Field
+              label="Create a password"
+              hint="At least 8 characters. You'll use this to sign back in."
+            >
+              <input
+                type="password"
+                value={form.borrower_password}
+                onChange={(e) => update("borrower_password", e.target.value)}
+                placeholder="••••••••"
+                className="form-input"
+                autoComplete="new-password"
+                minLength={8}
+              />
+            </Field>
+          )}
         </div>
       </SectionCard>
 
@@ -726,7 +863,7 @@ interface ChecklistItem {
  *  needs the income / credit / employment fields the rules engine
  *  uses for DTI, LTI, and FICO.
  */
-function checkCompleteness(form: FormState): ChecklistItem[] {
+function checkCompleteness(form: FormState, isAuthed: boolean): ChecklistItem[] {
   const shared: ChecklistItem[] = [
     {
       label:
@@ -739,6 +876,17 @@ function checkCompleteness(form: FormState): ChecklistItem[] {
       satisfied: /^[^@]+@[^@]+\.[^@]+$/.test(form.borrower_email),
       required: true,
     },
+    // Password is required for new applicants (we're creating an
+    // account atomically); skipped for already-signed-in users.
+    ...(isAuthed
+      ? []
+      : [
+          {
+            label: "Password (8+ characters)",
+            satisfied: form.borrower_password.length >= 8,
+            required: true,
+          },
+        ]),
     {
       label: "Loan amount > $0",
       satisfied: Number(form.amount) > 0,

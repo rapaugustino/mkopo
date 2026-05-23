@@ -61,11 +61,13 @@ class Settings(BaseSettings):
     # different domain in your own deployment:
     #   1. Verify the domain on https://resend.com/domains
     #   2. Set RESEND_FROM_ADDRESS to a mailbox on it
-    #   3. Configure the inbound webhook (DEPLOY.md §Email).
+    #
+    # Outbound only. Mkopo intentionally does NOT process inbound
+    # email — borrowers reply in-app, not by email. See
+    # ``mkopo.tools.comms`` for the rationale.
     resend_api_key: str = ""
     resend_from_address: str = "mkopo@ubunifutech.com"
     resend_from_name: str = "Mkopo"
-    resend_webhook_secret: str = ""
 
     # Document storage
     # STORAGE_BACKEND=local writes to STORAGE_ROOT on disk.
@@ -83,8 +85,18 @@ class Settings(BaseSettings):
     eval_golden_set_dir: str = "./evals/golden_sets"
     eval_results_dir: str = "./evals/results"
 
-    # Auth
+    # Auth — staff bearer (dev) + borrower JWT signing secret.
     dev_api_token: str = "dev-token-replace-me"
+    # Used to sign borrower session JWTs. MUST be overridden in
+    # production; the default is intentionally insecure so dev works
+    # out of the box but a missing env var in prod is obvious.
+    jwt_secret: str = "dev-jwt-secret-replace-me-min-32-chars"
+    # How long a borrower's session cookie lives (seconds). Short by
+    # default — re-login via password or magic-link is fast.
+    jwt_session_ttl_seconds: int = 60 * 60 * 12  # 12 hours
+    # Magic-link expiry (seconds). Tight — links should be acted on
+    # promptly. 15 min covers email-delivery slowness.
+    magic_link_ttl_seconds: int = 60 * 15
 
     # Frontend
     frontend_url: str = "http://localhost:3000"

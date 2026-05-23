@@ -17,6 +17,10 @@ if TYPE_CHECKING:
 
 class MessageDirection(enum.StrEnum):
     OUTBOUND = "outbound"
+    # ``INBOUND`` is no longer written by any code path — Mkopo
+    # decided against parsing email replies (borrowers reply in-app,
+    # not by email). The value stays on the enum so historical rows
+    # still load; new rows should never use it.
     INBOUND = "inbound"
     INTERNAL = "internal"
 

@@ -101,6 +101,38 @@ async def _has_audit_action(
     return (await session.execute(stmt)).scalar_one_or_none() is not None
 
 
+async def _materials_drift_message(
+    session: AsyncSession, loan_id: uuid.UUID
+) -> str | None:
+    """Return a user-readable message when the loan's current
+    materials no longer match the materials the latest decision was
+    made against; ``None`` otherwise.
+
+    "Drift" is what changed: a document swapped, an extraction
+    overridden, a meta field updated, a guarantor added/removed. Any
+    of those between decision and the next forward transition means
+    we'd be acting on a stale recommendation — so we refuse with a
+    message that tells the user exactly what to do (re-run the
+    decision agent).
+
+    Only fires when a decision actually exists for the loan. Loans
+    that haven't reached decision yet get ``None`` here regardless of
+    document churn — the protection only matters once a decision is
+    on file.
+    """
+    from mkopo.services.materials_hash import materials_drift_detected
+
+    drifted, _current, _previous = await materials_drift_detected(session, loan_id)
+    if drifted:
+        return (
+            "Materials have changed since the decision was made — "
+            "an extraction, document, or borrower-supplied field was "
+            "updated. Re-run the decision agent so the recommendation "
+            "reflects the current loan packet."
+        )
+    return None
+
+
 async def check_prerequisites(
     session: AsyncSession, loan: Loan, to_stage: LoanStage
 ) -> str | None:
@@ -145,6 +177,15 @@ async def check_prerequisites(
                 "Decision agent hasn't drafted a recommendation yet. "
                 "Run the decision agent first."
             )
+        # Materials-drift gate: if the inputs that fed the latest
+        # decision have changed (a document was swapped, an income
+        # field was edited, an extraction was overridden), the
+        # decision is stale and must not be acted on. Re-run the
+        # decision agent to produce a fresh recommendation against
+        # the current materials.
+        drift_msg = await _materials_drift_message(session, loan_id)
+        if drift_msg:
+            return drift_msg
         return None
 
     if to_stage == LoanStage.DECLINED:
@@ -173,6 +214,12 @@ async def check_prerequisites(
                     f"{n} condition{'' if n == 1 else 's'} still open. Mark them "
                     "satisfied or waived before closing."
                 )
+        # Closing is the last gate before funding — materials drift
+        # here would mean we're funding a loan on data the decision
+        # was never made against. Refuse and force re-decision.
+        drift_msg = await _materials_drift_message(session, loan_id)
+        if drift_msg:
+            return drift_msg
         return None
 
     # No prerequisites for SERVICING beyond the VALID_TRANSITIONS edge.

@@ -28,11 +28,11 @@ import uuid
 from decimal import Decimal
 from typing import Any
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, Response, UploadFile, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 
-from mkopo.deps import DbSessionDep
+from mkopo.deps import CurrentBorrowerDep, DbSessionDep
 from mkopo.models import (
     AutonomyLevel,
     Document,
@@ -93,6 +93,11 @@ class BorrowerApplyIn(BaseModel):
     # values aren't on file rather than blocking.
     monthly_debt_payments: Decimal | None = Field(default=None, ge=0)
     years_employment: Decimal | None = Field(default=None, ge=0, le=80)
+    # Optional password — when present we hash it onto the new
+    # borrower's user row so they can log in later by password. When
+    # absent (the recommended UX) the account is magic-link-only
+    # until the borrower sets a password from their dashboard.
+    borrower_password: str | None = Field(default=None, min_length=8, max_length=256)
 
 
 class BorrowerApplyOut(BaseModel):
@@ -126,8 +131,25 @@ class BorrowerStatusOut(BaseModel):
     response_model=BorrowerApplyOut,
     status_code=status.HTTP_201_CREATED,
 )
-async def borrower_apply(payload: BorrowerApplyIn, db: DbSessionDep) -> BorrowerApplyOut:
+async def borrower_apply(
+    payload: BorrowerApplyIn, response: Response, db: DbSessionDep
+) -> BorrowerApplyOut:
     """Create a new loan from a borrower-facing application.
+
+    Auth integration (Phase 1b): this endpoint stays publicly
+    callable so a new borrower can apply without going through a
+    separate signup step. As part of the application we:
+
+      1. Create a ``users`` row with ``role='borrower'``. If the
+         payload includes a password we hash it; otherwise the
+         account is magic-link-only (the borrower will get an
+         email with a "set password" link in Phase 1b's email
+         delivery work).
+      2. Set the ``mkopo_session`` cookie so the borrower is
+         signed in immediately and can land on ``/apply/{id}``
+         without a separate login step.
+      3. Reject duplicate emails with 409 — frontend redirects
+         to ``/login`` so the existing user can sign in first.
 
     Mirrors LoanCreate but:
     - the actor type on every audit event is ``borrower`` (not user),
@@ -137,6 +159,50 @@ async def borrower_apply(payload: BorrowerApplyIn, db: DbSessionDep) -> Borrower
     - the borrower's contact email is stored in ``loan.meta`` so the
       intake agent's email tool finds it.
     """
+    from mkopo.models import User as UserModel
+    from mkopo.services.auth_service import (
+        SESSION_COOKIE,
+        hash_password,
+        issue_jwt,
+    )
+
+    if not payload.borrower.email:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "An email address is required so we can reach you about your application.",
+        )
+    email = payload.borrower.email.lower().strip()
+
+    # Refuse if there's already an account for this email. The user
+    # should sign in first; we return 409 so the frontend can route
+    # them to /login. We do NOT auto-link to an existing user from
+    # an unauthenticated request — that would let anyone open new
+    # applications under someone else's identity.
+    existing_user = (
+        await db.execute(select(UserModel).where(UserModel.email == email))
+    ).scalar_one_or_none()
+    if existing_user is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "An account with that email already exists — please sign in to "
+            "submit another application.",
+        )
+
+    # New borrower user. Password is optional in the apply payload
+    # for Phase 1b's "magic-link-first" UX; if absent, the account
+    # is magic-link-only until the borrower sets a password from
+    # their dashboard.
+    borrower_user = UserModel(
+        email=email,
+        name=payload.borrower.name or email.split("@", 1)[0],
+        role="borrower",
+        password_hash=hash_password(payload.borrower_password)
+        if getattr(payload, "borrower_password", None)
+        else None,
+    )
+    db.add(borrower_user)
+    await db.flush()
+
     try:
         klass = LoanClass(payload.loan_class)
     except ValueError:
@@ -217,6 +283,23 @@ async def borrower_apply(payload: BorrowerApplyIn, db: DbSessionDep) -> Borrower
     await db.commit()
     await db.refresh(loan)
 
+    # Sign the new borrower in immediately by setting the session
+    # cookie. Their next request to /borrower-portal/loans/{id}/status
+    # or /borrower-portal/loans/{id}/documents will then carry the
+    # cookie and pass the ownership gate.
+    from mkopo.config import get_settings as _get_settings
+
+    settings = _get_settings()
+    response.set_cookie(
+        key=SESSION_COOKIE,
+        value=issue_jwt(borrower_user),
+        max_age=settings.jwt_session_ttl_seconds,
+        httponly=True,
+        samesite="lax",
+        secure=settings.is_production,
+        path="/",
+    )
+
     return BorrowerApplyOut(
         loan_id=loan.id,
         reference=loan.reference,
@@ -231,22 +314,63 @@ async def borrower_apply(payload: BorrowerApplyIn, db: DbSessionDep) -> Borrower
 # ----- upload docs from the portal --------------------------------------
 
 
+async def _assert_borrower_owns_loan(
+    db: "AsyncSession", loan: Loan, user_email: str
+) -> None:
+    """Refuse the request if the signed-in borrower isn't the loan's
+    borrower party.
+
+    Closes the "anyone with a loan id can act on it" gap the audit
+    flagged earlier. The match is by email — same key the borrower
+    portal uses to identify the borrower across the application
+    form and the audit log.
+
+    Returns ``None`` on success (caller proceeds); raises HTTP 403
+    on mismatch. 403 (not 404) because the loan *does* exist; the
+    caller just isn't entitled to it. We don't differentiate
+    "wrong loan id" from "not your loan" in the message — both
+    look identical to a client we don't trust.
+    """
+    row = (
+        await db.execute(
+            select(Party.email)
+            .join(LoanParty, LoanParty.party_id == Party.id)
+            .where(
+                LoanParty.loan_id == loan.id,
+                LoanParty.role == PartyRole.BORROWER,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None or (row or "").lower().strip() != user_email.lower().strip():
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "This loan isn't associated with your account",
+        )
+
+
 @router.post(
     "/loans/{loan_id}/documents",
     status_code=status.HTTP_201_CREATED,
 )
 async def borrower_upload_document(
-    loan_id: uuid.UUID, db: DbSessionDep, file: UploadFile = File(...)
+    loan_id: uuid.UUID,
+    user: CurrentBorrowerDep,
+    db: DbSessionDep,
+    file: UploadFile = File(...),
 ) -> dict[str, object]:
     """Borrower attaches a document to their own loan.
 
     Same storage + PDF extraction pipeline as the internal upload —
     we just write a borrower-typed audit event so the case-file
     timeline reads "borrower attached X" rather than "user attached X".
+
+    Authz: caller must be the signed-in borrower AND the loan's
+    borrower party must be them. Both checks fire on every request.
     """
     loan = (await db.execute(select(Loan).where(Loan.id == loan_id))).scalar_one_or_none()
     if not loan:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Loan not found")
+    await _assert_borrower_owns_loan(db, loan, user.email)
     if not file.filename:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Filename required")
 
@@ -271,6 +395,8 @@ async def borrower_upload_document(
         text_content, extract_stats = extract_pdf_text(body)
         extract_stats = {**extract_stats, "method": "pypdf"}
 
+    import hashlib
+
     document = Document(
         loan_id=loan_id,
         filename=file.filename,
@@ -278,6 +404,10 @@ async def borrower_upload_document(
         storage_uri=uri,
         content_type=content_type,
         size_bytes=len(body),
+        # sha256 of the bytes — feeds materials hash so a borrower
+        # can't quietly swap their appraisal between approval and
+        # closing without it being detected.
+        content_hash=hashlib.sha256(body).hexdigest(),
         meta={"text_content": text_content, "extract": extract_stats},
     )
     db.add(document)
@@ -311,11 +441,18 @@ async def borrower_upload_document(
 
 
 @router.get("/loans/{loan_id}/status", response_model=BorrowerStatusOut)
-async def borrower_status(loan_id: uuid.UUID, db: DbSessionDep) -> BorrowerStatusOut:
-    """Borrower-facing status projection of their loan."""
+async def borrower_status(
+    loan_id: uuid.UUID, user: CurrentBorrowerDep, db: DbSessionDep
+) -> BorrowerStatusOut:
+    """Borrower-facing status projection of their loan.
+
+    Authz: requires a borrower session, and the loan's borrower
+    party must be the signed-in user. Mismatch → 403.
+    """
     loan = (await db.execute(select(Loan).where(Loan.id == loan_id))).scalar_one_or_none()
     if not loan:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Loan not found")
+    await _assert_borrower_owns_loan(db, loan, user.email)
 
     docs = (
         await db.execute(

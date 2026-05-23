@@ -126,6 +126,9 @@ async def loans_for_guarantor(
         .where(
             LoanParty.party_id == party_id,
             LoanParty.role == PartyRole.GUARANTOR,
+            # Soft-deleted loans are excluded from concentration —
+            # they no longer represent active risk on the guarantor.
+            Loan.deleted_at.is_(None),
         )
         .order_by(Loan.created_at.desc())
     )

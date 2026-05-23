@@ -84,6 +84,7 @@ async def comparable_loans(
         LEFT JOIN borrower b ON b.loan_id = l.id
         WHERE l.embedding IS NOT NULL
           AND l.id <> :loan_id
+          AND l.deleted_at IS NULL
         ORDER BY l.embedding <=> src.embedding
         LIMIT :limit
         """
@@ -136,6 +137,7 @@ async def search_loans_by_text(
         FROM loans l
         LEFT JOIN borrower b ON b.loan_id = l.id
         WHERE l.embedding IS NOT NULL
+          AND l.deleted_at IS NULL
         ORDER BY l.embedding <=> :q
         LIMIT :limit
         """

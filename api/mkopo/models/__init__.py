@@ -28,6 +28,7 @@ from mkopo.models.loan import (
     LoanStage,
     LoanType,
 )
+from mkopo.models.magic_link import MagicLink
 from mkopo.models.party import LoanParty, Party, PartyRole, PartyType
 from mkopo.models.user import User
 
@@ -49,6 +50,7 @@ __all__ = [
     "LoanParty",
     "LoanStage",
     "LoanType",
+    "MagicLink",
     "Message",
     "MessageDirection",
     "Party",

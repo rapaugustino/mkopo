@@ -77,30 +77,20 @@ def _check_resend(settings: Settings) -> CheckResult:
         return CheckResult(
             name="Resend (email)",
             status="degraded",
-            message="RESEND_API_KEY not set — the intake agent's email step will fail at send time",
+            message=(
+                "RESEND_API_KEY not set — outbound email (magic links, "
+                "transactional notifications) will fail at send time"
+            ),
             hint=(
                 "Set RESEND_API_KEY in .env. Confirm the domain in "
                 f"RESEND_FROM_ADDRESS ({settings.resend_from_address}) is "
                 "verified at https://resend.com/domains."
             ),
         )
-    if not settings.resend_webhook_secret or settings.resend_webhook_secret.startswith("whsec_xxxxx"):
-        return CheckResult(
-            name="Resend (email)",
-            status="degraded",
-            message=(
-                f"outbound from {settings.resend_from_address} configured; "
-                "RESEND_WEBHOOK_SECRET not set so inbound replies are unauthenticated"
-            ),
-            hint=(
-                "Set RESEND_WEBHOOK_SECRET to the value Resend gives you when "
-                "you create the inbound endpoint — see docs/DEPLOY.md §Email."
-            ),
-        )
     return CheckResult(
         name="Resend (email)",
         status="ok",
-        message=f"from {settings.resend_from_address}, inbound webhook authenticated",
+        message=f"outbound from {settings.resend_from_address}",
     )
 
 

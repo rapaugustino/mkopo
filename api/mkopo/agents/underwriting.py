@@ -495,6 +495,14 @@ async def persist(state: UnderwritingState) -> UnderwritingState:
         # by-id instead of INSERT avoids the duplicate-pk error and
         # keeps the row's ``id`` stable for any AgentStep rows that
         # already point at it.
+        # Snapshot the materials hash — what fed this underwriting
+        # recommendation. Stage-transition guard later compares the
+        # current hash to this one; mismatch means materials drifted
+        # and the recommendation is stale.
+        from mkopo.services.materials_hash import compute_materials_hash
+
+        materials_hash = await compute_materials_hash(session, loan_id)
+
         await session.execute(
             update(AgentRun)
             .where(AgentRun.id == summary.agent_run_id)
@@ -506,6 +514,7 @@ async def persist(state: UnderwritingState) -> UnderwritingState:
                     "risk_band": risk_band,
                     "n_sections": len(summary.sections),
                     "n_flags": len(summary.risk_flags),
+                    "materials_hash": materials_hash,
                     "has_blocking_failures": has_blocking_failures(
                         [_outcome_from_flag(f) for f in summary.risk_flags]
                     ),

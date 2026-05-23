@@ -110,6 +110,12 @@ async def upload_document(
 
     text_content, extract_stats = _extract_text(body=body, content_type=content_type)
 
+    # sha256 of the exact bytes that were uploaded. Feeds the materials
+    # hash so a post-decision swap of the underlying file is detectable
+    # without re-reading the bytes from S3. Cheap (in-memory) so this
+    # adds no observable latency to the upload.
+    import hashlib
+
     document = Document(
         loan_id=loan_id,
         filename=file.filename,
@@ -117,6 +123,7 @@ async def upload_document(
         storage_uri=uri,
         content_type=content_type,
         size_bytes=len(body),
+        content_hash=hashlib.sha256(body).hexdigest(),
         meta={"text_content": text_content, "extract": extract_stats},
     )
     db.add(document)

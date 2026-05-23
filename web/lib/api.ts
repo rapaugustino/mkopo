@@ -9,7 +9,8 @@ export type LoanStage =
   | "closing"
   | "servicing"
   | "declined"
-  | "approved";
+  | "approved"
+  | "withdrawn";
 
 export type IntakeStatus = "running" | "awaiting_approval" | "complete" | "failed";
 
@@ -29,6 +30,18 @@ export interface Borrower {
 }
 
 export type AutonomyLevel = "assisted" | "autonomous";
+
+/** Materials-hash status for a loan. ``drifted`` is true when the
+ *  inputs that fed the last decision (extractions, document content,
+ *  borrower-supplied meta, guarantor list) have changed since the
+ *  decision agent ran. The UI surfaces this as a prominent banner —
+ *  the system refuses forward transitions until the decision agent
+ *  is re-run against the current materials. */
+export interface MaterialsStatus {
+  drifted: boolean;
+  current_hash: string;
+  decision_hash: string | null;
+}
 export type LoanClass = "business" | "personal";
 
 export interface Loan {
@@ -530,6 +543,8 @@ export const api = {
     }),
   getAllowedTransitions: (loanId: string) =>
     request<Record<string, string | null>>(`/loans/${loanId}/transitions`),
+  getMaterialsStatus: (loanId: string) =>
+    request<MaterialsStatus>(`/loans/${loanId}/materials/status`),
   setAutonomy: (loanId: string, level: AutonomyLevel, reason: string) =>
     request<Loan>(`/loans/${loanId}/autonomy`, {
       method: "PATCH",

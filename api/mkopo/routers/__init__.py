@@ -7,6 +7,8 @@ import it directly via `from mkopo.routers.auth import ...`.
 
 from mkopo.routers import (
     agents,
+    borrower_auth,
+    borrower_chat,
     borrower_portal,
     documents,
     evals,
@@ -14,11 +16,13 @@ from mkopo.routers import (
     observability,
     parties,
     review,
-    webhooks,
+    staff_chat,
 )
 
 __all__ = [
     "agents",
+    "borrower_auth",
+    "borrower_chat",
     "borrower_portal",
     "documents",
     "evals",
@@ -26,5 +30,5 @@ __all__ = [
     "observability",
     "parties",
     "review",
-    "webhooks",
+    "staff_chat",
 ]

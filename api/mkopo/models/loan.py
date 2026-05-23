@@ -30,6 +30,13 @@ class LoanStage(enum.StrEnum):
     SERVICING = "servicing"
     DECLINED = "declined"
     APPROVED = "approved"
+    # Terminal stage when the borrower self-cancels their application.
+    # Set by ``POST /borrower-auth/me/loans/{id}/withdraw``. Distinct
+    # from ``DECLINED`` because the lender didn't reject — the
+    # borrower walked away. Tracked separately for HMDA reporting
+    # (different "application result" code) and so the timeline reads
+    # "Withdrawn by borrower" rather than "Declined".
+    WITHDRAWN = "withdrawn"
 
 
 class LoanType(enum.StrEnum):
@@ -89,15 +96,26 @@ class AutonomyLevel(enum.StrEnum):
 
 
 # Legal stage transitions. Centralizing this prevents illegal states.
+#
+# Withdrawal can happen from any non-terminal stage — the borrower can
+# walk away from their application at any point before it funds. After
+# CLOSING the loan is committed and withdrawal is no longer a unilateral
+# borrower action; that becomes a payoff / servicing-level operation.
 VALID_TRANSITIONS: dict[LoanStage, set[LoanStage]] = {
-    LoanStage.INTAKE: {LoanStage.UNDERWRITING, LoanStage.DECLINED},
-    LoanStage.UNDERWRITING: {LoanStage.DECISION, LoanStage.DECLINED},
-    LoanStage.DECISION: {LoanStage.CONDITIONS, LoanStage.APPROVED, LoanStage.DECLINED},
-    LoanStage.CONDITIONS: {LoanStage.CLOSING, LoanStage.DECLINED},
-    LoanStage.APPROVED: {LoanStage.CLOSING},
+    LoanStage.INTAKE: {LoanStage.UNDERWRITING, LoanStage.DECLINED, LoanStage.WITHDRAWN},
+    LoanStage.UNDERWRITING: {LoanStage.DECISION, LoanStage.DECLINED, LoanStage.WITHDRAWN},
+    LoanStage.DECISION: {
+        LoanStage.CONDITIONS,
+        LoanStage.APPROVED,
+        LoanStage.DECLINED,
+        LoanStage.WITHDRAWN,
+    },
+    LoanStage.CONDITIONS: {LoanStage.CLOSING, LoanStage.DECLINED, LoanStage.WITHDRAWN},
+    LoanStage.APPROVED: {LoanStage.CLOSING, LoanStage.WITHDRAWN},
     LoanStage.CLOSING: {LoanStage.SERVICING},
     LoanStage.SERVICING: set(),
     LoanStage.DECLINED: set(),
+    LoanStage.WITHDRAWN: set(),
 }
 
 
@@ -195,6 +213,16 @@ class Loan(Base):
     # kNN. Populated by the underwriting agent's persist step. 1024 dims
     # to match config.embeddings_dimensions + migration 0003.
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1024), nullable=True)
+
+    # Soft-delete + retention. ``deleted_at`` is set when the borrower
+    # requests erasure; operational queries filter ``IS NULL``.
+    # ``retention_until`` is the earliest legal hard-delete time
+    # (Reg B/ECOA: 25mo after withdrawal/decline; HMDA: 5y after
+    # approval). The retention sweep job hard-deletes rows past
+    # ``retention_until``. Both nullable; ``deleted_at IS NULL``
+    # is the normal happy-path active state.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retention_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # Relationships
     owner: Mapped["User | None"] = relationship(lazy="joined")

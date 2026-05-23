@@ -15,6 +15,8 @@ import { api, type AuditEvent, type IntakeInterrupt, type Loan } from "@/lib/api
 import { humanizeLoanType, humanizePartyType, titleCase } from "@/lib/humanize";
 import { useAgentRun } from "@/lib/useAgentRun";
 import { AgentProgress } from "@/app/components/AgentProgress";
+import { MaterialsDriftBanner } from "./MaterialsDriftBanner";
+import { StaffChat } from "./StaffChat";
 import { BrandHeader } from "@/app/components/BrandHeader";
 import { PrimaryButton } from "@/app/components/PrimaryButton";
 import { SecondaryButton } from "@/app/components/SecondaryButton";
@@ -33,7 +35,7 @@ interface PageProps {
   params: Promise<{ id: string }>;
 }
 
-type Tab = "activity" | "underwriting" | "decision" | "trace";
+type Tab = "activity" | "underwriting" | "decision" | "trace" | "assistant";
 const TABS: { id: Tab; label: string }[] = [
   { id: "activity", label: "Activity" },
   { id: "underwriting", label: "Underwriting" },
@@ -42,6 +44,10 @@ const TABS: { id: Tab; label: string }[] = [
   // calls. Distinct from "Activity", which is the human-language
   // narrative; Trace is the technical receipt.
   { id: "trace", label: "Trace" },
+  // Staff-facing copilot — search the pipeline, override extractions,
+  // advance stages, message the borrower, by typing what you want.
+  // Mirrors the borrower-side chat surface on /apply/[id].
+  { id: "assistant", label: "Assistant" },
 ];
 
 /** Outline icon-only button used for prev/next loan navigation in the
@@ -421,6 +427,12 @@ export default function LoanPage({ params }: PageProps) {
 
       <GuarantorChips loan={loan} />
 
+      {/* Materials-drift banner. Fires loudly when the inputs that
+          fed the latest decision have changed — invalidates forward
+          transitions until the decision agent is re-run. Self-hides
+          on pre-decision stages where drift can't matter. */}
+      <MaterialsDriftBanner loanId={id} stage={loan.stage} />
+
       {/* Live progress trail from the SSE stream. Two streams can be
           active in this view: the initial intake run, then a resume
           run after the underwriter approves the draft. Render whichever
@@ -477,6 +489,7 @@ export default function LoanPage({ params }: PageProps) {
       {activeTab === "underwriting" && <UnderwritingWorkspace loanId={id} />}
       {activeTab === "decision" && <CreditDecisionPanel loanId={id} />}
       {activeTab === "trace" && <LoanTrace loanId={id} />}
+      {activeTab === "assistant" && <StaffChat loanId={id} />}
 
       {pendingInterrupt && (
         <IntakeApprovalModal

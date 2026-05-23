@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { Toaster } from "sonner";
 
+import { AuthProvider } from "./borrower/AuthProvider";
+
 /**
  * App-wide TanStack Query provider. The QueryClient is created lazily in
  * useState so it's stable across renders — important because Next.js dev mode
@@ -26,7 +28,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      {children}
+      {/* AuthProvider wraps the borrower auth state at app root. The
+          staff/internal pages don't consume ``useAuth``, but the
+          provider's initial /me call is one cheap fetch — quiet 401
+          when there's no cookie, no UI impact on staff routes. */}
+      <AuthProvider>{children}</AuthProvider>
       {/* Toasts are routed through sonner. We render the Toaster once at
           the app root so any mutation, hook, or component can call
           `toast.success(...)` / `toast.error(...)` and get a consistent

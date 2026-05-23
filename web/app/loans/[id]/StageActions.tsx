@@ -43,6 +43,8 @@ const FORWARD: Record<LoanStage, { to: LoanStage; label: string; Icon: React.Com
   closing: { to: "servicing", label: "Mark as servicing", Icon: IconBuildingBank },
   servicing: null,
   declined: null,
+  // Terminal — withdrawn loans aren't advanced from the staff side.
+  withdrawn: null,
 };
 
 /** Per-stage decline availability. Servicing / declined / approved-after-closing
@@ -56,6 +58,8 @@ const CAN_DECLINE: Record<LoanStage, boolean> = {
   closing: false,
   servicing: false,
   declined: false,
+  // Borrower-initiated terminal state; staff can't re-decline.
+  withdrawn: false,
 };
 
 /**

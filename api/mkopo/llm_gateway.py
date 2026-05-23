@@ -13,14 +13,14 @@ import hashlib
 import json
 import time
 import uuid
-from typing import TypeVar
+from dataclasses import dataclass, field
+from typing import Any, TypeVar
 
 import structlog
 from anthropic import AsyncAnthropic
 from anthropic.types import Message as AnthropicMessage
 from pydantic import BaseModel, ValidationError
 
-from mkopo.agents.context import current_thread_id
 from mkopo.config import get_settings
 from mkopo.db import get_session
 from mkopo.models.eval import LLMCall
@@ -28,6 +28,37 @@ from mkopo.models.eval import LLMCall
 logger = structlog.get_logger()
 
 T = TypeVar("T", bound=BaseModel)
+
+
+@dataclass(frozen=True)
+class ToolCall:
+    """A single tool-use block from the LLM. Anthropic's tool-use API
+    returns these inside the assistant's content; the agent loop
+    executes each and feeds the result back as a ``tool_result``."""
+
+    id: str
+    name: str
+    input: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ToolUseResponse:
+    """Decoded shape of one tool-use round-trip.
+
+    ``text`` is the assistant's prose when present (None if the
+    model went straight to a tool call). ``tool_calls`` is the list
+    of tools the model wants invoked — usually 1, sometimes 0,
+    occasionally multiple parallel calls when the LLM chooses to
+    fan out. ``assistant_message`` is the raw turn ready to be
+    appended to the messages array for the next round.
+    ``stop_reason`` tells the agent loop whether to keep going
+    (``"tool_use"``) or stop (``"end_turn"``).
+    """
+
+    text: str | None
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    assistant_message: dict[str, Any] = field(default_factory=dict)
+    stop_reason: str | None = None
 
 
 class LLMCallFailedError(Exception):
@@ -238,6 +269,135 @@ class LLMGateway:
             f"Return ONLY a valid JSON object that conforms to the schema."
         )
 
+    async def call_with_tools(
+        self,
+        *,
+        model: str,
+        system: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        max_tokens: int = 4096,
+        temperature: float = 0.2,
+        call_id: str | None = None,
+    ) -> "ToolUseResponse":
+        """Multi-turn chat with Anthropic tool-use.
+
+        Returns a :class:`ToolUseResponse` carrying:
+
+          - the assistant's ``text`` content (None if the model
+            chose to call a tool instead of replying with prose)
+          - any ``tool_calls`` the model wants the caller to execute
+          - the raw assistant turn (id, role, content) — the agent
+            loop needs this to keep building the conversation history
+          - the ``stop_reason`` so the caller can tell "model wants a
+            tool result" (``tool_use``) from "model is done"
+            (``end_turn``)
+
+        The agent loop is then: call → if tool_calls, execute each,
+        append a ``tool_result`` user-turn, call again. Loop until
+        ``stop_reason == "end_turn"`` or a safety budget runs out.
+
+        We log + persist via ``_record_call`` like ``call_structured``
+        does. The status string is ``"tool_use"`` when the model
+        called tools, ``"ok"`` when it produced text. ``schema_name``
+        is set to ``"tool_use:" + tool_names`` so the observability
+        table can filter for tool-using calls cleanly.
+        """
+        call_id = call_id or str(uuid.uuid4())
+        tool_names = ",".join(t["name"] for t in tools) if tools else ""
+        started_at = time.monotonic()
+        try:
+            response: AnthropicMessage = await self._client.messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                system=system,
+                tools=tools,  # type: ignore[arg-type]
+                messages=messages,  # type: ignore[arg-type]
+            )
+        except Exception as e:
+            elapsed = time.monotonic() - started_at
+            inner = (
+                getattr(e, "message", None) or str(e) or repr(e) or e.__class__.__name__
+            )
+            await self._record_call(
+                call_id=call_id,
+                model=model,
+                system=system,
+                user="",  # multi-turn — full transcript not single-string
+                response_text="",
+                schema_name=f"tool_use:{tool_names}" if tool_names else "tool_use",
+                status="error",
+                attempt=0,
+                elapsed_seconds=elapsed,
+                error_reason=f"{e.__class__.__name__}: {inner}",
+                error_detail=repr(e),
+            )
+            raise LLMCallFailedError(
+                f"LLM tool-use call failed: {inner}",
+                attempts=1,
+                last_error=str(inner),
+            ) from e
+        elapsed = time.monotonic() - started_at
+
+        # Extract text + tool_use blocks. Anthropic's response.content
+        # is a list of blocks: text blocks have ``.text``, tool_use
+        # blocks have ``.id``, ``.name``, ``.input``.
+        text_parts: list[str] = []
+        tool_calls: list[ToolCall] = []
+        for block in response.content:
+            btype = getattr(block, "type", None)
+            if btype == "text":
+                text_parts.append(getattr(block, "text", ""))
+            elif btype == "tool_use":
+                tool_calls.append(
+                    ToolCall(
+                        id=getattr(block, "id", ""),
+                        name=getattr(block, "name", ""),
+                        input=dict(getattr(block, "input", {}) or {}),
+                    )
+                )
+
+        # Best-effort serialise the raw assistant turn into the dict
+        # shape the next request needs as a message. Anthropic's SDK
+        # returns the typed object; we reconstruct the JSON-ish
+        # form to feed back in.
+        assistant_message: dict[str, Any] = {
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": getattr(b, "text", "")}
+                if getattr(b, "type", "") == "text"
+                else {
+                    "type": "tool_use",
+                    "id": getattr(b, "id", ""),
+                    "name": getattr(b, "name", ""),
+                    "input": dict(getattr(b, "input", {}) or {}),
+                }
+                for b in response.content
+            ],
+        }
+
+        await self._record_call(
+            call_id=call_id,
+            model=model,
+            system=system,
+            user="",  # multi-turn — see note above
+            response_text="\n".join(text_parts),
+            schema_name=f"tool_use:{tool_names}" if tool_names else "tool_use",
+            status="tool_use" if tool_calls else "ok",
+            attempt=0,
+            elapsed_seconds=elapsed,
+            input_tokens=getattr(response.usage, "input_tokens", None),
+            output_tokens=getattr(response.usage, "output_tokens", None),
+        )
+
+        return ToolUseResponse(
+            text="\n".join(text_parts) if text_parts else None,
+            tool_calls=tool_calls,
+            assistant_message=assistant_message,
+            stop_reason=getattr(response, "stop_reason", None),
+        )
+
     async def _record_call(
         self,
         *,
@@ -304,12 +464,26 @@ class LLMGateway:
                         # ContextVar — populated when this call is
                         # made inside ``agent_run_context``. Lets the
                         # observability UI group calls per run.
-                        thread_id=current_thread_id(),
+                        # Lazy-import to dodge a circular: agents.context
+                        # is part of mkopo.agents, whose package __init__
+                        # imports decision.py which imports this gateway.
+                        thread_id=_current_thread_id(),
                     )
                 )
         except Exception:
             # Don't let observability break the calling agent.
             logger.exception("llm_call_persist_failed", call_id=call_id)
+
+
+def _current_thread_id() -> str | None:
+    """Lazy accessor for the agent context's thread id. Wrapped in a
+    local helper because importing ``mkopo.agents.context`` at module
+    top-level triggers ``mkopo.agents.__init__`` → ``decision.py`` →
+    back into this module, a classic circular-import deadlock.
+    """
+    from mkopo.agents.context import current_thread_id
+
+    return current_thread_id()
 
 
 def _truncate(s: str | None, max_len: int) -> str | None:

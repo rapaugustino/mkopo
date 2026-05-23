@@ -79,6 +79,7 @@ const STAGE_LABEL: Record<LoanStage, string> = {
   servicing: "Servicing",
   declined: "Declined",
   approved: "Approved",
+  withdrawn: "Withdrawn",
 };
 
 export const humanizeStage = (s: LoanStage | string | null | undefined): string =>
@@ -209,6 +210,9 @@ const AUDIT_ACTION_LABEL: Record<string, string> = {
   internal_note: "Internal note",
   borrower_reply: "Borrower reply",
   document_uploaded: "Document uploaded",
+  document_accessed: "Document accessed",
+  borrower_field_updated: "Borrower updated a field",
+  borrower_erasure_requested: "Borrower requested erasure",
   condition_added: "Condition added",
   condition_satisfied: "Condition satisfied",
   condition_waived: "Condition waived",

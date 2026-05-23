@@ -19,6 +19,8 @@ from mkopo.config import get_settings
 from mkopo.db import get_engine
 from mkopo.routers import (
     agents,
+    borrower_auth,
+    borrower_chat,
     borrower_portal,
     documents,
     evals,
@@ -26,7 +28,7 @@ from mkopo.routers import (
     observability,
     parties,
     review,
-    webhooks,
+    staff_chat,
 )
 from mkopo.startup_check import run_startup_checks
 
@@ -131,5 +133,7 @@ app.include_router(parties.router, prefix="/api/v1")
 app.include_router(review.router, prefix="/api/v1")
 app.include_router(evals.router, prefix="/api/v1")
 app.include_router(observability.router, prefix="/api/v1")
+app.include_router(borrower_auth.router, prefix="/api/v1")
+app.include_router(borrower_chat.router, prefix="/api/v1")
 app.include_router(borrower_portal.router, prefix="/api/v1")
-app.include_router(webhooks.router, prefix="/api/v1")
+app.include_router(staff_chat.router, prefix="/api/v1")

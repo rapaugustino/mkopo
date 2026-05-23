@@ -354,6 +354,14 @@ async def persist(state: DecisionState) -> DecisionState:
                 )
             )
 
+        # Snapshot the materials hash so the stage-transition guard
+        # can later refuse to advance the loan if anything that fed
+        # this decision has changed. Computed inside the same session
+        # so all SELECTs see a consistent view.
+        from mkopo.services.materials_hash import compute_materials_hash
+
+        materials_hash = await compute_materials_hash(session, loan_id)
+
         # The AgentRun row was created by the streaming layer at the
         # start of this run; we update it here with the final payload.
         # UPDATE-by-id instead of INSERT keeps the row's id stable for
@@ -371,6 +379,7 @@ async def persist(state: DecisionState) -> DecisionState:
                     "n_conditions": len(decision.conditions),
                     "has_term_sheet": decision.term_sheet is not None,
                     "has_aal": decision.adverse_action_letter is not None,
+                    "materials_hash": materials_hash,
                 },
             )
         )

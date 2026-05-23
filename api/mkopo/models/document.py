@@ -47,6 +47,14 @@ class Document(Base):
     storage_uri: Mapped[str] = mapped_column(String(1024), nullable=False)
     content_type: Mapped[str] = mapped_column(String(128), nullable=False)
     size_bytes: Mapped[int] = mapped_column(nullable=False)
+    # sha256(bytes) recorded at upload time. Feeds the materials hash
+    # so a post-decision document swap is detectable. Nullable for
+    # backwards compatibility with rows uploaded before 0011_; the
+    # materials-hash service treats null as "unknown content" which
+    # forces a re-underwriting if a decision was made with such a row
+    # in scope (conservative: better to ask than to let a quiet
+    # tamper through).
+    content_hash: Mapped[str | None] = mapped_column(String(64))
     meta: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
 
     loan: Mapped["Loan"] = relationship(back_populates="documents")

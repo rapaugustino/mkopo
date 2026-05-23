@@ -41,7 +41,17 @@ router = APIRouter(prefix="/loans", tags=["loans"])
 
 @router.get("", response_model=list[LoanOut])
 async def list_loans(user: CurrentUserDep, db: DbSessionDep) -> list[Loan]:
-    result = await db.execute(select(Loan).order_by(Loan.created_at.desc()).limit(100))
+    # ``deleted_at IS NULL`` keeps soft-deleted loans out of the
+    # internal pipeline view — once a borrower requests erasure, the
+    # loan disappears from operational surfaces immediately even
+    # though the row sticks around for the regulatory retention
+    # window. Cited by the partial index ``ix_loans_active``.
+    result = await db.execute(
+        select(Loan)
+        .where(Loan.deleted_at.is_(None))
+        .order_by(Loan.created_at.desc())
+        .limit(100)
+    )
     return list(result.scalars().all())
 
 
@@ -196,6 +206,47 @@ async def list_allowed_transitions(
     if not loan:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Loan not found")
     return await loan_service.allowed_transitions(db, loan)
+
+
+class MaterialsStatus(BaseModel):
+    """Materials-hash drift status for a loan.
+
+    Powers the "your decision is stale" banner. Exposed as its own
+    endpoint (rather than folded into ``GET /loans/{id}``) so the UI
+    can poll it cheaply and refresh the banner without re-fetching
+    the entire loan blob — the moment an extraction is overridden or
+    a document re-uploaded, the next poll flips ``drifted`` true.
+
+    ``decision_hash`` is ``None`` until the decision agent has run
+    at least once. ``drifted`` is therefore ``False`` for pre-
+    decision loans even if their materials are churning — there's
+    nothing to drift from.
+    """
+
+    drifted: bool
+    current_hash: str
+    decision_hash: str | None
+
+
+@router.get("/{loan_id}/materials/status", response_model=MaterialsStatus)
+async def materials_status(
+    loan_id: uuid.UUID, user: CurrentUserDep, db: DbSessionDep
+) -> MaterialsStatus:
+    """Has anything fed-into-the-decision changed since the decision
+    agent last ran?
+
+    Used by the loan detail page to render a prominent drift banner.
+    Cheap (a few indexed SELECTs + a sha256) so safe to poll.
+    """
+    loan = await loan_service.get_loan(db, loan_id)
+    if not loan:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Loan not found")
+    from mkopo.services.materials_hash import materials_drift_detected
+
+    drifted, current_hash, decision_hash = await materials_drift_detected(db, loan_id)
+    return MaterialsStatus(
+        drifted=drifted, current_hash=current_hash, decision_hash=decision_hash
+    )
 
 
 @router.get("/{loan_id}/extractions", response_model=list[ExtractionOut])

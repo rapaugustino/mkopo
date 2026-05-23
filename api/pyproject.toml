@@ -44,6 +44,10 @@ dependencies = [
   "openai>=2.37.0",
   "tiktoken>=0.13.0",
   "pypdf>=6.12.0",
+  # Auth — borrower self-service identity. bcrypt for password hashing,
+  # pyjwt for short-lived session tokens in httpOnly cookies.
+  "bcrypt>=4.2.0",
+  "pyjwt>=2.10.0",
 ]
 
 [project.optional-dependencies]

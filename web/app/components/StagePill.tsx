@@ -42,6 +42,10 @@ const STAGE_META: Record<
   servicing: { label: "Servicing", variant: "success", Icon: IconBuildingBank },
   approved: { label: "Approved", variant: "success", Icon: IconCheck },
   declined: { label: "Declined", variant: "danger", Icon: IconX },
+  // Borrower-initiated withdrawal — terminal but distinct from
+  // ``declined`` (the lender didn't reject). Neutral pill so it
+  // reads as "closed by choice", not as a failure outcome.
+  withdrawn: { label: "Withdrawn", variant: "neutral", Icon: IconX },
 };
 
 interface Props {
