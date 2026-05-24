@@ -17,6 +17,7 @@ from mkopo.db import get_db
 from mkopo.models import User
 from mkopo.routers.auth import CurrentUser, require_user
 from mkopo.services.auth_service import SESSION_COOKIE, decode_jwt
+from mkopo.services.redis_client import is_jti_revoked
 
 # A logged-in caller (dev: bearer-token auth; production: swap require_user).
 CurrentUserDep = Annotated[CurrentUser, Depends(require_user)]
@@ -51,6 +52,14 @@ async def require_borrower(
 
     claims = decode_jwt(session_cookie)
     if claims is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Session invalid")
+
+    # Token revocation check. After ``/logout`` we add the jti to a
+    # Redis blacklist with TTL = remaining token lifetime; this is
+    # the only way to invalidate a single session token between
+    # issuance and natural expiry. Degrades open on Redis failure
+    # (see ``redis_client`` module docstring for the rationale).
+    if await is_jti_revoked(claims.jti):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Session invalid")
 
     user = (

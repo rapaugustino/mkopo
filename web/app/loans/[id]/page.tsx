@@ -25,6 +25,7 @@ import { StagePill } from "@/app/components/StagePill";
 import { AutonomyToggle } from "./AutonomyToggle";
 import { CaseFileTimeline } from "./CaseFileTimeline";
 import { CreditDecisionPanel } from "./CreditDecisionPanel";
+import { OwnerPicker } from "./OwnerPicker";
 import { LoanTrace } from "./LoanTrace";
 import { DocsPanel } from "./DocsPanel";
 import { IntakeApprovalModal } from "./IntakeApprovalModal";
@@ -351,9 +352,13 @@ export default function LoanPage({ params }: PageProps) {
   }
   if (!loan) return <LoanDetailSkeleton />;
 
-  const ownerLine = loan.owner ? ` · ${loan.owner.name} (owner)` : "";
+  // Owner used to live in the subtitle as "· Jane Doe (owner)" — now
+  // it's an interactive control rendered below the header alongside
+  // the guarantor chips. Keeping it out of the static subtitle means
+  // the badge can carry the reassign affordance without competing with
+  // the loan reference + borrower name for visual weight.
   const classLabel = loan.loan_class === "personal" ? "Personal" : "Business";
-  const subTitle = `${classLabel} · ${humanizeLoanType(loan.loan_type)} loan · $${Number(loan.amount).toLocaleString()}${ownerLine}`;
+  const subTitle = `${classLabel} · ${humanizeLoanType(loan.loan_type)} loan · $${Number(loan.amount).toLocaleString()}`;
 
   return (
     <div className="flex flex-col gap-4">
@@ -376,9 +381,11 @@ export default function LoanPage({ params }: PageProps) {
         }
         actions={
           <>
-            {/* Back-to-pipeline + prev/next loan nav. This is the
-                core "moving around without thinking about it" affordance —
-                replaces the previous dead Docs/Open-file buttons. */}
+            {/* NAVIGATION group — "where am I, where can I go".
+                Visually separated from the action group on the
+                right by a thin vertical divider so it's clear that
+                Back + Prev/Next don't change the loan, they just
+                move the viewer. */}
             <Link
               href="/"
               className="flex items-center gap-1.5 rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-2.5 py-1.5 text-[12px] text-[var(--color-text-primary)] hover:bg-[var(--color-background-secondary)]"
@@ -403,11 +410,27 @@ export default function LoanPage({ params }: PageProps) {
               />
             </div>
 
-            {/* "Run intake" is the demo's main "kick off the agent"
-                affordance. Only relevant while the loan is still in
-                intake — past that point the workspace tab has its own
-                "Re-run agent" buttons, so we hide this to keep the
-                header uncluttered. */}
+            {/* Vertical divider — separates "moving around" from
+                "changing this loan". Without it the two groups blur
+                into a single button row and the user can't tell
+                which clicks are reversible (nav) vs. which mutate
+                state (run intake, stage transition). */}
+            {/* Divider — present any time the actions group will have
+                content (i.e. unless we're on the decision stage where
+                the StageActions component renders nothing). The check
+                mirrors StageActions's null-when-decision behaviour. */}
+            {loan.stage !== "decision" && (
+              <span
+                aria-hidden
+                className="mx-1 h-5 w-px"
+                style={{ background: "var(--color-border-tertiary)" }}
+              />
+            )}
+
+            {/* ACTIONS group — "things that change this loan".
+                "Run intake" only renders during intake stage; past
+                that point the underwriting/decision tabs own their
+                own per-tab actions. */}
             {loan.stage === "intake" && (
               <PrimaryButton
                 Icon={IconSparkles}
@@ -425,7 +448,10 @@ export default function LoanPage({ params }: PageProps) {
         }
       />
 
-      <GuarantorChips loan={loan} />
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <OwnerPicker loan={loan} />
+        <GuarantorChips loan={loan} />
+      </div>
 
       {/* Materials-drift banner. Fires loudly when the inputs that
           fed the latest decision have changed — invalidates forward

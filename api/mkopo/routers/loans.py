@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel
+from fastapi import APIRouter, BackgroundTasks, HTTPException, status
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
+from mkopo.config import get_settings
 from mkopo.deps import CurrentUserDep, DbSessionDep
 from mkopo.models import (
     AuditEvent,
@@ -18,6 +19,7 @@ from mkopo.models import (
     Party,
     PartyRole,
     PartyType,
+    User,
 )
 from mkopo.schemas import (
     AskRequest,
@@ -33,8 +35,10 @@ from mkopo.schemas import (
 )
 from mkopo.services import loans as loan_service
 from mkopo.services.audit import Actor, record
+from mkopo.services.auth_service import mint_magic_link
 from mkopo.services.comparables import comparable_loans
 from mkopo.services.qa import answer_question
+from mkopo.tools.comms import send_magic_link_email
 
 router = APIRouter(prefix="/loans", tags=["loans"])
 
@@ -56,7 +60,31 @@ async def list_loans(user: CurrentUserDep, db: DbSessionDep) -> list[Loan]:
 
 
 @router.post("", response_model=LoanOut, status_code=status.HTTP_201_CREATED)
-async def create_loan(payload: LoanCreate, user: CurrentUserDep, db: DbSessionDep) -> Loan:
+async def create_loan(
+    payload: LoanCreate,
+    user: CurrentUserDep,
+    db: DbSessionDep,
+    background_tasks: BackgroundTasks,
+) -> Loan:
+    """Staff-initiated loan creation.
+
+    Side effects beyond the loan row itself:
+
+      - **Borrower account**: ensures a ``users`` row exists for
+        ``payload.borrower_email`` (creates one with no password if
+        not). The account starts magic-link-only — the borrower can
+        set a password later from /account.
+
+      - **Invite email**: mints a 7-day ``loan_invite`` magic link
+        and emails it (Resend background task). The link drops the
+        borrower into the borrower portal already signed in,
+        landing on /apply/[loan_id] where they can upload the
+        required documents.
+
+    Without this, a manually-created loan had no path for the
+    borrower to ever discover their application — the loan officer
+    would have had to send a one-off email out-of-band.
+    """
     from mkopo.models import LoanClass
 
     # Validate the loan_class on the boundary — the inbound payload
@@ -87,15 +115,76 @@ async def create_loan(payload: LoanCreate, user: CurrentUserDep, db: DbSessionDe
         await db.flush()
         db.add(LoanParty(loan_id=loan.id, party_id=party.id, role=PartyRole(p.role)))
 
+    # Ensure a borrower User row exists for this email so the invite
+    # link consume path can sign them in. ``role='borrower'``,
+    # password_hash=None (magic-link-only until they choose to set one).
+    settings = get_settings()
+    borrower_email = payload.borrower_email.lower().strip()
+    borrower_user = (
+        await db.execute(select(User).where(User.email == borrower_email))
+    ).scalar_one_or_none()
+    invite_minted = None
+    if borrower_user is None:
+        # Best-effort name from the borrower party payload — the
+        # parties array typically carries the borrower's name first.
+        borrower_name = (
+            next(
+                (p.name for p in payload.parties if p.role == "borrower"),
+                None,
+            )
+            or borrower_email.split("@", 1)[0]
+        )
+        borrower_user = User(
+            email=borrower_email,
+            name=borrower_name,
+            role="borrower",
+            password_hash=None,
+        )
+        db.add(borrower_user)
+        await db.flush()
+
+    # Mint the invite. Long TTL because borrowers may not check
+    # email for days; single-use semantics keep it safe enough.
+    if borrower_user.deleted_at is None:
+        invite_minted = await mint_magic_link(
+            db,
+            user=borrower_user,
+            purpose="loan_invite",
+            expires_in_seconds=settings.magic_link_loan_invite_ttl_seconds,
+        )
+
     await record(
         db,
         loan_id=loan.id,
         actor=Actor.user(user.user_id),
         action="loan_created",
-        payload={"amount": str(payload.amount), "loan_type": payload.loan_type.value},
+        payload={
+            "amount": str(payload.amount),
+            "loan_type": payload.loan_type.value,
+            "invite_sent_to": borrower_email if invite_minted else None,
+        },
     )
     await db.commit()
     await db.refresh(loan)
+
+    # Dispatch the invite email AFTER commit so the borrower can't
+    # click a working link before our row is durable. ``send_magic_link_email``
+    # is non-raising; Resend hiccups become log entries, not 500s.
+    if invite_minted:
+        invite_url = (
+            f"{settings.frontend_url}/auth/verify?"
+            f"purpose=loan_invite&token={invite_minted.plain_token}&"
+            f"loan_id={loan.id}"
+        )
+        background_tasks.add_task(
+            send_magic_link_email,
+            to=borrower_email,
+            url=invite_url,
+            purpose="loan_invite",
+            expires_minutes=settings.magic_link_loan_invite_ttl_seconds // 60,
+            recipient_name=borrower_user.name,
+        )
+
     return loan
 
 
@@ -188,6 +277,128 @@ async def set_autonomy(
         },
     )
     await db.commit()
+    return loan
+
+
+class StaffUserOut(BaseModel):
+    """Minimal staff identity for the owner-reassignment dropdown.
+
+    Same shape as :class:`OwnerOut` (which lives in
+    ``mkopo.schemas``) — we keep it local to this router so the
+    dropdown endpoint doesn't bring decision-side schema modules
+    into scope for a UI list endpoint.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    email: str
+    initials: str
+    role: str
+
+
+@router.get("/staff/users", response_model=list[StaffUserOut])
+async def list_staff_users(
+    user: CurrentUserDep, db: DbSessionDep
+) -> list[User]:
+    """List staff users (underwriters + admins) for the
+    owner-reassignment dropdown on the loan detail page.
+
+    Filters:
+      - ``role in ('underwriter', 'admin')`` so borrowers don't
+        appear in the list
+      - ``deleted_at IS NULL`` so soft-deleted users are excluded
+
+    Sort: alphabetical by name so the dropdown order is stable
+    and locale-friendly. The list is small enough (<100 users in
+    a typical lender) that we don't paginate.
+    """
+    rows = (
+        await db.execute(
+            select(User)
+            .where(
+                User.role.in_(("underwriter", "admin")),
+                User.deleted_at.is_(None),
+            )
+            .order_by(User.name.asc())
+        )
+    ).scalars().all()
+    return list(rows)
+
+
+class OwnerAssignIn(BaseModel):
+    """PATCH payload for reassigning a loan to a new staff owner.
+
+    ``owner_id`` may be ``None`` — that explicitly *unassigns* the
+    loan, returning it to the "Unassigned" bucket. The audit event
+    records the transition either way."""
+
+    owner_id: uuid.UUID | None
+    reason: str = Field(min_length=1, max_length=500)
+
+
+@router.patch("/{loan_id}/owner", response_model=LoanOut)
+async def set_loan_owner(
+    loan_id: uuid.UUID,
+    payload: OwnerAssignIn,
+    user: CurrentUserDep,
+    db: DbSessionDep,
+) -> Loan:
+    """Reassign (or unassign) a loan's staff owner.
+
+    The reason lands on an ``owner_reassigned`` audit event so the
+    case-file timeline shows who moved a deal and why — useful when
+    the loan officer hands a sticky file to a workout specialist,
+    or when an underwriter recuses themselves.
+
+    The new owner must be a non-deleted staff user (underwriter or
+    admin); we don't allow assigning a borrower as the loan's
+    underwriter for the obvious reasons.
+    """
+    loan = await loan_service.get_loan(db, loan_id)
+    if not loan:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Loan not found")
+
+    # Resolve + validate the new owner. ``None`` is allowed (unassign).
+    new_owner: User | None = None
+    if payload.owner_id is not None:
+        new_owner = (
+            await db.execute(select(User).where(User.id == payload.owner_id))
+        ).scalar_one_or_none()
+        if new_owner is None or new_owner.deleted_at is not None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, "Staff user not found"
+            )
+        if new_owner.role not in ("underwriter", "admin"):
+            # A borrower can't be a loan owner — keep the role boundary
+            # tight; the dropdown only ever offers staff, so this would
+            # only fire on a hand-crafted request.
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Owner must be an underwriter or admin",
+            )
+
+    from_owner_id = str(loan.owner_user_id) if loan.owner_user_id else None
+    from_owner_name = loan.owner.name if loan.owner else None
+
+    loan.owner_user_id = new_owner.id if new_owner is not None else None
+
+    await record(
+        db,
+        loan_id=loan.id,
+        actor=Actor.user(user.user_id),
+        action="owner_reassigned",
+        payload={
+            "from_owner_id": from_owner_id,
+            "from_owner_name": from_owner_name,
+            "to_owner_id": str(new_owner.id) if new_owner else None,
+            "to_owner_name": new_owner.name if new_owner else None,
+            "reason": payload.reason,
+        },
+    )
+    await db.commit()
+    await db.refresh(loan)
     return loan
 
 

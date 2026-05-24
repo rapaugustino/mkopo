@@ -95,36 +95,12 @@ class _DraftedUnderwriting(BaseModel):
 # up on the persona and writes more credibly when it's not asked to
 # code-switch mid-paragraph.
 
-_COMMERCIAL_SYSTEM_PROMPT = (
-    "You are an experienced commercial loan underwriter writing for a "
-    "credit committee. You produce factual, concise, citation-backed "
-    "summaries. Hard rules:\n"
-    "1. You MUST cite the field names you rely on in each section's "
-    "   `citations` array (e.g. 'annual_noi', 'appraised_value').\n"
-    "2. You do NOT invent values — if a field is missing, say so.\n"
-    "3. You do NOT compute or assert pass/fail on policy rules — the "
-    "   rules engine has already done that. You may *describe* what it "
-    "   found, but the verdict belongs to the engine.\n"
-    "4. You do NOT name a recommendation that contradicts the engine's "
-    "   blocking failures — if the engine blocks the deal, your only "
-    "   options are 'decline' or 'request_more_info'.\n"
-)
-
-_PERSONAL_SYSTEM_PROMPT = (
-    "You are an experienced consumer-credit underwriter writing for a "
-    "personal-loan adjudication queue. You produce factual, concise, "
-    "citation-backed summaries. Hard rules:\n"
-    "1. You MUST cite the field names you rely on in each section's "
-    "   `citations` array (e.g. 'annual_income', 'credit_score').\n"
-    "2. You do NOT invent values — if a field is missing, say so.\n"
-    "3. You do NOT compute or assert pass/fail on policy rules — the "
-    "   rules engine has already done that.\n"
-    "4. Personal loans are unsecured — your language should reflect "
-    "   that DTI, FICO band, and employment stability are the primary "
-    "   signals; there is no appraisal or collateral coverage to lean on.\n"
-    "5. You do NOT name a recommendation that contradicts the engine's "
-    "   blocking failures.\n"
-)
+# System prompts now live in the ``prompts`` table and are loaded via
+# ``prompts.get(identifier)`` below. The identifiers are kept as
+# constants so the call-site reads obviously. See
+# mkopo.services.prompts.DEFAULTS for the canonical default bodies.
+_COMMERCIAL_PROMPT_ID = "underwriting.summary.commercial"
+_PERSONAL_PROMPT_ID = "underwriting.summary.personal"
 
 
 def _commercial_kpi_block(kpis: UnderwritingKPIs) -> str:
@@ -310,9 +286,11 @@ async def draft_summary(state: UnderwritingState) -> UnderwritingState:
     loan_class = state.get("loan_class", "business")
     is_personal = loan_class == "personal"
 
+    from mkopo.services.prompts import get as get_prompt
+
     if is_personal:
         kpi_block = _personal_kpi_block(kpis)
-        system = _PERSONAL_SYSTEM_PROMPT
+        system = get_prompt(_PERSONAL_PROMPT_ID)
         sections_hint = (
             "Produce 3–4 sections covering: Applicant & employment, "
             "Income & debt capacity (DTI / LTI), Credit profile (FICO + band), "
@@ -326,7 +304,7 @@ async def draft_summary(state: UnderwritingState) -> UnderwritingState:
         )
     else:
         kpi_block = _commercial_kpi_block(kpis)
-        system = _COMMERCIAL_SYSTEM_PROMPT
+        system = get_prompt(_COMMERCIAL_PROMPT_ID)
         sections_hint = (
             "Produce 3–5 sections covering: Borrower & sponsorship, "
             "Property & collateral, Financials (NOI, DSCR, debt yield), "

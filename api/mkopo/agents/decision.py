@@ -201,14 +201,18 @@ async def draft_decision(state: DecisionState) -> DecisionState:
     extractions_block = "\n".join(f"- {k}: {v}" for k, v in extractions.items())
 
     # 1) Pick the path + write the verdict.
+    #
+    # The static persona + hard-rules portion of the prompt comes from
+    # the prompts registry (editable through the /prompts UI). The
+    # dynamic "allowed paths for THIS loan" line is appended in code
+    # because it's not editorial — it's a derived rule-engine fact
+    # the LLM needs to honour, and exposing it as editable text would
+    # let a well-meaning edit corrupt the engine integration.
+    from mkopo.services.prompts import get as get_prompt
+
     system_path = (
-        "You are a senior credit officer making a decision recommendation. "
-        "Hard rules:\n"
-        "1. You may NOT contradict the rules engine's BLOCKING failures.\n"
-        f"2. Allowed paths for THIS loan, per the engine: {allowed_paths}.\n"
-        "3. Be decisive — verdict_text is a one-line action statement.\n"
-        "4. Rationale names the specific rule outcomes that informed the "
-        "   choice. Do NOT invent values.\n"
+        get_prompt("decision.path_selection")
+        + f"\n\nAllowed paths for THIS loan, per the engine: {allowed_paths}."
     )
     user_path = (
         f"{guidance}\n\n"
@@ -243,18 +247,7 @@ async def draft_decision(state: DecisionState) -> DecisionState:
             loan = (await session.execute(select(Loan).where(Loan.id == loan_id))).scalar_one()
         rate_pct, rate_basis, term_months, amort = _rate_basis_for(loan.loan_type.value)
 
-        ac_system = (
-            "You draft a commercial loan term sheet and (if conditional) a "
-            "list of conditions to close. Hard rules:\n"
-            "1. Principal = the loan amount provided. Do not invent another.\n"
-            "2. Use the provided rate basis exactly — do not invent market rates.\n"
-            "3. For 'conditional' path: write 1–4 SPECIFIC conditions tied to "
-            "   actual rule findings (missing docs, stale appraisal, etc.). "
-            "   For 'approve' path: an empty conditions list.\n"
-            "4. Conditions must be concrete and verifiable. Bad: "
-            '"improve financials". Good: "Provide updated appraisal dated '
-            'within 6 months of closing."'
-        )
+        ac_system = get_prompt("decision.approve_conditional")
         ac_user = (
             f"Path: {drafted.path}.\n"
             f"Loan amount: ${float(loan.amount):,.0f}.\n"
@@ -285,22 +278,7 @@ async def draft_decision(state: DecisionState) -> DecisionState:
             f"- {f.rule_id}: {f.message}" for f in flags if f.rule_id in candidate_reasons
         )
 
-        dec_system = (
-            "You draft an ADVERSE ACTION LETTER under ECOA Regulation B. "
-            "Hard rules:\n"
-            "1. `principal_reasons` MUST contain at least one rule_id from "
-            "   the provided list of failed rules. The body MUST reference "
-            '   each of those reasons by name (e.g. "Debt service coverage '
-            "   ratio of 1.08 is below our underwriting floor of 1.20 for "
-            '   multifamily").\n'
-            "2. Do NOT cite 'internal policy', 'scoring', or 'creditworthiness' "
-            "   as the reason. Reg B requires specific principal reasons.\n"
-            "3. Professional, plain language. No jargon. ≤ 350 words.\n"
-            "4. Inform the borrower of their right to request additional "
-            "   information about the reasons within 60 days.\n"
-            "5. Do NOT promise outcomes (e.g. 'you may reapply at any time' "
-            "   is fine; 'we will approve a smaller loan' is not)."
-        )
+        dec_system = get_prompt("decision.decline_letter")
         dec_user = (
             f"Verdict rationale: {drafted.rationale}\n\n"
             f"Failed rules (cite at least one in principal_reasons; reference "

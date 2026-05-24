@@ -172,11 +172,24 @@ export const borrowerAuthApi = {
       body: JSON.stringify(input),
     }),
 
-  /** Withdraw an in-flight application. Terminal — no undo. */
-  withdrawLoan: (loanId: string, reason: string) =>
+  /** Mint a fresh-auth challenge token. Verifies the current
+   *  password and returns a one-shot token the UI must echo back on
+   *  the next sensitive request (withdraw / erasure). 5-minute TTL.
+   *
+   *  Required because a stolen session cookie shouldn't be enough to
+   *  trigger an irreversible action — see #169. */
+  mintChallenge: (password: string) =>
+    bfetch<{ token: string; expires_in_seconds: number }>(
+      `/borrower-auth/me/challenge`,
+      { method: "POST", body: JSON.stringify({ password }) },
+    ),
+
+  /** Withdraw an in-flight application. Terminal — no undo.
+   *  Requires a fresh-auth challenge token; obtain via mintChallenge. */
+  withdrawLoan: (loanId: string, reason: string, challengeToken: string) =>
     bfetch<MyLoanRow>(`/borrower-auth/me/loans/${loanId}/withdraw`, {
       method: "POST",
-      body: JSON.stringify({ reason }),
+      body: JSON.stringify({ reason, challenge_token: challengeToken }),
     }),
 
   /** Edit borrower-supplied loan fields (income, employer, etc.).
@@ -198,13 +211,31 @@ export const borrowerAuthApi = {
       { method: "PATCH", body: JSON.stringify(patch) },
     ),
 
+  /** Mint a short-lived presigned download URL for one of the
+   *  borrower's documents. The returned URL fetches the raw bytes
+   *  directly from object storage and expires after a few minutes.
+   *  An audit ``document_accessed`` event is recorded server-side. */
+  getDocumentDownloadUrl: (loanId: string, documentId: string) =>
+    bfetch<{
+      url: string;
+      filename: string;
+      content_type: string;
+      expires_in_seconds: number;
+    }>(
+      `/borrower-auth/me/loans/${loanId}/documents/${documentId}/download-url`,
+    ),
+
   /** Download a DSAR-style JSON dump of everything we hold. */
   exportMyData: () =>
     bfetch<Record<string, unknown>>(`/borrower-auth/me/data/export`),
 
   /** Soft-delete account + all loans. Retention window applies; the
    *  user is signed out immediately. */
-  requestErasure: (input: { reason: string; confirm: boolean }) =>
+  requestErasure: (input: {
+    reason: string;
+    confirm: boolean;
+    challenge_token: string;
+  }) =>
     bfetch<{
       ok: boolean;
       loans_affected: number;

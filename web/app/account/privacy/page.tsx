@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { borrowerAuthApi, type ApiError } from "@/lib/borrowerApi";
 import { useAuth } from "@/app/borrower/AuthProvider";
 import { PrimaryButton } from "@/app/components/PrimaryButton";
+import { ReauthPromptModal } from "@/app/components/ReauthPromptModal";
 import { SecondaryButton } from "@/app/components/SecondaryButton";
 
 /**
@@ -51,6 +52,10 @@ export default function PrivacyPage() {
     );
   }
 
+  // Width + centering come from the surrounding BorrowerShell.
+  // Privacy keeps a slightly narrower stack (max-w-2xl) than the
+  // dashboard because erasure controls + retention copy read
+  // better at the tighter width.
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-5">
       <header className="flex items-center justify-between gap-3">
@@ -133,15 +138,25 @@ function ErasureCard() {
   const [confirming, setConfirming] = useState(false);
   const [reason, setReason] = useState("");
   const [understood, setUnderstood] = useState(false);
+  // The password modal is the FINAL step — only shown after the
+  // checkbox + reason are set and the user clicks the red button.
+  // This is the most consequential borrower action in the app, so
+  // we deliberately make it the most friction-heavy.
+  const [promptingPassword, setPromptingPassword] = useState(false);
 
   const erase = useMutation({
-    mutationFn: () =>
-      borrowerAuthApi.requestErasure({ reason, confirm: understood }),
+    mutationFn: (challengeToken: string) =>
+      borrowerAuthApi.requestErasure({
+        reason,
+        confirm: understood,
+        challenge_token: challengeToken,
+      }),
     onSuccess: async (data) => {
       toast.success("Erasure requested", {
         description: data.message,
         duration: 10_000,
       });
+      setPromptingPassword(false);
       // Backend hasn't cleared the cookie itself; do it client-side
       // so the AuthProvider's next /me call sees anonymous and
       // bounces us to /login. Then route home.
@@ -235,7 +250,7 @@ function ErasureCard() {
         </SecondaryButton>
         <button
           type="button"
-          onClick={() => erase.mutate()}
+          onClick={() => setPromptingPassword(true)}
           disabled={
             erase.isPending || !understood || reason.trim().length === 0
           }
@@ -249,6 +264,18 @@ function ErasureCard() {
           {erase.isPending ? "Working…" : "Erase my account"}
         </button>
       </div>
+      {promptingPassword && (
+        <ReauthPromptModal
+          title="Erase your account?"
+          description="This signs you out immediately. Your account and applications enter the retention window and become unrecoverable via any borrower-side action. Confirm your password to proceed."
+          confirmLabel="Erase my account"
+          variant="danger"
+          onConfirm={async (token) => {
+            await erase.mutateAsync(token);
+          }}
+          onClose={() => setPromptingPassword(false)}
+        />
+      )}
     </section>
   );
 }

@@ -18,8 +18,10 @@ See migration ``0005_eval`` for the matching DDL.
 
 from __future__ import annotations
 
-from sqlalchemy import Float, Index, Integer, String
-from sqlalchemy.dialects.postgresql import JSONB
+import uuid
+
+from sqlalchemy import Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from mkopo.models.base import Base
@@ -96,3 +98,57 @@ class LLMCall(Base):
     # through call signatures. ``None`` for ad-hoc calls outside an
     # agent run (eval CI, smoke tests, manual scripts).
     thread_id: Mapped[str | None] = mapped_column(String(128))
+
+
+class ToolUse(Base):
+    """One tool invocation made by an LLM during a chat / agent turn.
+
+    Persists the trajectory the model asked for and what came back.
+    The observability drawer renders these as a timeline under the
+    LLM call that issued them, so an operator can see "the agent
+    called ``withdraw_application`` with ``{loan_id: …}`` and got
+    ``{ok: true}``" without scraping the structured logs.
+
+    Foreign keys are nullable everywhere except ``tool_name`` so we
+    can record an ad-hoc tool execution (a future direct API path
+    that doesn't go through an LLM) — today every row will have an
+    ``llm_call_id`` because every tool use goes through the chat
+    loop's ``call_with_tools`` cycle.
+
+    See migration ``0014_tool_uses`` for the matching DDL.
+    """
+
+    __tablename__ = "tool_uses"
+    __table_args__ = (
+        Index("ix_tool_uses_llm_call_id_sequence", "llm_call_id", "sequence_num"),
+        Index("ix_tool_uses_agent_run_id", "agent_run_id"),
+        Index("ix_tool_uses_loan_id", "loan_id"),
+        Index("ix_tool_uses_thread_id", "thread_id"),
+        Index("ix_tool_uses_tool_name_created_at", "tool_name", "created_at"),
+    )
+
+    llm_call_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("llm_calls.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    agent_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_runs.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    thread_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    loan_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("loans.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    sequence_num: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    tool_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    input: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    output: Mapped[dict | None] = mapped_column(JSONB)
+    # ``ok`` on a clean execution, ``error`` on a raised tool, ``cancelled``
+    # for the confirmation-required path where the user clicked Cancel.
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="ok")
+    error_message: Mapped[str | None] = mapped_column(Text)
+    elapsed_ms: Mapped[int | None] = mapped_column(Integer)

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
 import {
+  IconArrowLeft,
   IconArrowRight,
   IconBuilding,
   IconCheck,
@@ -281,6 +282,69 @@ export default function ApplyPage() {
 
   const ready = checklist.filter((c) => c.required).every((c) => c.satisfied);
 
+  // ---- Wizard state -----------------------------------------------------
+  // Steps run 1..N where N depends on loan_class. The first step picks
+  // the class, so it shows up in both flows; from there the path forks.
+  //
+  // Why a wizard rather than the previous single-page form: applying
+  // for a loan is consequential, and the form has 15+ fields. Asking
+  // the borrower to fill all of them on one scroll page felt like
+  // homework. Stepping it surfaces the structure ("first about you,
+  // then the loan, then…") and lets us guide them with per-step
+  // validation rather than a giant checklist at the bottom.
+  const [step, setStep] = useState(1);
+  const steps: { id: number; label: string; key: string }[] =
+    form.loan_class === "personal"
+      ? [
+          { id: 1, label: "Loan type", key: "class" },
+          { id: 2, label: "About you", key: "about" },
+          { id: 3, label: "The loan", key: "loan" },
+          { id: 4, label: "Finances", key: "finances" },
+          { id: 5, label: "Review", key: "review" },
+        ]
+      : [
+          { id: 1, label: "Loan type", key: "class" },
+          { id: 2, label: "Business", key: "about" },
+          { id: 3, label: "The loan", key: "loan" },
+          { id: 4, label: "Guarantor", key: "guarantor" },
+          { id: 5, label: "Review", key: "review" },
+        ];
+  const totalSteps = steps.length;
+  const currentKey = steps.find((s) => s.id === step)?.key ?? "class";
+
+  /** Per-step gating: can the user click Next? Returns either ``true``
+   *  or a string explaining why not. The validation here is the
+   *  required subset of ``checkCompleteness``; optional fields don't
+   *  block progression. */
+  const stepValid = ((): true | string => {
+    if (currentKey === "class") return true; // default is set
+    if (currentKey === "about") {
+      if (form.borrower_name.trim().length < 2)
+        return form.loan_class === "personal"
+          ? "Add your full name."
+          : "Add the entity name.";
+      if (!/^[^@]+@[^@]+\.[^@]+$/.test(form.borrower_email))
+        return "Add a valid contact email.";
+      if (auth.status !== "authed" && form.borrower_password.length < 8)
+        return "Create a password (8+ characters).";
+      return true;
+    }
+    if (currentKey === "loan") {
+      if (!(Number(form.amount) > 0)) return "Enter a loan amount.";
+      return true;
+    }
+    if (currentKey === "finances") {
+      if (!(Number(form.annual_income) > 0))
+        return "Enter your annual income (gross).";
+      return true;
+    }
+    if (currentKey === "guarantor") return true; // optional throughout
+    return true;
+  })();
+
+  const canProceed = stepValid === true;
+  const isLastStep = step === totalSteps;
+
   return (
     <div className="flex flex-col gap-6">
       {/* Signed-in banner. Shows up only for borrowers who already
@@ -305,41 +369,42 @@ export default function ApplyPage() {
         </div>
       )}
 
-      {/* Hero / explainer. Sets expectations and explains the dual
-          surface so the borrower understands what's happening when
-          their information lands on the lender's side. */}
-      <div className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-5 py-4">
-        <p className="text-[18px] font-medium tracking-tight">
-          Apply for a loan
-        </p>
-        <p className="mt-1.5 text-[13px] leading-relaxed text-[var(--color-text-secondary)]">
-          Fill this out and our underwriting team will pick it up. We use
-          AI to read your packet and flag anything missing — you&apos;ll
-          get an email if we need more information.
-        </p>
-        {auth.status !== "authed" && (
-          <p className="mt-2 text-[12px] text-[var(--color-text-secondary)]">
+      {/* Wizard header — title + progress. The hero copy moved here
+          and shrank because the wizard scaffold itself signals the
+          shape of the flow (step N of M) without prose. */}
+      <div className="flex flex-col gap-3 rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-5 py-4">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <p className="text-[16px] font-medium tracking-tight">
+            Apply for a loan
+          </p>
+          <p className="text-[11.5px] text-[var(--color-text-tertiary)]">
+            Step {step} of {totalSteps} · {steps.find((s) => s.id === step)?.label}
+          </p>
+        </div>
+        <ProgressDots steps={steps} current={step} />
+        {auth.status !== "authed" && step === 1 && (
+          <p className="text-[12px] text-[var(--color-text-secondary)]">
             Already have an account?{" "}
             <Link
               href={`/login?next=${encodeURIComponent("/apply")}`}
               className="font-medium text-[var(--color-text-info)] hover:underline"
             >
               Sign in
-            </Link>
-            .
+            </Link>{" "}
+            instead.
           </p>
         )}
-        <p className="mt-3 flex items-center gap-1.5 text-[11px] text-[var(--color-text-tertiary)]">
-          <IconLockSquare size={11} />
-          Your information is stored privately. You can come back to this
-          link any time to check status or attach more documents.
-        </p>
+        {step === 1 && (
+          <p className="flex items-center gap-1.5 text-[11px] text-[var(--color-text-tertiary)]">
+            <IconLockSquare size={11} />
+            Your information is stored privately. You can come back to this
+            link any time to check status or attach more documents.
+          </p>
+        )}
       </div>
 
-      {/* Class picker. Top of the flow because it changes which
-          downstream fields are required. We render two big tiles
-          rather than a dropdown because the choice is consequential
-          and we want the borrower to read both descriptions. */}
+      {/* ---- STEP 1: Loan class --------------------------------------- */}
+      {currentKey === "class" && (
       <div className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-5 py-4">
         <p className="mb-2.5 text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
           What kind of loan?
@@ -414,9 +479,10 @@ export default function ApplyPage() {
           })}
         </div>
       </div>
+      )}
 
-      {/* Form sections, separated by SectionCard. Each holds related
-          fields so a borrower can take them in chunks. */}
+      {/* ---- STEP 2: About you / Your business ------------------------ */}
+      {currentKey === "about" && (
       <SectionCard
         icon={form.loan_class === "personal" ? IconUserCircle : IconBuilding}
         title={form.loan_class === "personal" ? "About you" : "Your business"}
@@ -505,7 +571,10 @@ export default function ApplyPage() {
           )}
         </div>
       </SectionCard>
+      )}
 
+      {/* ---- STEP 3: The loan ----------------------------------------- */}
+      {currentKey === "loan" && (
       <SectionCard
         icon={IconArrowRight}
         title="The loan"
@@ -596,14 +665,10 @@ export default function ApplyPage() {
           </Field>
         </div>
       </SectionCard>
+      )}
 
-      {/* Personal-loan-only finance section. Hidden when class is
-          business because business loans evaluate the entity's NOI
-          and asset, not the individual's income. The fields here are
-          1:1 with the personal rule pack: income + monthly debts feed
-          DTI; the loan amount + income feeds LTI; credit score gates
-          the FICO floor; years employment feeds the employment rule. */}
-      {form.loan_class === "personal" && (
+      {/* ---- STEP 4 (personal): Your finances ------------------------- */}
+      {currentKey === "finances" && form.loan_class === "personal" && (
         <SectionCard
           icon={IconUserCircle}
           title="Your finances"
@@ -678,6 +743,8 @@ export default function ApplyPage() {
         </SectionCard>
       )}
 
+      {/* ---- STEP 4 (business): Guarantor (optional) ------------------ */}
+      {currentKey === "guarantor" && (
       <SectionCard
         icon={IconUserCircle}
         title="Guarantor"
@@ -704,29 +771,71 @@ export default function ApplyPage() {
           </Field>
         </div>
       </SectionCard>
+      )}
 
-      {/* Completeness checklist. Updates live as the borrower types.
-          Borrowers who complete this fully drop into the lender's
-          intake stage with everything the agent needs. Borrowers who
-          submit partial applications trigger the doc-request email
-          flow — the system explains that here so it's not a surprise. */}
-      <SectionCard
-        icon={IconCircleDashed}
-        title="Ready to submit?"
-        description="Required items must be filled. Optional items can be added later."
-      >
-        <Checklist items={checklist} />
-
-        <div className="mt-4 flex items-center justify-between gap-3">
-          <p className="text-[11.5px] text-[var(--color-text-tertiary)]">
+      {/* ---- STEP 5: Review & submit ---------------------------------- */}
+      {currentKey === "review" && (
+        <SectionCard
+          icon={IconCircleDashed}
+          title="Ready to submit?"
+          description="Required items must be filled. Optional items can be added later. You can come back and attach documents after submission."
+        >
+          <ReviewSummary form={form} />
+          <div className="mt-4">
+            <p className="mb-2 text-[10.5px] font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
+              Checklist
+            </p>
+            <Checklist items={checklist} />
+          </div>
+          <p className="mt-4 text-[11.5px] text-[var(--color-text-tertiary)]">
             By submitting you agree to our terms. We&apos;ll send confirmation
             to {form.borrower_email || "your email"}.
           </p>
+        </SectionCard>
+      )}
+
+      {/* ---- Wizard nav (Back / Next / Submit) ------------------------ */}
+      <div className="flex items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={() => setStep((s) => Math.max(1, s - 1))}
+          disabled={step === 1}
+          className="inline-flex items-center gap-1.5 rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-3 py-1.5 text-[12.5px] text-[var(--color-text-primary)] hover:bg-[var(--color-background-secondary)] disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <IconArrowLeft size={13} />
+          Back
+        </button>
+
+        {/* Inline gating message — appears next to the Next button so the
+            borrower understands why they're stuck. Empty when the step
+            is valid; otherwise shows the first reason from stepValid. */}
+        {typeof stepValid === "string" && (
+          <p className="text-[11.5px] text-[var(--color-text-tertiary)]">
+            {stepValid}
+          </p>
+        )}
+
+        {!isLastStep ? (
+          <motion.button
+            whileTap={{ scale: 0.98 }}
+            type="button"
+            onClick={() => setStep((s) => Math.min(totalSteps, s + 1))}
+            disabled={!canProceed}
+            className="inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-[13px] font-medium disabled:opacity-45"
+            style={{
+              background: "var(--color-brand)",
+              color: "var(--color-brand-light)",
+            }}
+          >
+            Next
+            <IconArrowRight size={14} />
+          </motion.button>
+        ) : (
           <motion.button
             whileTap={{ scale: 0.98 }}
             onClick={() => submit.mutate()}
             disabled={!ready || submit.isPending}
-            className="flex items-center gap-1.5 rounded-md px-4 py-2 text-[13px] font-medium disabled:opacity-45"
+            className="inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-[13px] font-medium disabled:opacity-45"
             style={{
               background: "var(--color-brand)",
               color: "var(--color-brand-light)",
@@ -735,10 +844,146 @@ export default function ApplyPage() {
             {submit.isPending ? "Submitting…" : "Submit application"}
             <IconArrowRight size={14} />
           </motion.button>
-        </div>
-      </SectionCard>
-
+        )}
+      </div>
     </div>
+  );
+}
+
+/** Step progress dots. Numeric step indicator (1 of 5) lives in the
+ *  header text; this is the visual companion. Active step is filled
+ *  brand-green; completed steps are filled neutral; upcoming steps
+ *  are outlined. Clicking a previous step goes back to it. */
+function ProgressDots({
+  steps,
+  current,
+}: {
+  steps: { id: number; label: string; key: string }[];
+  current: number;
+}) {
+  return (
+    <ol className="flex items-center gap-1.5">
+      {steps.map((s, idx) => {
+        const state =
+          s.id === current ? "active" : s.id < current ? "done" : "todo";
+        return (
+          <li key={s.id} className="flex items-center gap-1.5">
+            <span
+              className="inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10.5px] font-semibold"
+              style={{
+                background:
+                  state === "active"
+                    ? "var(--color-brand)"
+                    : state === "done"
+                      ? "var(--color-background-success)"
+                      : "var(--color-background-primary)",
+                color:
+                  state === "active"
+                    ? "var(--color-brand-light)"
+                    : state === "done"
+                      ? "var(--color-brand)"
+                      : "var(--color-text-tertiary)",
+                border:
+                  state === "todo"
+                    ? "0.5px solid var(--color-border-tertiary)"
+                    : "none",
+              }}
+            >
+              {state === "done" ? <IconCheck size={10} /> : s.id}
+            </span>
+            <span
+              className="text-[11.5px]"
+              style={{
+                color:
+                  state === "active"
+                    ? "var(--color-text-primary)"
+                    : "var(--color-text-tertiary)",
+                fontWeight: state === "active" ? 500 : 400,
+              }}
+            >
+              {s.label}
+            </span>
+            {idx < steps.length - 1 && (
+              <span
+                aria-hidden
+                className="mx-1 h-px w-3"
+                style={{ background: "var(--color-border-tertiary)" }}
+              />
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+/** Read-only summary card shown on the Review step. Mirrors the form
+ *  state in human-readable form so the borrower can sanity-check
+ *  before clicking Submit. */
+function ReviewSummary({ form }: { form: FormState }) {
+  const rows: { label: string; value: string }[] = [
+    {
+      label: "Loan type",
+      value:
+        form.loan_class === "personal"
+          ? `Personal · ${form.loan_type}`
+          : `Business · ${form.loan_type}`,
+    },
+    {
+      label: form.loan_class === "personal" ? "Your name" : "Entity name",
+      value: form.borrower_name || "—",
+    },
+    { label: "Contact email", value: form.borrower_email || "—" },
+    {
+      label: "Loan amount",
+      value: form.amount
+        ? `$${Number(form.amount).toLocaleString()}`
+        : "—",
+    },
+    { label: "Purpose", value: form.purpose || "—" },
+  ];
+  if (form.loan_class === "business") {
+    rows.push(
+      { label: "Property type", value: form.property_type || "—" },
+      { label: "Property address", value: form.property_address || "—" },
+      {
+        label: "Guarantor",
+        value: form.guarantor_name
+          ? `${form.guarantor_name}${form.guarantor_email ? ` · ${form.guarantor_email}` : ""}`
+          : "—",
+      },
+    );
+  } else {
+    rows.push(
+      {
+        label: "Annual income",
+        value: form.annual_income
+          ? `$${Number(form.annual_income).toLocaleString()}`
+          : "—",
+      },
+      {
+        label: "Monthly debt",
+        value: form.monthly_debt_payments
+          ? `$${Number(form.monthly_debt_payments).toLocaleString()}`
+          : "—",
+      },
+      { label: "Credit score", value: form.credit_score || "—" },
+      { label: "Employer", value: form.employer || "—" },
+    );
+  }
+  return (
+    <dl className="grid grid-cols-2 gap-x-6 gap-y-2 rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-secondary)] px-4 py-3">
+      {rows.map((r) => (
+        <div key={r.label} className="flex flex-col">
+          <dt className="text-[10.5px] font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
+            {r.label}
+          </dt>
+          <dd className="text-[12.5px] text-[var(--color-text-primary)]">
+            {r.value}
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 

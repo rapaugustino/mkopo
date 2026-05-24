@@ -22,6 +22,7 @@ import { toast } from "sonner";
 import { humanizeStatus } from "@/lib/humanize";
 import { useAgentRun } from "@/lib/useAgentRun";
 import { AgentProgress } from "@/app/components/AgentProgress";
+import { MarkdownBlock } from "@/app/components/MarkdownBlock";
 import { Pill } from "@/app/components/Pill";
 import { PrimaryButton } from "@/app/components/PrimaryButton";
 import { QuoteBlock } from "@/app/components/QuoteBlock";
@@ -217,81 +218,203 @@ function ConditionsList({
   );
 }
 
+/** Build the borrower-visible message body for a decision. The body
+ *  is what lands on /apply/[id] when the underwriter clicks "Send to
+ *  borrower" — see the rationale in :func:`sendDecisionToBorrower`. */
+function composeBorrowerMessage(result: DecisionResult): string {
+  if (result.path === "decline") {
+    // Adverse action letter is required to cite the specific reasons.
+    // We trust the agent's draft — the underwriter has already had a
+    // chance to "Edit letter" before clicking send.
+    return result.adverse_action_letter?.body_text ?? result.verdict_text;
+  }
+  const ts = result.term_sheet;
+  const lines: string[] = [];
+  if (result.path === "approve") {
+    lines.push("We've approved your loan application.");
+  } else {
+    lines.push("We've conditionally approved your loan application.");
+  }
+  if (ts) {
+    lines.push(
+      "",
+      "Term sheet:",
+      `· Principal: $${ts.principal}`,
+      `· Rate: ${ts.rate_pct.toFixed(2)}% (${ts.rate_basis})`,
+      `· Term: ${ts.term_months} months`,
+      `· Amortization: ${ts.amortization}`,
+      `· Origination fee: ${ts.origination_fee_pct.toFixed(2)}%`,
+      `· Prepay: ${ts.prepay_terms}`,
+    );
+    if (ts.notes) lines.push("", ts.notes);
+  }
+  if (result.path === "conditional" && result.conditions.length > 0) {
+    lines.push(
+      "",
+      "Conditions to satisfy before closing:",
+      ...result.conditions.map(
+        (c, i) =>
+          `${i + 1}. ${c.description}${
+            c.due_within_days
+              ? ` (within ${c.due_within_days} days)`
+              : ""
+          }`,
+      ),
+    );
+  }
+  lines.push("", "Sign in to your application to see updates.");
+  return lines.join("\n");
+}
+
+/** Target stage for each decision path. ``conditional`` is the only
+ *  path that goes through CONDITIONS before APPROVED → CLOSING.
+ *  ``approve`` jumps directly to APPROVED because there are no
+ *  outstanding conditions. */
+function targetStageFor(path: DecisionPath): "conditions" | "approved" | "declined" {
+  if (path === "approve") return "approved";
+  if (path === "conditional") return "conditions";
+  return "declined";
+}
+
 /**
- * Decision action buttons — stubs in this phase.
+ * Decision action buttons.
  *
- * Each click writes an audit_event so the timeline reflects the user's
- * intent (e.g. "Sent term sheet to borrower"). Real builds would also:
- *   - send the term sheet / decline letter via Resend
- *   - transition the loan stage via transition_stage (decision → conditions
- *     for conditional approve / approved for full approve / declined for AAL)
+ * "Send to borrower" / "Send adverse action letter" do TWO things,
+ * in this order:
  *
- * We intentionally don't transition the stage here — that's a deliberate
- * downstream action keyed to "the underwriter clicked Send", not to the
- * agent itself. Same boundary discipline as the rest of the system.
+ *   1. Write a borrower-visible note (action ``borrower_reply`` —
+ *      same audit shape the timeline + the /apply/[id] view both
+ *      already consume). Body composed from the agent's draft +
+ *      whatever the underwriter saw on screen.
+ *   2. Transition the loan stage: decision → approved / conditions /
+ *      declined depending on the path.
+ *
+ * The two writes aren't atomic at the DB level but the audit log
+ * shows both intents, so an operator can see exactly what happened
+ * if step 2 fails (the message is still on the timeline).
+ *
+ * "Send to committee" is intentionally still audit-only — Mkopo
+ * doesn't model a committee surface today; the audit event is the
+ * canonical handoff signal.
+ *
+ * "Edit term sheet" / "Edit letter" surface a toast pointing at the
+ * agent re-run rather than silently logging; an in-place editor is
+ * out of scope (the underwriter can re-run the decision agent with
+ * adjusted rules if the term sheet needs material changes).
  */
 function ActionBar({
   loanId,
   selectedPath,
+  result,
 }: {
   loanId: string;
   selectedPath: DecisionPath;
+  result: DecisionResult;
 }) {
   const queryClient = useQueryClient();
-  const log = useMutation({
-    mutationFn: (target: string) =>
-      api.addNote(loanId, `decision_apply · path=${selectedPath} · target=${target}`),
-    onSuccess: () => {
+
+  const sendDecisionToBorrower = useMutation({
+    mutationFn: async () => {
+      const body = composeBorrowerMessage(result);
+      // Note first so the timeline records the message even if the
+      // stage transition then fails (e.g. someone advanced the loan
+      // in another tab and the transition is now invalid).
+      await api.addNote(loanId, body, "borrower_reply");
+      const target = targetStageFor(selectedPath);
+      await api.transitionStage(
+        loanId,
+        target,
+        `decision_panel · path=${selectedPath}`,
+      );
+      return target;
+    },
+    onSuccess: (target) => {
+      // Refetch every surface that observes either the message stream
+      // or the stage. ``materials`` is invalidated too because the
+      // drift banner re-evaluates against the new decision-stage.
       queryClient.invalidateQueries({ queryKey: ["loan", loanId, "audit"] });
+      queryClient.invalidateQueries({ queryKey: ["loan", loanId] });
+      queryClient.invalidateQueries({ queryKey: ["loan", loanId, "materials"] });
+      toast.success(
+        selectedPath === "decline"
+          ? "Adverse action letter sent. Loan moved to declined."
+          : `Decision sent to borrower. Loan moved to ${target}.`,
+      );
+    },
+    onError: (e) => {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error("Couldn't send the decision", { description: msg });
     },
   });
+
+  const sendToCommittee = useMutation({
+    mutationFn: () =>
+      api.addNote(
+        loanId,
+        `Routed to credit committee for review. Path: ${selectedPath}.`,
+        "internal_note",
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["loan", loanId, "audit"] });
+      toast.success("Routed to committee", {
+        description:
+          "Logged on the timeline. Committee handoff is internal — borrower isn't notified until you click \"Send to borrower\".",
+      });
+    },
+  });
+
+  // "Edit term sheet" / "Edit letter" — placeholder until we wire a
+  // proper editor. Surfaces the right next step rather than silently
+  // logging, which the previous stub did.
+  const editStub = () =>
+    toast.info(
+      selectedPath === "decline"
+        ? "To revise the letter, re-run the decision agent with adjusted rules."
+        : "To revise the term sheet, re-run the decision agent with adjusted inputs.",
+    );
 
   if (selectedPath === "decline") {
     return (
       <div className="flex flex-wrap items-center justify-end gap-2">
-        <SecondaryButton
-          Icon={IconPencil}
-          onClick={() => log.mutate("internal_review")}
-        >
+        <SecondaryButton Icon={IconPencil} onClick={editStub}>
           Edit letter
         </SecondaryButton>
         {/* Danger primary — distinct from brand-green because the
             consequence (adverse action letter) is the most loaded action
             in the system. */}
         <button
-          onClick={() => log.mutate("borrower")}
-          disabled={log.isPending}
+          onClick={() => sendDecisionToBorrower.mutate()}
+          disabled={sendDecisionToBorrower.isPending}
           className="flex items-center gap-1 rounded-md px-3 py-1.5 text-xs font-medium disabled:opacity-50"
           style={{
             background: "var(--color-text-danger)",
             color: "var(--color-background-danger)",
           }}
         >
-          Send adverse action letter
+          {sendDecisionToBorrower.isPending
+            ? "Sending…"
+            : "Send adverse action letter"}
         </button>
       </div>
     );
   }
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
-      <SecondaryButton
-        Icon={IconPencil}
-        onClick={() => log.mutate("internal_review")}
-      >
+      <SecondaryButton Icon={IconPencil} onClick={editStub}>
         Edit term sheet
       </SecondaryButton>
       <div className="flex gap-1.5">
         <SecondaryButton
-          onClick={() => log.mutate("committee")}
-          disabled={log.isPending}
+          onClick={() => sendToCommittee.mutate()}
+          disabled={sendToCommittee.isPending}
         >
           Send to committee
         </SecondaryButton>
         <PrimaryButton
-          onClick={() => log.mutate("borrower")}
-          disabled={log.isPending}
+          onClick={() => sendDecisionToBorrower.mutate()}
+          disabled={sendDecisionToBorrower.isPending}
         >
-          Send to borrower
+          {sendDecisionToBorrower.isPending ? "Sending…" : "Send to borrower"}
         </PrimaryButton>
       </div>
     </div>
@@ -428,9 +551,11 @@ export function CreditDecisionPanel({ loanId }: Props) {
               <p className="font-editorial mt-1 text-[20px] leading-tight">
                 {result.verdict_text}
               </p>
-              <p className="mt-2 text-[13px] leading-relaxed text-[var(--color-text-primary)]">
-                {result.rationale}
-              </p>
+              <div className="mt-2 text-[var(--color-text-primary)]">
+                <MarkdownBlock variant="relaxed">
+                  {result.rationale}
+                </MarkdownBlock>
+              </div>
             </div>
           </div>
 
@@ -500,12 +625,15 @@ export function CreditDecisionPanel({ loanId }: Props) {
               </p>
             )}
 
-          {/* Action bar — stubs in this phase: each writes an audit event.
-              Real builds would send via Resend / transition the loan stage. */}
+          {/* Action bar — "Send to borrower" / AAL now writes the
+              borrower-visible note AND transitions the stage. See the
+              ActionBar docstring for the boundary between this and the
+              decision-agent's drafting work. */}
           {selectedPath && (
             <ActionBar
               loanId={loanId}
               selectedPath={selectedPath}
+              result={result}
             />
           )}
 

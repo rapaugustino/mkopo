@@ -52,10 +52,16 @@ from mkopo.models import MagicLink, User
 
 logger = structlog.get_logger()
 
-# The four kinds of magic link the system knows how to issue. Each
-# has a distinct purpose so a "set password" token can't be replayed
-# at the "login" consume endpoint.
-MagicLinkPurpose = Literal["login", "set_password", "password_reset", "email_verify"]
+# The kinds of magic link the system knows how to issue. Each has
+# a distinct purpose so a "set password" token can't be replayed at
+# the "login" consume endpoint. ``loan_invite`` is the staff-initiated
+# "your loan officer created an application for you" invite — same
+# consume semantics as ``login`` (sets a session cookie) but a
+# longer default TTL because borrowers may not check email for a
+# day or two.
+MagicLinkPurpose = Literal[
+    "login", "set_password", "password_reset", "email_verify", "loan_invite"
+]
 
 
 # ---- password hashing --------------------------------------------------
@@ -126,12 +132,19 @@ async def mint_magic_link(
     *,
     user: User,
     purpose: MagicLinkPurpose,
+    expires_in_seconds: int | None = None,
 ) -> MintedLink:
     """Generate a single-use token for ``user`` and persist its hash.
 
     Returns the plain token in a :class:`MintedLink` so the caller
     can put it in the outbound email. The plain text is NEVER stored.
     The DB sees only ``sha256(plain_token)``.
+
+    ``expires_in_seconds`` overrides the default ``magic_link_ttl_seconds``
+    setting. Used by the ``loan_invite`` purpose, which needs a longer
+    TTL (7 days) than the standard 15-minute login link because
+    borrowers might not check email for a day or two after a loan
+    officer creates their application.
 
     Caller commits the session.
     """
@@ -141,7 +154,12 @@ async def mint_magic_link(
     # link without escaping.
     plain_token = secrets.token_urlsafe(32)
     token_hash = _hash_token(plain_token)
-    expires_at = datetime.now(UTC) + timedelta(seconds=settings.magic_link_ttl_seconds)
+    ttl = (
+        expires_in_seconds
+        if expires_in_seconds is not None
+        else settings.magic_link_ttl_seconds
+    )
+    expires_at = datetime.now(UTC) + timedelta(seconds=ttl)
     row = MagicLink(
         user_id=user.id,
         token_hash=token_hash,
@@ -228,16 +246,37 @@ async def consume_magic_link(
 
 @dataclass(frozen=True)
 class SessionClaims:
-    """Decoded contents of a borrower session JWT."""
+    """Decoded contents of a borrower session JWT.
+
+    ``jti`` is the per-token identifier — used by the Redis blacklist
+    to revoke individual tokens on logout without changing the
+    signing secret (which would log every borrower out at once)."""
 
     user_id: uuid.UUID
     email: str
     role: str
     issued_at: datetime
     expires_at: datetime
+    jti: str
 
 
 _JWT_ALG = "HS256"
+
+# Issuer + audience claims are added as defense-in-depth. Today Mkopo
+# is a single service so the cookie scoping already prevents
+# cross-service confusion, but pinning iss/aud means that if a token
+# ever leaks to a non-Mkopo verifier (or the architecture grows a
+# second service later) the claims will refuse to validate without
+# matching config — strictly safer than relying on cookie scoping
+# alone.
+_JWT_ISSUER = "mkopo-borrower-api"
+_JWT_AUDIENCE = "mkopo-borrower"
+
+# Tolerate small clock skew between the JWT-minting host and the host
+# decoding the JWT. 30 seconds is the conventional value: enough to
+# absorb NTP drift on a sloppily-configured device, not so much that
+# expired-by-a-minute tokens stay alive.
+_JWT_LEEWAY_SECONDS = 30
 
 
 def issue_jwt(user: User) -> str:
@@ -251,23 +290,38 @@ def issue_jwt(user: User) -> str:
     Tokens are HS256-signed with ``settings.jwt_secret``. Rotating
     the secret invalidates all outstanding sessions — that's the
     intentional kill switch.
+
+    Claims:
+      - ``sub``: user.id (uuid)
+      - ``email`` / ``role``: convenience for log-prefix + RBAC gating
+      - ``iat`` / ``exp``: standard issued-at + expiry
+      - ``iss`` / ``aud``: pinned to "mkopo-borrower-api" / "mkopo-borrower"
+        so a stray token can't be confused with one minted by a
+        different (future) service.
     """
     settings = get_settings()
     now = datetime.now(UTC)
     expires_at = now + timedelta(seconds=settings.jwt_session_ttl_seconds)
+    # Per-token UUID. Lets the Redis blacklist revoke this exact
+    # token on logout without invalidating every borrower's session
+    # (which is what rotating ``jwt_secret`` would do).
+    jti = str(uuid.uuid4())
     payload = {
         "sub": str(user.id),
         "email": user.email,
         "role": user.role,
         "iat": int(now.timestamp()),
         "exp": int(expires_at.timestamp()),
+        "iss": _JWT_ISSUER,
+        "aud": _JWT_AUDIENCE,
+        "jti": jti,
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm=_JWT_ALG)
 
 
 def decode_jwt(token: str) -> SessionClaims | None:
     """Verify and unpack a session JWT. ``None`` on any failure
-    (bad signature, expired, malformed payload).
+    (bad signature, expired, malformed payload, wrong issuer/audience).
 
     Caller treats ``None`` uniformly as "not authenticated" — we
     don't differentiate the failure reason to the client because
@@ -275,7 +329,14 @@ def decode_jwt(token: str) -> SessionClaims | None:
     """
     settings = get_settings()
     try:
-        payload = jwt.decode(token, settings.jwt_secret, algorithms=[_JWT_ALG])
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret,
+            algorithms=[_JWT_ALG],
+            issuer=_JWT_ISSUER,
+            audience=_JWT_AUDIENCE,
+            leeway=_JWT_LEEWAY_SECONDS,
+        )
     except jwt.PyJWTError as e:
         logger.debug("jwt_decode_failed", reason=type(e).__name__)
         return None
@@ -286,6 +347,7 @@ def decode_jwt(token: str) -> SessionClaims | None:
             role=payload["role"],
             issued_at=datetime.fromtimestamp(payload["iat"], tz=UTC),
             expires_at=datetime.fromtimestamp(payload["exp"], tz=UTC),
+            jti=payload["jti"],
         )
     except (KeyError, ValueError):
         # Token was signed by us but the payload shape is wrong —

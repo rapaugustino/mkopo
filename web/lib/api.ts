@@ -23,6 +23,17 @@ export interface Owner {
   initials: string;
 }
 
+/** A staff user available as a loan owner. Superset of ``Owner`` —
+ *  the dropdown needs to surface roles so the underwriter can tell
+ *  who's an admin vs a regular underwriter at a glance. */
+export interface StaffUser {
+  id: string;
+  name: string;
+  email: string;
+  initials: string;
+  role: string;
+}
+
 export interface Borrower {
   id: string;
   name: string;
@@ -350,6 +361,52 @@ export interface EvalSummary {
   llm_calls_24h: number;
   llm_p95_latency_seconds: number | null;
   llm_error_rate_24h: number | null;
+  /** Which window the LLM stats above actually came from. The backend
+   *  cascades 24h → 7d → all-time so a quiet demo install still shows
+   *  meaningful numbers rather than leaving every tile at "—". */
+  llm_window_label?: string;
+}
+
+// Diagnostics — everything below the drift trend on the eval page.
+// One response shape so the page makes one extra fetch.
+
+export interface EvalConfidenceBucket {
+  label: string;
+  n: number;
+  accepted: number;
+  overridden: number;
+}
+
+export interface EvalReviewQueueStats {
+  open: number;
+  resolved_7d: number;
+  median_open_age_hours: number | null;
+}
+
+export interface EvalAgentReliabilityRow {
+  agent_name: string;
+  runs: number;
+  ok: number;
+  interrupted: number;
+  failed: number;
+}
+
+export interface EvalFailureRow {
+  /** `"llm"` opens the LLM call drawer; `"agent_step"` opens the
+   *  agent run drawer (drill-in is by parent run, not by step). */
+  kind: "llm" | "agent_step";
+  id: string;
+  at: string;
+  summary: string;
+  detail: string | null;
+}
+
+export interface EvalDiagnostics {
+  confidence_buckets: EvalConfidenceBucket[];
+  extractions_total: number;
+  review_queue: EvalReviewQueueStats;
+  agent_reliability: EvalAgentReliabilityRow[];
+  recent_failures: EvalFailureRow[];
 }
 
 export interface EvalFieldRow {
@@ -426,9 +483,25 @@ export interface LLMCallRow {
 /** Full detail for one LLM call, with same-prompt neighbours.
  *  Returned by ``GET /observability/llm/{id}``; the drawer renders
  *  the long-form ``error_detail`` and the related-calls list. */
+export interface ToolUseRow {
+  id: string;
+  sequence_num: number;
+  tool_name: string;
+  status: string; // "ok" | "error" | "cancelled"
+  elapsed_ms: number | null;
+  input: Record<string, unknown>;
+  output: Record<string, unknown> | null;
+  error_message: string | null;
+  created_at: string;
+}
+
 export interface LLMCallDetail extends LLMCallRow {
   error_detail: string | null;
   related: LLMCallRow[];
+  /** Tool trajectory for this call. Empty when the call didn't use
+   *  tools. Ordered by ``sequence_num`` so the drawer can render the
+   *  steps in the order the model proposed them. */
+  tool_uses: ToolUseRow[];
 }
 
 export interface ModelStats {
@@ -536,6 +609,13 @@ export const api = {
   // ---- Documents ----
   listDocuments: (loanId: string) =>
     request<LoanDocument[]>(`/loans/${loanId}/documents`),
+  getDocumentDownloadUrl: (loanId: string, documentId: string) =>
+    request<{
+      url: string;
+      filename: string;
+      content_type: string;
+      expires_in_seconds: number;
+    }>(`/loans/${loanId}/documents/${documentId}/download-url`),
   transitionStage: (loanId: string, to_stage: LoanStage, reason: string) =>
     request<Loan>(`/loans/${loanId}/transition`, {
       method: "POST",
@@ -545,6 +625,14 @@ export const api = {
     request<Record<string, string | null>>(`/loans/${loanId}/transitions`),
   getMaterialsStatus: (loanId: string) =>
     request<MaterialsStatus>(`/loans/${loanId}/materials/status`),
+  // ---- Staff + owner reassignment ----
+  listStaffUsers: () =>
+    request<StaffUser[]>(`/loans/staff/users`),
+  setLoanOwner: (loanId: string, ownerId: string | null, reason: string) =>
+    request<Loan>(`/loans/${loanId}/owner`, {
+      method: "PATCH",
+      body: JSON.stringify({ owner_id: ownerId, reason }),
+    }),
   setAutonomy: (loanId: string, level: AutonomyLevel, reason: string) =>
     request<Loan>(`/loans/${loanId}/autonomy`, {
       method: "PATCH",
@@ -568,6 +656,10 @@ export const api = {
   getEvalSummary: () => request<EvalSummary>(`/eval/summary`),
   getEvalFields: () => request<EvalFieldRow[]>(`/eval/fields`),
   getEvalTrend: (days = 30) => request<EvalTrend>(`/eval/trend?days=${days}`),
+  /** Confidence calibration + review queue + agent reliability + recent
+   *  failures. Same backend table set as observability, sliced for the
+   *  eval page's "is the AI actually working?" framing. */
+  getEvalDiagnostics: () => request<EvalDiagnostics>(`/eval/diagnostics`),
   refreshDrift: () => request<EvalRefreshResult>(`/eval/refresh`, { method: "POST" }),
   // ---- Observability ----
   getLLMObservability: (hours = 24) =>
@@ -578,4 +670,65 @@ export const api = {
     request<AgentSummary>(`/observability/agents?hours=${hours}`),
   getAgentRunDetail: (runId: string) =>
     request<AgentRunDetail>(`/observability/agents/${runId}`),
+  // ---- Prompts ----
+  /** List every registered prompt with its current active version. */
+  listPrompts: () => request<PromptSummary[]>(`/prompts`),
+  /** Detail view for one prompt: full body + version history. */
+  getPromptDetail: (identifier: string) =>
+    request<PromptDetail>(`/prompts/${encodeURIComponent(identifier)}`),
+  /** Fetch the code-default body. Powers the "Restore default" button. */
+  getPromptDefault: (identifier: string) =>
+    request<{ identifier: string; body: string }>(
+      `/prompts/${encodeURIComponent(identifier)}/default`,
+    ),
+  /** Append a new version. ``activate=true`` makes it the runtime body. */
+  createPromptVersion: (
+    identifier: string,
+    body: { body: string; change_note: string; activate: boolean },
+  ) =>
+    request<PromptVersion>(`/prompts/${encodeURIComponent(identifier)}/versions`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  /** Switch the active flag to a previous version (rollback). */
+  activatePromptVersion: (identifier: string, version: number) =>
+    request<PromptVersion>(
+      `/prompts/${encodeURIComponent(identifier)}/activate/${version}`,
+      { method: "POST" },
+    ),
 };
+
+
+// ---- Prompts (Phase: prompt management UI) ----
+
+export interface PromptSummary {
+  identifier: string;
+  label: string;
+  description: string;
+  /** ``null`` when the identifier exists in the registry but has no
+   *  DB row yet — UI shows "code default" in that case. */
+  active_version: number | null;
+  active_at: string | null;
+  n_versions: number;
+}
+
+export interface PromptVersion {
+  id: string;
+  version: number;
+  body: string;
+  change_note: string | null;
+  is_active: boolean;
+  created_at: string;
+  created_by_user_id: string | null;
+}
+
+export interface PromptDetail {
+  identifier: string;
+  label: string;
+  description: string;
+  /** The canonical code default — what "Restore default" snaps back to. */
+  default_body: string;
+  /** Newest first. Empty means we've never written a DB row for this
+   *  identifier; ``default_body`` is what the runtime is using. */
+  versions: PromptVersion[];
+}

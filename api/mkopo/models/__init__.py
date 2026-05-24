@@ -17,7 +17,7 @@ from mkopo.models.document import (
     ReviewTask,
 )
 from mkopo.models.embedding import DocumentChunk
-from mkopo.models.eval import LLMCall, TaskRun
+from mkopo.models.eval import LLMCall, TaskRun, ToolUse
 from mkopo.models.loan import (
     VALID_TRANSITIONS,
     AgentRun,
@@ -30,6 +30,7 @@ from mkopo.models.loan import (
 )
 from mkopo.models.magic_link import MagicLink
 from mkopo.models.party import LoanParty, Party, PartyRole, PartyType
+from mkopo.models.prompt import Prompt
 from mkopo.models.user import User
 
 __all__ = [
@@ -58,8 +59,10 @@ __all__ = [
     "Party",
     "PartyRole",
     "PartyType",
+    "Prompt",
     "ReviewTask",
     "TaskRun",
+    "ToolUse",
     "User",
     "VALID_TRANSITIONS",
 ]

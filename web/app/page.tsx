@@ -390,7 +390,7 @@ export default function PipelinePage() {
           </div>
         }
         title="Mkopo Lens"
-        sub="AI-first origination · Atlas Capital workspace"
+        sub={pipelineSummary(loans)}
         actions={
           <>
             <PipelineFilters
@@ -557,4 +557,49 @@ export default function PipelinePage() {
       </div>
     </div>
   );
+}
+
+/** Build the "X active loans · $Y in pipeline · Z need review" line
+ *  shown under the Mkopo Lens title. Filters out terminal stages
+ *  (declined / withdrawn / servicing) when counting "active" because
+ *  those don't represent work-in-progress for the underwriter.
+ *
+ *  Renders a low-effort but high-signal at-a-glance metric — the page
+ *  previously felt empty because the only above-the-table content was
+ *  a generic "Loan origination workspace" tagline, and the stage
+ *  tiles below it were filterable but not summary-flavoured. */
+function pipelineSummary(loans: Loan[]): string {
+  const ACTIVE_STAGES: ReadonlySet<LoanStage> = new Set([
+    "intake",
+    "underwriting",
+    "decision",
+    "conditions",
+    "closing",
+    "approved",
+  ]);
+  const active = loans.filter((l) => ACTIVE_STAGES.has(l.stage));
+  const pipelineUsd = active.reduce(
+    (acc, l) => acc + Number(l.amount || 0),
+    0,
+  );
+  const inDecision = active.filter((l) => l.stage === "decision").length;
+
+  const parts: string[] = [];
+  parts.push(
+    `${active.length} active loan${active.length === 1 ? "" : "s"}`,
+  );
+  if (pipelineUsd > 0) {
+    const mShort = pipelineUsd >= 1_000_000;
+    parts.push(
+      mShort
+        ? `$${(pipelineUsd / 1_000_000).toFixed(1)}M in pipeline`
+        : `$${pipelineUsd.toLocaleString()} in pipeline`,
+    );
+  }
+  if (inDecision > 0) {
+    parts.push(
+      `${inDecision} awaiting decision`,
+    );
+  }
+  return parts.join(" · ");
 }

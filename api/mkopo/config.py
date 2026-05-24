@@ -97,6 +97,12 @@ class Settings(BaseSettings):
     # Magic-link expiry (seconds). Tight — links should be acted on
     # promptly. 15 min covers email-delivery slowness.
     magic_link_ttl_seconds: int = 60 * 15
+    # Loan-invite magic-link expiry. Longer than the standard link
+    # because a borrower whose loan officer just created their
+    # application might not check email for a day or two. 7 days
+    # gives them comfortable time to act without staying valid long
+    # enough to be a real attacker-window risk.
+    magic_link_loan_invite_ttl_seconds: int = 60 * 60 * 24 * 7
 
     # Frontend
     frontend_url: str = "http://localhost:3000"

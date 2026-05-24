@@ -53,9 +53,15 @@ class ToolUseResponse:
     appended to the messages array for the next round.
     ``stop_reason`` tells the agent loop whether to keep going
     (``"tool_use"``) or stop (``"end_turn"``).
+
+    ``call_id`` is the UUID of the persisted ``llm_calls`` row for
+    this turn. The chat loop links every ``tool_uses`` row it
+    writes back to this call_id, so the observability drawer can
+    render the tool sequence under the LLM call that issued it.
     """
 
     text: str | None
+    call_id: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
     assistant_message: dict[str, Any] = field(default_factory=dict)
     stop_reason: str | None = None
@@ -396,6 +402,7 @@ class LLMGateway:
 
         return ToolUseResponse(
             text="\n".join(text_parts) if text_parts else None,
+            call_id=call_id,
             tool_calls=tool_calls,
             assistant_message=assistant_message,
             stop_reason=getattr(response, "stop_reason", None),
@@ -454,6 +461,13 @@ class LLMGateway:
             async with get_session() as session:
                 session.add(
                     LLMCall(
+                        # Pin the row PK to the upstream call_id so
+                        # tool_uses + (future) parent_step refs can
+                        # link by the same UUID we logged. Without
+                        # this, the structlog ``call_id`` and the row
+                        # ``llm_calls.id`` are two different UUIDs
+                        # and you can't join them.
+                        id=uuid.UUID(call_id),
                         model=model,
                         system_prompt_hash=system_hash,
                         elapsed_seconds=elapsed_seconds,

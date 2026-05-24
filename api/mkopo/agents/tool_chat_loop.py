@@ -44,6 +44,7 @@ from mkopo.agents.tools import (
 from mkopo.config import get_settings
 from mkopo.db import get_session
 from mkopo.llm_gateway import get_gateway
+from mkopo.models import ToolUse
 from mkopo.services.audit import Actor, record
 
 logger = structlog.get_logger()
@@ -115,6 +116,11 @@ async def run_chat_turn(
     if tool_resume:
         # Resuming after a confirmation. Either we execute the held
         # tool (action=confirm) or synthesise a cancellation (else).
+        # ``call_id`` is echoed back from the client (it came in on
+        # the ``confirm_required`` event); it links the resulting
+        # ``tool_uses`` row back to the LLM call that originally
+        # asked for the tool.
+        held_call_id = tool_resume.get("call_id")
         if tool_resume.get("action") == "confirm":
             async for chunk in _execute_one_tool(
                 user_id=user_id,
@@ -125,6 +131,8 @@ async def run_chat_turn(
                 tool_name=tool_resume["name"],
                 tool_input=tool_resume.get("input") or {},
                 messages=messages,
+                llm_call_id=held_call_id,
+                sequence_num=0,
             ):
                 yield chunk
         else:
@@ -151,6 +159,20 @@ async def run_chat_turn(
                     "ok": False,
                     "error": "Cancelled by user",
                 },
+            )
+            # Record the cancellation in tool_uses too — the
+            # observability drawer otherwise wouldn't show that the
+            # user actively refused, only that the tool wasn't run.
+            await _persist_tool_use(
+                llm_call_id=held_call_id,
+                loan_id=loan_id,
+                tool_name=tool_resume["name"],
+                sequence_num=0,
+                tool_input=tool_resume.get("input") or {},
+                output=None,
+                status="cancelled",
+                error_message="User cancelled at confirmation prompt",
+                elapsed_ms=0,
             )
 
     # Main loop.
@@ -188,7 +210,7 @@ async def run_chat_turn(
             yield _sse("done", {"messages": messages})
             return
 
-        for tc in response.tool_calls:
+        for sequence_num, tc in enumerate(response.tool_calls):
             tool = get_tool(tc.name)
             if tool is None:
                 yield _sse(
@@ -242,6 +264,11 @@ async def run_chat_turn(
                         "human_action": tool.human_action,
                         "summary": _summarise_args(tc.input),
                         "messages": messages,
+                        # Pass the LLM call's id back to the client so
+                        # the eventual tool_resume can echo it. Links
+                        # the persisted tool_uses row to the original
+                        # LLM call once the user confirms.
+                        "call_id": response.call_id,
                     },
                 )
                 return
@@ -255,6 +282,8 @@ async def run_chat_turn(
                 tool_name=tc.name,
                 tool_input=tc.input,
                 messages=messages,
+                llm_call_id=response.call_id,
+                sequence_num=sequence_num,
             ):
                 yield chunk
 
@@ -281,7 +310,17 @@ async def _execute_one_tool(
     tool_name: str,
     tool_input: dict[str, Any],
     messages: list[dict[str, Any]],
+    llm_call_id: str | None = None,
+    sequence_num: int = 0,
 ) -> AsyncGenerator[bytes, None]:
+    """Execute a single tool requested by the LLM. Streams SSE events
+    + persists a ``tool_uses`` row for the observability drawer.
+
+    ``llm_call_id`` is the UUID of the LLM call that asked for this
+    tool. Passed through so the persisted ``tool_uses`` row can join
+    back to its parent LLM call — without this, the observability
+    drawer can't reconstruct "the agent called X, then Y, then Z".
+    """
     tool = get_tool(tool_name)
     if tool is None:
         return
@@ -295,6 +334,11 @@ async def _execute_one_tool(
             "human_action": tool.human_action,
         },
     )
+
+    started_at = datetime.now(UTC)
+    status: str = "ok"
+    output: dict[str, Any] | None = None
+    error_message: str | None = None
 
     async with get_session() as session:
         try:
@@ -312,6 +356,7 @@ async def _execute_one_tool(
             )
             result = await tool.handler(ctx, validated)
             await session.commit()
+            output = result if isinstance(result, dict) else {"result": result}
             yield _sse(
                 "tool_result",
                 {"id": tool_use_id, "ok": True, "result": result},
@@ -330,6 +375,8 @@ async def _execute_one_tool(
             )
         except ToolError as e:
             await session.rollback()
+            status = "error"
+            error_message = str(e)
             yield _sse(
                 "tool_result",
                 {"id": tool_use_id, "ok": False, "error": str(e)},
@@ -349,6 +396,8 @@ async def _execute_one_tool(
             )
         except Exception as e:  # noqa: BLE001
             await session.rollback()
+            status = "error"
+            error_message = f"{type(e).__name__}: {e}"
             logger.exception(
                 "tool_handler_unexpected",
                 tool=tool_name,
@@ -375,3 +424,59 @@ async def _execute_one_tool(
                     ],
                 }
             )
+
+    # Persist the trajectory in its own session — the tool's own
+    # session may have rolled back on error, and we still want the
+    # observability row to land. Never raise from this path; if
+    # observability is broken the chat must still complete.
+    elapsed_ms = int((datetime.now(UTC) - started_at).total_seconds() * 1000)
+    await _persist_tool_use(
+        llm_call_id=llm_call_id,
+        loan_id=loan_id,
+        tool_name=tool_name,
+        sequence_num=sequence_num,
+        tool_input=tool_input,
+        output=output,
+        status=status,
+        error_message=error_message,
+        elapsed_ms=elapsed_ms,
+    )
+
+
+async def _persist_tool_use(
+    *,
+    llm_call_id: str | None,
+    loan_id: uuid.UUID,
+    tool_name: str,
+    sequence_num: int,
+    tool_input: dict[str, Any],
+    output: dict[str, Any] | None,
+    status: str,
+    error_message: str | None,
+    elapsed_ms: int,
+) -> None:
+    """Best-effort write of one ``tool_uses`` row. Used by both the
+    auto-execute path and the cancellation/resume paths so every
+    tool invocation lands on disk."""
+    try:
+        async with get_session() as session:
+            session.add(
+                ToolUse(
+                    llm_call_id=uuid.UUID(llm_call_id) if llm_call_id else None,
+                    loan_id=loan_id,
+                    tool_name=tool_name,
+                    sequence_num=sequence_num,
+                    input=tool_input,
+                    output=output,
+                    status=status,
+                    error_message=error_message,
+                    elapsed_ms=elapsed_ms,
+                )
+            )
+            await session.commit()
+    except Exception:
+        logger.exception(
+            "tool_use_persist_failed",
+            tool=tool_name,
+            llm_call_id=llm_call_id,
+        )

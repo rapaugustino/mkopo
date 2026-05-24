@@ -8,6 +8,7 @@ import {
   IconChartLine,
   IconLayoutGrid,
   IconListSearch,
+  IconPencil,
 } from "@tabler/icons-react";
 import { api, type ReviewTask } from "@/lib/api";
 
@@ -24,6 +25,10 @@ const NAV: NavItem[] = [
   { href: "/review-queue", label: "Review queue", Icon: IconListSearch },
   { href: "/eval", label: "Eval", Icon: IconChartLine },
   { href: "/observability", label: "Observability", Icon: IconActivity },
+  // Prompts is the management surface for the system prompts every
+  // agent uses. Staff-only by route gate (the underlying endpoint
+  // requires CurrentUserDep).
+  { href: "/prompts", label: "Prompts", Icon: IconPencil },
 ];
 
 /**

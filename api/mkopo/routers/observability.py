@@ -32,7 +32,7 @@ from sqlalchemy import desc, func, select
 
 from mkopo.deps import CurrentUserDep, DbSessionDep
 from mkopo.models import AgentRun, AgentStep, AuditEvent
-from mkopo.models.eval import LLMCall
+from mkopo.models.eval import LLMCall, ToolUse
 
 router = APIRouter(prefix="/observability", tags=["observability"])
 
@@ -59,14 +59,30 @@ class LLMCallRow(BaseModel):
     error_reason: str | None = None
 
 
+class ToolUseRow(BaseModel):
+    """One persisted tool invocation. Renders as a step in the
+    trajectory timeline inside the observability drawer."""
+
+    id: str
+    sequence_num: int
+    tool_name: str
+    status: str  # "ok" | "error" | "cancelled"
+    elapsed_ms: int | None
+    input: dict[str, Any]
+    output: dict[str, Any] | None
+    error_message: str | None
+    created_at: datetime
+
+
 class LLMCallDetail(BaseModel):
     """Full LLM call record for the observability drill-in drawer.
 
     Same shape as ``LLMCallRow`` plus ``error_detail`` (long-form
-    technical content) and a small list of *related* calls — rows
+    technical content), a small list of *related* calls — rows
     sharing the same ``system_prompt_hash`` in the recent window, so an
     operator looking at one schema_failed call can see whether the
-    same prompt fails repeatedly or is a one-off.
+    same prompt fails repeatedly or is a one-off — and the full
+    ``tool_uses`` trajectory if this was a tool-using call.
     """
 
     id: str
@@ -82,6 +98,7 @@ class LLMCallDetail(BaseModel):
     error_reason: str | None
     error_detail: str | None
     related: list[LLMCallRow]  # other calls with the same prompt hash
+    tool_uses: list[ToolUseRow]  # ordered tool trajectory, empty if none
 
 
 class ModelStats(BaseModel):
@@ -264,6 +281,17 @@ async def llm_call_detail(
         )
     ).scalars().all()
 
+    # Tool trajectory issued by this call. Ordered by sequence_num so
+    # the drawer renders the agent's reasoning in the same order the
+    # model proposed it.
+    tool_uses = (
+        await db.execute(
+            select(ToolUse)
+            .where(ToolUse.llm_call_id == call.id)
+            .order_by(ToolUse.sequence_num.asc())
+        )
+    ).scalars().all()
+
     return LLMCallDetail(
         id=str(call.id),
         created_at=call.created_at,
@@ -292,6 +320,20 @@ async def llm_call_detail(
                 error_reason=n.error_reason,
             )
             for n in neighbours
+        ],
+        tool_uses=[
+            ToolUseRow(
+                id=str(t.id),
+                sequence_num=t.sequence_num,
+                tool_name=t.tool_name,
+                status=t.status,
+                elapsed_ms=t.elapsed_ms,
+                input=t.input,
+                output=t.output,
+                error_message=t.error_message,
+                created_at=t.created_at,
+            )
+            for t in tool_uses
         ],
     )
 

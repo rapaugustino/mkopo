@@ -133,7 +133,7 @@ def _check_storage(settings: Settings) -> CheckResult:
 def _check_auth(settings: Settings) -> CheckResult:
     if settings.dev_api_token == "dev-token-replace-me":
         return CheckResult(
-            name="Auth",
+            name="Auth (staff bearer)",
             status="degraded" if settings.is_production else "ok",
             message="dev bearer token is the placeholder default",
             hint=(
@@ -142,7 +142,45 @@ def _check_auth(settings: Settings) -> CheckResult:
                 else "DEV_API_TOKEN must not be the placeholder in production."
             ),
         )
-    return CheckResult(name="Auth", status="ok", message="dev bearer token configured")
+    return CheckResult(
+        name="Auth (staff bearer)", status="ok", message="dev bearer token configured"
+    )
+
+
+def _check_jwt(settings: Settings) -> CheckResult:
+    """Borrower-session JWT secret. The default is intentionally
+    insecure so dev works out of the box, but a production deployment
+    that forgets to override it would mint forgeable session tokens —
+    we surface that loudly here so the deployer catches it on the
+    first boot rather than the first incident."""
+    default = "dev-jwt-secret-replace-me-min-32-chars"
+    if settings.jwt_secret == default:
+        return CheckResult(
+            name="Auth (borrower JWT)",
+            status="degraded" if settings.is_production else "ok",
+            message="JWT signing secret is the placeholder default",
+            hint=(
+                None
+                if not settings.is_production
+                else (
+                    "JWT_SECRET must be set to a unique random ≥32-char "
+                    "value in production — otherwise every deployment shares "
+                    "the same signing key and session tokens are forgeable."
+                )
+            ),
+        )
+    if len(settings.jwt_secret) < 32:
+        return CheckResult(
+            name="Auth (borrower JWT)",
+            status="degraded",
+            message=f"JWT signing secret is only {len(settings.jwt_secret)} chars",
+            hint="Use a random secret of at least 32 characters (256 bits).",
+        )
+    return CheckResult(
+        name="Auth (borrower JWT)",
+        status="ok",
+        message=f"JWT signing secret configured ({len(settings.jwt_secret)} chars)",
+    )
 
 
 def run_startup_checks(settings: Settings) -> list[CheckResult]:
@@ -158,6 +196,7 @@ def run_startup_checks(settings: Settings) -> list[CheckResult]:
         _check_resend(settings),
         _check_storage(settings),
         _check_auth(settings),
+        _check_jwt(settings),
     ]
     ok = [r for r in results if r.status == "ok"]
     degraded = [r for r in results if r.status == "degraded"]

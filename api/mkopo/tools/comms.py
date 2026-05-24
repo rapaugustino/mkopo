@@ -45,7 +45,7 @@ logger = structlog.get_logger()
 # auth_service if it ever wants to). Stay in sync if the auth set
 # changes — the test file pins both lists.
 MagicLinkPurposeLiteral = Literal[
-    "login", "set_password", "password_reset", "email_verify"
+    "login", "set_password", "password_reset", "email_verify", "loan_invite"
 ]
 
 
@@ -175,6 +175,16 @@ def _purpose_copy(
                 f"Confirm your email at {brand}",
                 "Click below to confirm your email address.",
                 "Confirm email",
+            )
+        case "loan_invite":
+            return (
+                f"Your loan application is ready at {brand}",
+                (
+                    "Your loan officer has started a loan application for "
+                    "you. Click below to sign in and upload the required "
+                    "documents — we'll guide you through what's needed."
+                ),
+                "Open my application",
             )
         case _:  # pragma: no cover — Literal exhaustiveness handled by mypy
             raise ValueError(f"unknown magic-link purpose: {purpose}")

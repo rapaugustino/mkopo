@@ -43,7 +43,7 @@ const jetbrains = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: "Mkopo Lens",
-  description: "AI-first loan origination for private lenders",
+  description: "Loan origination platform for private lenders",
 };
 
 export default function RootLayout({

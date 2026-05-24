@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   IconArrowRight,
-  IconLogout,
   IconPencil,
   IconPlus,
   IconUser,
@@ -72,31 +71,23 @@ export default function AccountPage() {
 
   const loans = loansQuery.data ?? [];
 
+  // Outer wrapper is just a vertical stack now — width and centering
+  // come from the surrounding BorrowerShell (mounted by AppShell for
+  // ``/account`` routes).
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-5">
-      {/* Header with user identity + sign-out. */}
-      <header className="flex items-start justify-between gap-3 rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-5 py-4">
-        <div>
-          <p className="text-[11px] uppercase tracking-wider text-[var(--color-text-tertiary)]">
-            Account
-          </p>
-          <p className="font-editorial mt-1 text-[22px] tracking-tight">
-            {auth.user.name || auth.user.email}
-          </p>
-          <p className="mt-0.5 text-[12px] text-[var(--color-text-secondary)]">
-            {auth.user.email}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => {
-            void auth.logout().then(() => router.push("/"));
-          }}
-          className="inline-flex items-center gap-1.5 rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-2.5 py-1.5 text-[11.5px] text-[var(--color-text-secondary)] hover:bg-[var(--color-background-secondary)]"
-        >
-          <IconLogout size={12} />
-          Sign out
-        </button>
+    <div className="flex flex-col gap-5">
+      {/* Personal greeting card. Sign-out lives in the chrome
+          (BorrowerHeaderChip) so we don't duplicate it here. */}
+      <header className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-5 py-4">
+        <p className="text-[11px] uppercase tracking-wider text-[var(--color-text-tertiary)]">
+          Account
+        </p>
+        <p className="font-editorial mt-1 text-[22px] tracking-tight">
+          {auth.user.name || auth.user.email}
+        </p>
+        <p className="mt-0.5 text-[12px] text-[var(--color-text-secondary)]">
+          {auth.user.email}
+        </p>
       </header>
 
       {/* Loans list. The launchpad. */}

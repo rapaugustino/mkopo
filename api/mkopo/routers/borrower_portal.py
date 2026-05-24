@@ -114,13 +114,28 @@ class BorrowerApplyOut(BaseModel):
 class BorrowerStatusOut(BaseModel):
     """The status view a borrower sees when they return to the portal.
     Deliberately a thin projection — no internal risk flags, no
-    AI-drafted prose, just where the loan is and what's expected next."""
+    AI-drafted prose, just where the loan is and what's expected next.
+
+    ``loan_class`` is exposed so the borrower portal can render the
+    right document-upload hints (personal: pay stubs / tax returns /
+    bank statements / ID; business: appraisal / rent roll / etc.).
+    Without this, the upload card showed the business set to every
+    applicant.
+
+    ``required_docs`` is the per-class list the rules engine would
+    refuse to advance the loan without. Surfacing it to the borrower
+    early ("we need these four document types") is a much better UX
+    than "intake ran, here's an email asking for them" — they see
+    the checklist on first load.
+    """
 
     loan_id: uuid.UUID
     reference: str
     stage: str
     next_step: str
     submitted_at: str
+    loan_class: str
+    required_docs: list[str]
     documents: list[dict[str, Any]]
 
 
@@ -461,17 +476,35 @@ async def borrower_status(
         )
     ).scalars().all()
 
+    # Required-docs list scoped to the loan's class. Pulled from the
+    # rules engine's REQUIRED_DOCS_* sets so the borrower portal's
+    # checklist stays in sync with what underwriting will actually
+    # demand at the prerequisite gate — no risk of asking the
+    # borrower for documents we won't accept, or skipping documents
+    # we'll later refuse to advance without.
+    from mkopo.rules.policy import REQUIRED_DOCS, REQUIRED_DOCS_PERSONAL
+
+    loan_class_str = (
+        loan.loan_class.value if loan.loan_class is not None else "business"
+    )
+    required = (
+        REQUIRED_DOCS_PERSONAL if loan_class_str == "personal" else REQUIRED_DOCS
+    )
     return BorrowerStatusOut(
         loan_id=loan.id,
         reference=loan.reference,
         stage=loan.stage.value,
         next_step=_next_step_for_borrower(loan.stage),
         submitted_at=loan.created_at.isoformat(),
+        loan_class=loan_class_str,
+        required_docs=sorted(required),
         documents=[
             {
+                "id": str(d.id),
                 "filename": d.filename,
                 "uploaded_at": d.created_at.isoformat(),
                 "size_bytes": d.size_bytes,
+                "content_type": d.content_type,
             }
             for d in docs
         ],

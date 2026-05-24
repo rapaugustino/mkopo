@@ -232,3 +232,110 @@ select.form-input,
 select.form-input-on-card {
   padding-right: 1.75rem;
 }
+
+/* ---- Markdown rendering ------------------------------------------------
+ *
+ * Used by every assistant-produced surface: chat bubbles, decision
+ * verdicts, AAL bodies, timeline quote blocks. Two variants: compact
+ * (chat bubble — tight) and relaxed (long-form prose). Both keep the
+ * heading-size jump small relative to body text so a stray ``#`` in
+ * an LLM response doesn't blow out the layout. */
+.markdown-block {
+  color: var(--color-text-primary);
+}
+.markdown-block p {
+  margin: 0;
+}
+.markdown-block p + p,
+.markdown-block ul,
+.markdown-block ol,
+.markdown-block blockquote,
+.markdown-block pre,
+.markdown-block h1,
+.markdown-block h2,
+.markdown-block h3 {
+  margin-top: 0.5rem;
+}
+.markdown-block ul,
+.markdown-block ol {
+  padding-left: 1.25rem;
+}
+.markdown-block ul {
+  list-style: disc;
+}
+.markdown-block ol {
+  list-style: decimal;
+}
+.markdown-block li + li {
+  margin-top: 0.15rem;
+}
+.markdown-block h1,
+.markdown-block h2,
+.markdown-block h3 {
+  font-weight: 600;
+  line-height: 1.3;
+}
+.markdown-block h1 { font-size: 1.05em; }
+.markdown-block h2 { font-size: 1em; }
+.markdown-block h3 { font-size: 0.95em; }
+.markdown-block strong { font-weight: 600; }
+.markdown-block em { font-style: italic; }
+.markdown-block code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+  background: var(--color-background-secondary);
+}
+.markdown-block pre {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  padding: 0.65rem 0.85rem;
+  border-radius: 6px;
+  background: var(--color-background-secondary);
+  overflow-x: auto;
+  line-height: 1.45;
+}
+.markdown-block pre code {
+  padding: 0;
+  background: transparent;
+}
+.markdown-block blockquote {
+  border-left: 2px solid var(--color-border-tertiary);
+  padding-left: 0.75rem;
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+.markdown-block table {
+  border-collapse: collapse;
+  margin-top: 0.5rem;
+  font-size: 0.95em;
+}
+.markdown-block th,
+.markdown-block td {
+  border: 1px solid var(--color-border-tertiary);
+  padding: 0.3rem 0.55rem;
+  text-align: left;
+}
+.markdown-block th {
+  background: var(--color-background-secondary);
+  font-weight: 600;
+}
+.markdown-block a {
+  color: var(--color-text-info);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.markdown-block a:hover {
+  text-decoration: none;
+}
+.markdown-block hr {
+  margin: 0.75rem 0;
+  border: 0;
+  border-top: 1px solid var(--color-border-tertiary);
+}
+.markdown-block input[type="checkbox"] {
+  margin-right: 0.4em;
+}
+.markdown-compact { font-size: 13px; line-height: 1.5; }
+.markdown-relaxed { font-size: 13.5px; line-height: 1.6; }

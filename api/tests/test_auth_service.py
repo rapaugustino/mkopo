@@ -168,12 +168,109 @@ class TestJwtRoundTrip:
     def test_payload_missing_subject_rejected(self):
         # Token signed correctly but lacks ``sub`` — must NOT crash
         # downstream code. Our decoder returns None on KeyError.
+        # Use the canonical iss/aud so the token gets past the
+        # PyJWT-level checks; the failure should be on the payload
+        # shape, not the claims validation.
         settings = get_settings()
         payload = {
             "email": "x@y.z",
             "role": "borrower",
             "iat": int(datetime.now(UTC).timestamp()),
             "exp": int((datetime.now(UTC) + timedelta(hours=1)).timestamp()),
+            "iss": "mkopo-borrower-api",
+            "aud": "mkopo-borrower",
         }
         token = pyjwt.encode(payload, settings.jwt_secret, algorithm="HS256")
         assert decode_jwt(token) is None
+
+    def test_wrong_issuer_rejected(self):
+        """A token signed with our secret but with a foreign ``iss``
+        must NOT be accepted — defense-in-depth against a future
+        deployment where the same secret might be reused across
+        sister services."""
+        settings = get_settings()
+        payload = {
+            "sub": str(uuid.uuid4()),
+            "email": "x@y.z",
+            "role": "borrower",
+            "iat": int(datetime.now(UTC).timestamp()),
+            "exp": int((datetime.now(UTC) + timedelta(hours=1)).timestamp()),
+            "iss": "some-other-service",
+            "aud": "mkopo-borrower",
+            "jti": str(uuid.uuid4()),
+        }
+        token = pyjwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+        assert decode_jwt(token) is None
+
+    def test_wrong_audience_rejected(self):
+        """Wrong ``aud`` claim is rejected with the same logic as
+        wrong ``iss`` — the decoder pins both."""
+        settings = get_settings()
+        payload = {
+            "sub": str(uuid.uuid4()),
+            "email": "x@y.z",
+            "role": "borrower",
+            "iat": int(datetime.now(UTC).timestamp()),
+            "exp": int((datetime.now(UTC) + timedelta(hours=1)).timestamp()),
+            "iss": "mkopo-borrower-api",
+            "aud": "mkopo-staff",
+            "jti": str(uuid.uuid4()),
+        }
+        token = pyjwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+        assert decode_jwt(token) is None
+
+    def test_clock_skew_leeway_tolerates_recently_expired(self):
+        """A token that expired up to ~30s ago (the configured
+        leeway) should still validate. Past that boundary it fails.
+        This protects users whose device clock drifted slightly."""
+        settings = get_settings()
+        # Expired 10 seconds ago — inside the 30s leeway.
+        recent_expiry = int(datetime.now(UTC).timestamp()) - 10
+        payload = {
+            "sub": str(uuid.uuid4()),
+            "email": "x@y.z",
+            "role": "borrower",
+            "iat": recent_expiry - 60,
+            "exp": recent_expiry,
+            "iss": "mkopo-borrower-api",
+            "aud": "mkopo-borrower",
+            "jti": str(uuid.uuid4()),
+        }
+        token = pyjwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+        assert decode_jwt(token) is not None
+
+        # Expired 5 minutes ago — well past the leeway window.
+        long_expired = int(datetime.now(UTC).timestamp()) - 300
+        payload["exp"] = long_expired
+        payload["iat"] = long_expired - 60
+        token = pyjwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+        assert decode_jwt(token) is None
+
+    def test_issued_token_carries_iss_and_aud_and_jti(self):
+        """Smoke: the live ``issue_jwt`` path emits the iss + aud
+        claims that ``decode_jwt`` requires, plus a unique jti per
+        token (the blacklist primitive needs it)."""
+        user = _fake_borrower()
+        settings = get_settings()
+        token_a = issue_jwt(user)
+        token_b = issue_jwt(user)
+        # Decode without enforcing iss/aud so we can read them raw.
+        decoded_a = pyjwt.decode(
+            token_a,
+            settings.jwt_secret,
+            algorithms=["HS256"],
+            options={"verify_aud": False, "verify_iss": False},
+        )
+        decoded_b = pyjwt.decode(
+            token_b,
+            settings.jwt_secret,
+            algorithms=["HS256"],
+            options={"verify_aud": False, "verify_iss": False},
+        )
+        assert decoded_a["iss"] == "mkopo-borrower-api"
+        assert decoded_a["aud"] == "mkopo-borrower"
+        assert "jti" in decoded_a
+        # Two issuances for the same user must produce different
+        # jti — otherwise the blacklist can't distinguish "this
+        # session" from "that session" on logout.
+        assert decoded_a["jti"] != decoded_b["jti"]

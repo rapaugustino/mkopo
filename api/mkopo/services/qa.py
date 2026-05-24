@@ -198,17 +198,12 @@ async def answer_question(
         or "(none yet — only underwritten loans have embeddings)"
     )
 
-    system = (
-        "You answer questions about a single commercial loan, on behalf of "
-        "an underwriter. Hard rules:\n"
-        "1. Use ONLY the provided document chunks and comparable-loan list.\n"
-        "2. If the chunks don't support an answer, say so — do not guess.\n"
-        "3. Cite each fact by chunk number: include the integer indices of "
-        "   the chunks you relied on in `cited_chunk_ordinals` (1-based).\n"
-        "4. When the question asks about comparable loans, summarise the "
-        "   comparable-loan list — do not invent loans that aren't there.\n"
-        "5. Be concise. 1–4 sentences is typical."
-    )
+    # System prompt managed through the /prompts UI; identifier
+    # qa.answer_question.system. The canonical default lives in
+    # mkopo.services.prompts.DEFAULTS.
+    from mkopo.services.prompts import get as get_prompt
+
+    system = get_prompt("qa.answer_question.system")
     user = (
         f"Question:\n{question}\n\n"
         f"Retrieved document chunks ({len(cited_chunks)}):\n"

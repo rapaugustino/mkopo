@@ -30,6 +30,9 @@ from mkopo.routers import (
     review,
     staff_chat,
 )
+from mkopo.routers import (
+    prompts as prompts_router,
+)
 from mkopo.startup_check import run_startup_checks
 
 
@@ -63,6 +66,33 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from mkopo.telemetry import setup_telemetry
 
     setup_telemetry(app)
+
+    # Prompt registry — write v1 of every code default into the
+    # ``prompts`` table on first boot against a fresh DB, then warm
+    # the process-level cache so the first agent run after start-up
+    # already gets active bodies. Idempotent: subsequent boots see
+    # the rows already there and only warm the cache. A failure
+    # here doesn't take down the app — the cache stays empty and
+    # ``prompts.get()`` falls through to the in-process defaults,
+    # which is correct fallback behaviour.
+    try:
+        from mkopo.db import get_session
+        from mkopo.services.prompts import (
+            ensure_defaults_seeded,
+        )
+        from mkopo.services.prompts import (
+            refresh_cache as refresh_prompt_cache,
+        )
+
+        async with get_session() as session:
+            n = await ensure_defaults_seeded(session)
+            await session.commit()
+            if n:
+                logger.info("prompts_seeded", count=n)
+            await refresh_prompt_cache(session)
+            logger.info("prompts_cache_warmed")
+    except Exception as exc:  # pragma: no cover — startup nicety only
+        logger.warning("prompts_seed_failed", error=str(exc)[:200])
 
     yield
     logger.info("app_shutting_down")
@@ -115,6 +145,18 @@ async def readiness(response: Response) -> dict[str, object]:
         checks["postgres"] = {"status": "error", "error": str(e)[:200]}
         logger.error("health_check_failed", component="postgres", error=str(e))
 
+    # Redis. Auth-side uses it for JWT-blacklist + rate-limit checks,
+    # both of which degrade open on Redis failure (see ``redis_client``).
+    # An outage shouldn't yank the pod from the LB, but operators want
+    # to see "degraded" surfaced loudly so they chase it.
+    from mkopo.services.redis_client import ping as redis_ping
+
+    if await redis_ping():
+        checks["redis"] = {"status": "ok"}
+    else:
+        checks["redis"] = {"status": "degraded", "note": "auth runs degraded-open"}
+        logger.warning("health_check_redis_unreachable")
+
     if not overall_ok:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 
@@ -133,6 +175,7 @@ app.include_router(parties.router, prefix="/api/v1")
 app.include_router(review.router, prefix="/api/v1")
 app.include_router(evals.router, prefix="/api/v1")
 app.include_router(observability.router, prefix="/api/v1")
+app.include_router(prompts_router.router, prefix="/api/v1")
 app.include_router(borrower_auth.router, prefix="/api/v1")
 app.include_router(borrower_chat.router, prefix="/api/v1")
 app.include_router(borrower_portal.router, prefix="/api/v1")

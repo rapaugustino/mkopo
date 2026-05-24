@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { IconX } from "@tabler/icons-react";
 import { AnimatePresence, motion } from "motion/react";
-import { api, type LLMCallDetail } from "@/lib/api";
+import { api, type LLMCallDetail, type ToolUseRow } from "@/lib/api";
 import { titleCase } from "@/lib/humanize";
 import { IconButton } from "@/app/components/IconButton";
 import { Pill, type PillVariant } from "@/app/components/Pill";
@@ -171,6 +171,27 @@ function CallBody({ detail }: { detail: LLMCallDetail }) {
         </section>
       )}
 
+      {/* Tool trajectory. Populated when the LLM call asked for one
+          or more tools — renders the full sequence the agent issued,
+          its inputs, what came back, and (for failures) why. This
+          is the Langsmith-replacement insight: you can see exactly
+          what the agent did without crawling structured logs. */}
+      {detail.tool_uses.length > 0 && (
+        <section>
+          <SectionLabel>
+            Tool trajectory
+            <span className="ml-1 font-normal text-[var(--color-text-tertiary)]">
+              · {detail.tool_uses.length}
+            </span>
+          </SectionLabel>
+          <ol className="mt-2 flex flex-col gap-2">
+            {detail.tool_uses.map((tu) => (
+              <ToolUseStep key={tu.id} tu={tu} />
+            ))}
+          </ol>
+        </section>
+      )}
+
       {/* Same-prompt neighbours. The single most useful thing for
           deciding "is this a pattern or a blip?" — if 12 of the last
           14 calls with this prompt hash failed the same way, the
@@ -265,4 +286,74 @@ function relativeShort(iso: string): string {
   if (sec < 3600) return `${Math.floor(sec / 60)}m`;
   if (sec < 86400) return `${Math.floor(sec / 3600)}h`;
   return `${Math.floor(sec / 86400)}d`;
+}
+
+/** One step in the tool trajectory. Expandable card showing the
+ *  tool name, status, timing, and (on expand) the input + output
+ *  JSON for full forensic transparency. Failures surface the error
+ *  message in red so the operator can see exactly what went wrong. */
+function ToolUseStep({ tu }: { tu: ToolUseRow }) {
+  const variant: PillVariant =
+    tu.status === "ok"
+      ? "success"
+      : tu.status === "cancelled"
+        ? "neutral"
+        : "danger";
+  return (
+    <li className="rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-3 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span
+            className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold"
+            style={{
+              background: "var(--color-background-secondary)",
+              color: "var(--color-text-secondary)",
+            }}
+          >
+            {tu.sequence_num + 1}
+          </span>
+          <code className="truncate font-mono text-[12.5px] text-[var(--color-text-primary)]">
+            {tu.tool_name}
+          </code>
+          <Pill variant={variant} size="xs">
+            {titleCase(tu.status)}
+          </Pill>
+        </div>
+        {tu.elapsed_ms != null && (
+          <span className="shrink-0 tabular-nums text-[11px] text-[var(--color-text-tertiary)]">
+            {tu.elapsed_ms}ms
+          </span>
+        )}
+      </div>
+      {tu.error_message && (
+        <p className="mt-1.5 rounded bg-[var(--color-background-danger)] px-2 py-1.5 text-[11.5px] text-[var(--color-text-danger)]">
+          {tu.error_message}
+        </p>
+      )}
+      <details className="mt-1.5 group">
+        <summary className="cursor-pointer text-[11px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]">
+          <span className="group-open:hidden">Show inputs &amp; output</span>
+          <span className="hidden group-open:inline">Hide inputs &amp; output</span>
+        </summary>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <div>
+            <p className="mb-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-tertiary)]">
+              Input
+            </p>
+            <pre className="max-h-48 overflow-auto rounded bg-[var(--color-background-secondary)] p-2 font-mono text-[11px] leading-snug">
+              {JSON.stringify(tu.input, null, 2)}
+            </pre>
+          </div>
+          <div>
+            <p className="mb-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-tertiary)]">
+              Output
+            </p>
+            <pre className="max-h-48 overflow-auto rounded bg-[var(--color-background-secondary)] p-2 font-mono text-[11px] leading-snug">
+              {tu.output ? JSON.stringify(tu.output, null, 2) : "—"}
+            </pre>
+          </div>
+        </div>
+      </details>
+    </li>
+  );
 }

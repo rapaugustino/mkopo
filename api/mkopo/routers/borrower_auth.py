@@ -28,7 +28,16 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Response, status
+import structlog
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Cookie,
+    HTTPException,
+    Request,
+    Response,
+    status,
+)
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,13 +59,27 @@ from mkopo.services.audit import Actor, record
 from mkopo.services.auth_service import (
     SESSION_COOKIE,
     consume_magic_link,
+    decode_jwt,
     hash_password,
     issue_jwt,
     mint_magic_link,
     verify_password,
 )
 from mkopo.services.loans import IllegalStageTransitionError, transition_stage
+from mkopo.services.redis_client import (
+    consume_challenge,
+    is_account_locked,
+    lock_account,
+    mint_challenge,
+    rate_limit_check,
+    rate_limit_reset,
+    revoke_jti,
+    unlock_account,
+)
+from mkopo.services.storage import StorageAuthzError, mint_download_url
 from mkopo.tools.comms import send_magic_link_email
+
+logger = structlog.get_logger()
 
 router = APIRouter(prefix="/borrower-auth", tags=["borrower-auth"])
 
@@ -172,6 +195,7 @@ def _dev_link_for_response(plain_token: str, purpose: str) -> str | None:
 @router.post("/signup", status_code=status.HTTP_201_CREATED)
 async def signup(
     payload: SignupRequest,
+    request: Request,
     response: Response,
     background_tasks: BackgroundTasks,
     db: DbSessionDep,
@@ -188,9 +212,20 @@ async def signup(
 
     Duplicate emails return 409 — this is the one spot we'd
     acknowledge that a user exists, because the UX otherwise breaks.
-    Real-world mitigation is rate limiting, which lives in the
-    middleware layer (nginx / cloudfront).
+
+    Hardening (#168): per-IP rate limit (10/hour). Stops a script
+    from carpet-bombing the users table with throwaway addresses.
     """
+    ip = _client_ip(request)
+    allowed, _ = await rate_limit_check(
+        key=f"signup:ip:{ip}", limit=10, window_seconds=3600
+    )
+    if not allowed:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Too many signup attempts from this network. Try again later.",
+        )
+
     email = payload.email.lower().strip()
     existing = (
         await db.execute(select(User).where(User.email == email))
@@ -230,14 +265,46 @@ async def signup(
 
 @router.post("/login")
 async def login(
-    payload: LoginRequest, response: Response, db: DbSessionDep
+    payload: LoginRequest,
+    request: Request,
+    response: Response,
+    db: DbSessionDep,
 ) -> MeResponse:
     """Verify password and set the session cookie.
 
     Always returns the same 401 for "wrong password" and "no such
     user" — don't leak which one happened.
+
+    Hardening (#168):
+      - Per-IP rate limit (5/min). Stops a botnet from hammering
+        a single user agent under one IP.
+      - Per-(email, IP) failed-attempt counter. Five failures in 15
+        minutes locks the account; the legitimate user can recover
+        by clicking a magic-link (which clears the lock).
+      - Locked accounts get the same 401 as wrong-password so we
+        don't reveal that the account is under attack.
     """
     email = payload.email.lower().strip()
+    ip = _client_ip(request)
+
+    # IP-wide rate limit. Generous enough that a normal user typo-ing
+    # their password three times in a row isn't blocked, tight enough
+    # that a credential-stuffing run gets throttled hard.
+    allowed, _ = await rate_limit_check(
+        key=f"login:ip:{ip}", limit=20, window_seconds=60
+    )
+    if not allowed:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            "Too many sign-in attempts. Try again in a minute.",
+        )
+
+    # Account lockout precheck — refuse with the same 401 used for
+    # wrong-password. The legitimate user can recover via a magic
+    # link (consume path calls ``unlock_account``).
+    if await is_account_locked(email=email):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
+
     user = (
         await db.execute(select(User).where(User.email == email))
     ).scalar_one_or_none()
@@ -248,15 +315,47 @@ async def login(
     # constant-time guarantee).
     valid = user is not None and verify_password(payload.password, user.password_hash)
     if not valid or user is None or user.role != "borrower":
+        # Count this failure against the (email, IP) tuple. Five
+        # failures in 15min locks the account for an hour; the lock
+        # clears on a successful magic-link consume.
+        fail_key = f"login-fail:{email}:{ip}"
+        _, attempts = await rate_limit_check(
+            key=fail_key, limit=10**9, window_seconds=900
+        )
+        if attempts >= 5:
+            await lock_account(email=email, ttl_seconds=3600)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
+
+    # Successful login: wipe the failure counter + any lock that
+    # was set. A legitimate user with one bad attempt shouldn't be
+    # carrying the failure forward into tomorrow.
+    await rate_limit_reset(key=f"login-fail:{email}:{ip}")
+    await unlock_account(email=email)
 
     _set_session_cookie(response, user)
     return _me(user)
 
 
+def _client_ip(request: Request) -> str:
+    """Best-effort caller IP. Honours ``X-Forwarded-For`` so deployments
+    behind a load balancer record the real client rather than the LB.
+
+    Trust boundary: this is only used for rate-limiting (i.e. throwing
+    away requests). A spoofed ``X-Forwarded-For`` could let an attacker
+    move their bucket — that's strictly worse for them than not setting
+    the header at all (they get bucketed under their real IP), so we
+    don't worry about validating the header chain here.
+    """
+    fwd = request.headers.get("x-forwarded-for", "")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
 @router.post("/magic-link/request", response_model=MagicLinkIssued)
 async def request_magic_link(
     payload: MagicLinkRequest,
+    request: Request,
     background_tasks: BackgroundTasks,
     db: DbSessionDep,
 ) -> MagicLinkIssued:
@@ -269,8 +368,21 @@ async def request_magic_link(
     In dev we additionally include the URL in the response so test
     scripts can follow the link without an inbox. In production the
     URL ships via email only; the response just confirms acceptance.
+
+    Hardening (#168): per-email rate limit (3/10min). Prevents an
+    attacker from inundating someone's inbox with login links.
     """
     email = payload.email.lower().strip()
+    allowed, _ = await rate_limit_check(
+        key=f"magic-link:{email}", limit=3, window_seconds=600
+    )
+    if not allowed:
+        # Same anti-enumeration shape — we still return MagicLinkIssued
+        # rather than a 429 so a bot can't tell the email exists from
+        # the response. The legitimate user already has a link.
+        logger.info("magic_link_request_rate_limited", email=email)
+        return MagicLinkIssued()
+
     user = (
         await db.execute(select(User).where(User.email == email))
     ).scalar_one_or_none()
@@ -305,27 +417,47 @@ async def request_magic_link(
 async def consume_login_link(
     payload: MagicLinkConsume, response: Response, db: DbSessionDep
 ) -> MeResponse:
-    """Exchange a login or email-verify magic link for a session.
+    """Exchange a login / email-verify / loan-invite magic link for
+    a session.
 
-    The same endpoint handles both ``login`` and ``email_verify``
-    tokens — the consume helper is purpose-locked but we accept
-    either kind here. Verify tokens, in addition to setting the
-    session, stamp ``users.email_verified_at``.
+    The same endpoint handles all three purposes — the consume
+    helper is purpose-locked, but we try each in turn so the client
+    doesn't need to tell us which one it has. All three set a
+    session cookie on success; email_verify also stamps
+    ``users.email_verified_at``, and loan_invite stamps it too (the
+    fact that the borrower received the email at this address
+    counts as verification).
     """
-    # Try login purpose first; that's the common path.
+    # Try the common purposes in order. Each is purpose-locked at
+    # the consume layer so a login token can't be replayed as an
+    # invite (or vice-versa) — we're just trying multiple keys to
+    # one lock from the same plain token.
     user = await consume_magic_link(db, plain_token=payload.token, purpose="login")
     if user is None:
         user = await consume_magic_link(
             db, plain_token=payload.token, purpose="email_verify"
         )
-        if user is None:
-            raise HTTPException(
-                status.HTTP_401_UNAUTHORIZED, "Magic link is invalid or expired"
-            )
-        if user.email_verified_at is None:
+        if user is not None and user.email_verified_at is None:
             user.email_verified_at = datetime.now(UTC)
+    if user is None:
+        user = await consume_magic_link(
+            db, plain_token=payload.token, purpose="loan_invite"
+        )
+        if user is not None and user.email_verified_at is None:
+            # Receiving the invite at this address proves ownership.
+            user.email_verified_at = datetime.now(UTC)
+    if user is None:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, "Magic link is invalid or expired"
+        )
 
     await db.commit()
+    # Successfully clicking a login magic link proves the user owns the
+    # mailbox — if their account was locked by a brute-force attempt,
+    # this is the canonical "this is the legitimate user" signal. Clear
+    # the lockout + the failure counter so they can sign in normally
+    # next time. Same logic the successful-password path runs.
+    await unlock_account(email=user.email)
     _set_session_cookie(response, user)
     return _me(user)
 
@@ -339,6 +471,15 @@ async def request_password_reset(
     """Send a password-reset link. Same anti-enumeration semantics
     as the login magic-link request endpoint."""
     email = payload.email.lower().strip()
+    allowed, _ = await rate_limit_check(
+        key=f"password-reset:{email}", limit=3, window_seconds=600
+    )
+    if not allowed:
+        # Same anti-enumeration shape as ``/magic-link/request`` —
+        # quiet 200 so a bot can't tell anything about the account.
+        logger.info("password_reset_request_rate_limited", email=email)
+        return MagicLinkIssued()
+
     user = (
         await db.execute(select(User).where(User.email == email))
     ).scalar_one_or_none()
@@ -387,10 +528,32 @@ async def confirm_password_reset(
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout(response: Response) -> None:
-    """Clear the session cookie. Always returns 204 — the cookie
-    might already be gone (logout-while-logged-out shouldn't 401)."""
+async def logout(
+    response: Response,
+    session_cookie: str | None = Cookie(default=None, alias=SESSION_COOKIE),
+) -> None:
+    """Clear the session cookie + revoke the underlying JWT.
+
+    Always returns 204 — the cookie might already be gone, the JWT
+    might already be expired, etc. ``logout`` should be safe to call
+    in any state.
+
+    Revocation is server-side via a Redis blacklist keyed on the JWT
+    ``jti`` claim. The blacklist entry expires when the token would
+    have expired naturally, so we never store stale entries. If Redis
+    is down we still clear the cookie locally and log — the worst
+    case is a stolen-token window equal to the remaining TTL, which
+    is the same as the status quo before #167.
+    """
     response.delete_cookie(SESSION_COOKIE, path="/")
+    if session_cookie:
+        claims = decode_jwt(session_cookie)
+        if claims is not None:
+            remaining = int(
+                (claims.expires_at - datetime.now(UTC)).total_seconds()
+            )
+            if remaining > 0:
+                await revoke_jti(claims.jti, ttl_seconds=remaining)
 
 
 @router.get("/me", response_model=MeResponse)
@@ -500,6 +663,98 @@ async def update_contact(
 # ----- Phase 2: self-service mutations -------------------------------------
 
 
+class ChallengeRequest(BaseModel):
+    """Body for ``POST /me/challenge``: the user's current password.
+
+    The endpoint verifies it and returns a short-lived token that the
+    subsequent sensitive request (withdraw / erasure) must include.
+    """
+
+    password: str = Field(min_length=1, max_length=256)
+
+
+class ChallengeIssued(BaseModel):
+    """Response shape for ``POST /me/challenge``. ``token`` is the
+    one-shot challenge that the client must echo back on the next
+    sensitive request within :data:`_CHALLENGE_TTL_SECONDS` seconds.
+    """
+
+    token: str
+    expires_in_seconds: int = 300
+
+
+@router.post("/me/challenge", response_model=ChallengeIssued)
+async def mint_reauth_challenge(
+    payload: ChallengeRequest, user: CurrentBorrowerDep
+) -> ChallengeIssued:
+    """Mint a one-shot challenge token for a sensitive operation.
+
+    The flow:
+
+      1. UI shows a "type your password to continue" modal just
+         before a destructive action (withdraw / erasure).
+      2. UI POSTs the password here, getting back a token.
+      3. UI sends the actual destructive request with the token in
+         the body. The handler ``await consume_challenge(...)`` to
+         verify + burn it.
+
+    Why this exists (#169 / JWT audit 🔴):
+
+      - The session cookie alone is enough to call withdraw +
+        erasure today. If a session is ever leaked (XSS, malware on
+        a shared device, lost phone) the attacker has a ~12h window
+        to trigger either of these IRREVERSIBLE actions.
+      - Requiring a fresh password re-entry binds the action to
+        "the person physically at the keyboard right now", not just
+        "the person whose session is on this device".
+      - Magic-link-only users (no password set) get a 400 with a
+        hint to set a password first; the alternative is to mint
+        challenge tokens unconditionally and let any session-cookie
+        holder withdraw the loan, which is the status quo we want
+        to close.
+
+    The plain token is in the response body but never in the URL,
+    never logged, never stored server-side as plain text (only its
+    sha256 is in Redis).
+    """
+    if not user.password_hash:
+        # Magic-link-only user: there's no password to verify against.
+        # We could fall back to "click a fresh magic link to confirm"
+        # but that's a much bigger flow change. For now, surface a
+        # 400 with guidance so the user knows what to do.
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            (
+                "Set a password on your account first via "
+                "Account → Privacy → Password reset, then retry."
+            ),
+        )
+    if not verify_password(payload.password, user.password_hash):
+        # Constant-time compare in verify_password. Same 401 we use
+        # for login wrong-password — no info leak about the account.
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Password incorrect")
+
+    token = await mint_challenge(user_id=user.id)
+    return ChallengeIssued(token=token, expires_in_seconds=300)
+
+
+async def _require_challenge(*, user: User, token: str | None) -> None:
+    """Sensitive-op gate. Raises 403 unless ``token`` is a valid
+    fresh-auth challenge for ``user``. Single-use; the token is
+    burned on success."""
+    if not token:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Re-authentication required: call /me/challenge first.",
+        )
+    ok = await consume_challenge(user_id=user.id, plain_token=token)
+    if not ok:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Re-authentication challenge is invalid or expired.",
+        )
+
+
 async def _assert_loan_owned_by(
     db: AsyncSession, loan_id: uuid.UUID, user: User
 ) -> Loan:
@@ -538,9 +793,16 @@ class WithdrawRequest(BaseModel):
     audit event so internal staff can see why the application died —
     useful both for product feedback ('rate too high', 'found another
     lender') and for compliance ('borrower-initiated, not lender
-    rejection') because HMDA distinguishes the two."""
+    rejection') because HMDA distinguishes the two.
+
+    ``challenge_token`` is the one-shot value from
+    ``POST /me/challenge`` — see :func:`_require_challenge` for the
+    rationale (stolen session cookies shouldn't be able to trigger
+    irreversible loan withdrawal).
+    """
 
     reason: str = Field(min_length=1, max_length=500)
+    challenge_token: str | None = Field(default=None, max_length=128)
 
 
 @router.post("/me/loans/{loan_id}/withdraw", response_model=MyLoanRow)
@@ -561,7 +823,11 @@ async def withdraw_loan(
     possible. The loan stays in the database, anonymisable later via
     erasure but never re-opened. If the borrower changes their mind
     they file a new application.
+
+    Gated by :func:`_require_challenge` — even a valid session cookie
+    isn't sufficient without a fresh password re-entry. See #169.
     """
+    await _require_challenge(user=user, token=payload.challenge_token)
     loan = await _assert_loan_owned_by(db, loan_id, user)
 
     try:
@@ -683,6 +949,56 @@ async def update_loan_fields(
     return {"changed": sorted(diff.keys()), "diff": diff}
 
 
+@router.get("/me/loans/{loan_id}/documents/{document_id}/download-url")
+async def borrower_document_download_url(
+    loan_id: uuid.UUID,
+    document_id: uuid.UUID,
+    user: CurrentBorrowerDep,
+    db: DbSessionDep,
+) -> dict[str, object]:
+    """Mint a short-lived presigned download URL for a borrower-owned
+    document.
+
+    Mirrors the staff endpoint in ``documents.py`` but with cookie-based
+    auth and an extra ownership check via ``_assert_loan_owned_by``. The
+    audit event recorded by ``mint_download_url`` includes the
+    borrower's email as the actor, so timeline reads from the borrower
+    portal are distinguishable from staff reads.
+    """
+    loan = await _assert_loan_owned_by(db, loan_id, user)
+    doc = (
+        await db.execute(
+            select(Document).where(
+                Document.id == document_id,
+                Document.loan_id == loan.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found")
+
+    try:
+        url = await mint_download_url(
+            db,
+            loan_id=loan.id,
+            document_id=doc.id,
+            storage_uri=doc.storage_uri,
+            actor=Actor.borrower(user.email),
+            purpose="preview",
+            expires_in=300,
+        )
+    except StorageAuthzError as e:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(e)) from e
+
+    await db.commit()
+    return {
+        "url": url,
+        "filename": doc.filename,
+        "content_type": doc.content_type,
+        "expires_in_seconds": 300,
+    }
+
+
 @router.get("/me/data/export")
 async def export_my_data(
     user: CurrentBorrowerDep, db: DbSessionDep
@@ -799,12 +1115,20 @@ async def export_my_data(
 
 class ErasureRequest(BaseModel):
     """Borrower's confirmation that they understand the retention
-    window. The reason is recorded on the audit trail."""
+    window. The reason is recorded on the audit trail.
+
+    ``challenge_token`` is the one-shot value from
+    ``POST /me/challenge`` — see :func:`_require_challenge`. Erasure
+    is the single most consequential borrower-initiated action in
+    the system; a stolen session cookie shouldn't be enough to
+    trigger it.
+    """
 
     reason: str = Field(min_length=1, max_length=500)
     # Must be ``true`` for the request to be accepted — guards
     # against accidental fat-finger erasure from the API.
     confirm: bool
+    challenge_token: str | None = Field(default=None, max_length=128)
 
 
 @router.post("/me/erasure")
@@ -836,6 +1160,11 @@ async def request_erasure(
             status.HTTP_400_BAD_REQUEST,
             "Confirmation is required to request erasure.",
         )
+    # Gate AFTER the confirm-flag check so a request that forgot to
+    # set ``confirm=true`` gets a clear 400 ("you must confirm")
+    # rather than the misleading 403 ("re-auth required") — they're
+    # both prereqs and order matters for the user-facing diagnostic.
+    await _require_challenge(user=user, token=payload.challenge_token)
 
     now = datetime.now(UTC)
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   IconCloudUpload,
@@ -12,6 +12,7 @@ import {
 import { toast } from "sonner";
 import { api, type LoanDocument } from "@/lib/api";
 import { humanizeDocType } from "@/lib/humanize";
+import { DocumentViewer } from "@/app/components/DocumentViewer";
 import { Pill } from "@/app/components/Pill";
 import { SectionLabel } from "@/app/components/SectionLabel";
 
@@ -58,11 +59,21 @@ function relativeTime(iso: string): string {
 
 // ---- row ------------------------------------------------------------------
 
-function DocRow({ doc }: { doc: LoanDocument }) {
+function DocRow({
+  doc,
+  onOpen,
+}: {
+  doc: LoanDocument;
+  onOpen: (doc: LoanDocument) => void;
+}) {
   const ocrPages = doc.extract.pages_needing_ocr ?? 0;
   const totalPages = doc.extract.page_count;
   return (
-    <div className="flex items-center justify-between gap-3 py-2 text-[12.5px]">
+    <button
+      type="button"
+      onClick={() => onOpen(doc)}
+      className="-mx-2 flex w-full items-center justify-between gap-3 rounded-md px-2 py-2 text-left text-[12.5px] transition-colors hover:bg-[var(--color-background-secondary)] focus:outline-none focus-visible:bg-[var(--color-background-secondary)]"
+    >
       <div className="flex min-w-0 items-center gap-2.5">
         <span
           className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md"
@@ -95,7 +106,7 @@ function DocRow({ doc }: { doc: LoanDocument }) {
           </Pill>
         )}
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -250,6 +261,15 @@ export function DocsPanel({ loanId }: Props) {
 
   const docs = docsQuery.data ?? [];
 
+  // The viewer-open state is just an id reference — DocumentViewer
+  // fetches its own URL via the callback, so we don't cache anything
+  // here. Clearing on close + escape is handled inside the modal.
+  const [viewing, setViewing] = useState<LoanDocument | null>(null);
+  const fetchUrl = useCallback(async () => {
+    if (!viewing) throw new Error("No document selected");
+    return api.getDocumentDownloadUrl(loanId, viewing.id);
+  }, [loanId, viewing]);
+
   return (
     <div className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-4 py-3">
       <SectionLabel
@@ -271,9 +291,17 @@ export function DocsPanel({ loanId }: Props) {
       ) : (
         <div className="mb-3 divide-y-[0.5px] divide-[var(--color-border-tertiary)]">
           {docs.map((d) => (
-            <DocRow key={d.id} doc={d} />
+            <DocRow key={d.id} doc={d} onOpen={setViewing} />
           ))}
         </div>
+      )}
+
+      {viewing && (
+        <DocumentViewer
+          fetchUrl={fetchUrl}
+          filename={viewing.filename}
+          onClose={() => setViewing(null)}
+        />
       )}
 
       <Dropzone

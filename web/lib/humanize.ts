@@ -223,6 +223,7 @@ const AUDIT_ACTION_LABEL: Record<string, string> = {
   borrower_document_uploaded: "Borrower uploaded a document",
   autonomy_changed: "Autonomy mode changed",
   orchestrator_advanced: "Orchestrator advanced stage",
+  owner_reassigned: "Owner reassigned",
 };
 
 export const humanizeAuditAction = (a: string | null | undefined): string =>

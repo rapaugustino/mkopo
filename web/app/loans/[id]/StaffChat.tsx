@@ -21,6 +21,7 @@ import {
   type ConfirmRequiredEvent,
   type ToolResume,
 } from "@/lib/agentChat";
+import { MarkdownBlock } from "@/app/components/MarkdownBlock";
 
 /**
  * Internal staff chat agent. Mirrors the borrower chat surface but:
@@ -329,9 +330,9 @@ function TranscriptItem({ entry }: { entry: TranscriptEntry }) {
   if (entry.kind === "assistant") {
     return (
       <div className="flex justify-start">
-        <p className="max-w-[85%] whitespace-pre-wrap text-[var(--color-text-primary)]">
-          {entry.text}
-        </p>
+        <div className="max-w-[85%]">
+          <MarkdownBlock>{entry.text}</MarkdownBlock>
+        </div>
       </div>
     );
   }

@@ -79,6 +79,37 @@ async def _has_documents(session: AsyncSession, loan_id: uuid.UUID) -> bool:
     return (await session.execute(stmt)).scalar_one_or_none() is not None
 
 
+async def _missing_required_docs(
+    session: AsyncSession, loan: Loan
+) -> set[str]:
+    """Return the set of required document types missing for this loan
+    class, or an empty set if the packet is complete.
+
+    Mirrors the rules engine's later doc-completeness check (which fires
+    in underwriting) so the borrower / loan officer gets the same gate
+    surfaced *before* underwriting starts — far more useful as a "you're
+    missing X" prompt than as a warn-severity rule outcome after the
+    LLM has already drafted a summary against an incomplete packet.
+
+    The set comparison is on the underlying doc_type string. Document.doc_type
+    is declared ``Mapped[DocumentType]`` but the column is ``String(64)``,
+    so SQLAlchemy returns plain strings on read — see services/rules_eval.py
+    for the same pattern.
+    """
+    from mkopo.rules.policy import REQUIRED_DOCS, REQUIRED_DOCS_PERSONAL
+
+    loan_class_str = (
+        loan.loan_class.value if loan.loan_class is not None else "business"
+    )
+    required = (
+        REQUIRED_DOCS_PERSONAL if loan_class_str == "personal" else REQUIRED_DOCS
+    )
+
+    docs_q = select(Document.doc_type).where(Document.loan_id == loan.id)
+    present = set((await session.execute(docs_q)).scalars().all())
+    return required - present
+
+
 # Stub flags. The "decision result" and "underwriting result" objects
 # live in LangGraph checkpoint state, not in their own tables — we
 # don't have a cheap synchronous way to inspect them from here.
@@ -151,6 +182,27 @@ async def check_prerequisites(
     if to_stage == LoanStage.UNDERWRITING:
         if not await _has_documents(session, loan_id):
             return "No documents uploaded yet — add the loan packet first."
+        # Class-aware document completeness. We surface the same gate
+        # the rules engine enforces in underwriting (rule_doc_completeness
+        # / rule_personal_doc_completeness) early — refusing the
+        # forward transition with a specific "you're missing X, Y" list
+        # is much more actionable than letting underwriting run on an
+        # incomplete packet and emitting a warn-severity rule outcome.
+        missing = await _missing_required_docs(session, loan)
+        if missing:
+            human_missing = ", ".join(
+                sorted(name.replace("_", " ") for name in missing)
+            )
+            class_label = (
+                "personal"
+                if loan.loan_class is not None
+                and loan.loan_class.value == "personal"
+                else "commercial"
+            )
+            return (
+                f"Missing required {class_label}-loan document(s): "
+                f"{human_missing}. Upload these before moving to underwriting."
+            )
         if not await _has_accepted_extraction(session, loan_id):
             return (
                 "Intake hasn't produced any accepted extractions yet. "

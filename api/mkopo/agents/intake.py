@@ -101,6 +101,14 @@ class IntakeState(TypedDict, total=False):
     """Agent working state. Source of truth for loan stays in the database."""
 
     loan_id: str
+    # Loan class — "personal" | "business". Read out of the DB once
+    # in ``extract_all_documents`` and threaded through every
+    # downstream node so the required-fields list and the email
+    # draft prompt both branch on it. Without this, personal-loan
+    # applicants would get business-flavoured extraction + email
+    # asks ("please send us your rent roll") which is the wrong
+    # product entirely.
+    loan_class: Literal["personal", "business"]
     extracted_fields: dict[str, ExtractedField]
     missing_fields: list[str]
     draft_email: dict[str, str] | None  # subject + body
@@ -135,6 +143,26 @@ async def extract_all_documents(state: IntakeState) -> IntakeState:
     extracted: dict[str, ExtractedField] = {}
 
     async with get_session() as session:
+        # Load the loan first so we know which required-fields list
+        # to ask the extractor for. Personal loans want
+        # income/employer/credit-score; business loans want
+        # NOI/appraised-value/property-address. Asking for the wrong
+        # set wastes tokens and produces "missing" fields the
+        # borrower can never satisfy.
+        loan_stmt = select(Loan).where(Loan.id == loan_id)
+        loan = (await session.execute(loan_stmt)).scalar_one_or_none()
+        loan_class_str: Literal["personal", "business"]
+        if loan is None or loan.loan_class is None:
+            # Defensive: treat missing/unknown class as business —
+            # matches the legacy behaviour before the personal class
+            # existed.
+            loan_class_str = "business"
+        else:
+            loan_class_str = (
+                "personal" if loan.loan_class.value == "personal" else "business"
+            )
+        required_fields = required_fields_for(loan_class_str)
+
         docs_stmt = select(Document).where(Document.loan_id == loan_id)
         documents = (await session.execute(docs_stmt)).scalars().all()
 
@@ -144,10 +172,11 @@ async def extract_all_documents(state: IntakeState) -> IntakeState:
                 loan_id=loan_id,
                 actor=Actor.agent("intake"),
                 action="intake_skipped",
-                payload={"reason": "no_documents"},
+                payload={"reason": "no_documents", "loan_class": loan_class_str},
             )
             return {
                 **state,
+                "loan_class": loan_class_str,
                 "extracted_fields": {},
                 "status": "needs_documents",
             }
@@ -167,7 +196,7 @@ async def extract_all_documents(state: IntakeState) -> IntakeState:
 
             result: ExtractionResult = await extract_fields(
                 document_text=doc_text,
-                fields_to_extract=REQUIRED_FIELDS,
+                fields_to_extract=required_fields,
                 document_id=doc.id,
             )
 
@@ -220,39 +249,113 @@ async def extract_all_documents(state: IntakeState) -> IntakeState:
             action="extraction_complete",
             payload={
                 "n_extracted": len(extracted),
-                "n_required": len(REQUIRED_FIELDS),
+                "n_required": len(required_fields),
+                "loan_class": loan_class_str,
             },
         )
 
-    return {**state, "extracted_fields": extracted}
+    return {
+        **state,
+        "loan_class": loan_class_str,
+        "extracted_fields": extracted,
+    }
 
 
 async def identify_missing(state: IntakeState) -> IntakeState:
-    """Compute what's still needed from the borrower."""
+    """Compute what's still needed from the borrower.
+
+    Per-class required-fields list so a personal-loan borrower
+    doesn't get chased for an appraisal (and vice-versa for a
+    business borrower being asked for pay stubs).
+    """
     extracted = state.get("extracted_fields", {})
+    required = required_fields_for(state.get("loan_class"))
     # Treat low-confidence and missing the same way for messaging — both need follow-up
-    missing = [f for f in REQUIRED_FIELDS if f not in extracted or extracted[f].confidence < 0.7]
+    missing = [
+        f for f in required if f not in extracted or extracted[f].confidence < 0.7
+    ]
     return {**state, "missing_fields": missing}
 
 
+# Per-class document "asks" — the human-readable list the email
+# composer suggests on each missing-fields email. The agent has the
+# field list (e.g. ``annual_income``); these tell it which
+# *documents* would supply those fields, in the language a borrower
+# expects to see.
+_DOC_ASKS_PERSONAL = (
+    "Most recent two pay stubs (or 1099s if self-employed)",
+    "Most recent two months of bank statements",
+    "Most recent year of W-2s or full tax return (Form 1040)",
+    "A government-issued photo ID",
+)
+
+_DOC_ASKS_BUSINESS = (
+    "The most recent property appraisal",
+    "A current rent roll (if income-producing)",
+    "Trailing-12 operating statements",
+    "Two years of business tax returns",
+    "Personal financial statement for any guarantor",
+)
+
+
+def _doc_asks_for(loan_class: str | None) -> tuple[str, ...]:
+    if loan_class == "personal":
+        return _DOC_ASKS_PERSONAL
+    return _DOC_ASKS_BUSINESS
+
+
 async def draft_doc_request(state: IntakeState) -> IntakeState:
-    """Draft an email to the borrower listing what's still needed."""
+    """Draft an email to the borrower listing what's still needed.
+
+    The prompt is class-aware: a personal-loan borrower gets a
+    "send us pay stubs / W-2s / bank statements / ID" email; a
+    business borrower gets "appraisal / rent roll / operating
+    statements" copy. Same agent, same node — different vocabulary.
+    """
     missing = state.get("missing_fields", [])
     if not missing:
         return {**state, "status": "complete", "draft_email": None}
 
     settings = get_settings()
     gateway = get_gateway()
+    loan_class = state.get("loan_class") or "business"
 
     missing_str = "\n".join(f"- {f.replace('_', ' ').title()}" for f in missing)
-    system = (
-        "You are a professional loan underwriter writing to a borrower. "
-        "Be concise, polite, and specific. Use plain language. "
-        "Do not invent details or commit to terms or timelines beyond what is provided."
+    doc_asks = "\n".join(f"- {a}" for a in _doc_asks_for(loan_class))
+    product_context = (
+        "This is an UNSECURED PERSONAL LOAN application. The borrower is "
+        "an individual. Documents we expect them to provide: pay stubs, "
+        "tax returns, bank statements, a government ID. We do NOT need "
+        "an appraisal or rent roll — there is no property securing this "
+        "loan."
+        if loan_class == "personal"
+        else (
+            "This is a COMMERCIAL / BUSINESS loan application. The "
+            "borrower is typically an entity (LLC, corp) and the loan "
+            "is secured by a property or business asset. Documents we "
+            "expect: appraisal, rent roll (if income-producing), "
+            "operating statements, business tax returns, personal "
+            "financial statement for guarantors."
+        )
+    )
+    # Class-branched system prompt — managed through the /prompts UI.
+    # The product_context block above stays inline because it's
+    # mechanical, fact-bearing context the LLM needs but the
+    # underwriting team doesn't need to be able to edit (changing
+    # which documents we accept is a code change, not a prompt tweak).
+    from mkopo.services.prompts import get as get_prompt
+
+    system = get_prompt(
+        "intake.draft_doc_request.personal"
+        if loan_class == "personal"
+        else "intake.draft_doc_request.business"
     )
     user = (
-        f"Draft an email requesting the following items needed to complete underwriting:\n"
-        f"{missing_str}\n\n"
+        f"{product_context}\n\n"
+        f"Items the borrower needs to send us (these are the underwriting "
+        f"fields still missing — translate to the documents that would "
+        f"contain them):\n{missing_str}\n\n"
+        f"Suggested documents you can mention by name:\n{doc_asks}\n\n"
         f"Tone: professional, friendly. Length: ≤120 words. "
         f"Subject line should be specific."
     )

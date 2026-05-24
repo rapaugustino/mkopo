@@ -1,6 +1,12 @@
 import type { ReactNode } from "react";
 
+import { MarkdownBlock } from "./MarkdownBlock";
+
 interface Props {
+  /** String children are rendered as markdown (LLM rationales,
+   *  decision verdicts, email bodies — all of which produce
+   *  markdown). ReactNode children render as-is (e.g. when the
+   *  parent has already done its own formatting). */
   children: ReactNode;
   /** Optional caption above the quote (e.g. "Subject:" or "From: borrower"). */
   caption?: ReactNode;
@@ -13,8 +19,19 @@ interface Props {
  * "the AI's words to the borrower" from log-style event chrome around it.
  * Don't repurpose this for non-prose content; the serif/italic treatment is
  * pointed.
+ *
+ * String children get markdown rendering — every LLM-produced surface
+ * (underwriting rationale, decision verdict, AAL body) returns markdown
+ * by default, and the pre-markdown behaviour leaked literal ``**``
+ * and ``#`` into the timeline.
  */
 export function QuoteBlock({ children, caption }: Props) {
+  const body =
+    typeof children === "string" ? (
+      <MarkdownBlock variant="relaxed">{children}</MarkdownBlock>
+    ) : (
+      children
+    );
   return (
     <div className="mt-2 rounded-md bg-[var(--color-background-secondary)] px-3 py-2.5">
       {caption && (
@@ -23,10 +40,10 @@ export function QuoteBlock({ children, caption }: Props) {
         </p>
       )}
       <div
-        className="whitespace-pre-wrap text-[12.5px] leading-relaxed text-[var(--color-text-primary)]"
+        className="text-[12.5px] leading-relaxed text-[var(--color-text-primary)]"
         style={{ fontFamily: "var(--font-serif)" }}
       >
-        {children}
+        {body}
       </div>
     </div>
   );

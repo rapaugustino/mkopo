@@ -40,6 +40,11 @@ class ToolResume(BaseModel):
     name: str
     input: dict[str, Any] = Field(default_factory=dict)
     action: str  # "confirm" | "cancel"
+    # UUID of the LLM call that issued the original tool request.
+    # Echoed back from the ``confirm_required`` SSE event so the
+    # persisted ``tool_uses`` row can link to it. Optional for
+    # backwards compat — old clients still work, just with a null FK.
+    call_id: str | None = None
 
 
 class ChatRequest(BaseModel):
@@ -49,27 +54,22 @@ class ChatRequest(BaseModel):
     tool_resume: ToolResume | None = None
 
 
-_BORROWER_SYSTEM_PROMPT = """You are Mkopo's borrower-side assistant. You
-help the signed-in borrower understand and act on their loan application.
+# System prompt now lives in the ``prompts`` table; loaded per-turn
+# via prompts.get(). The identifier is kept as a constant so the
+# call-site reads obviously and refactors are search-friendly.
+_PROMPT_ID = "chat.borrower.system"
 
-You have access to a set of tools. Use them whenever the borrower asks
-about their application's status, documents, missing fields, or
-decision reasoning — don't guess from prior conversation context.
 
-For destructive actions (withdrawing an application, updating a field,
-requesting erasure), you MUST call the appropriate tool. The system
-will pause before the action runs and ask the borrower to confirm.
-Don't try to confirm yourself by asking "are you sure?" in prose;
-the tool catalog handles confirmation. Just propose the action by
-calling the tool.
+def _get_borrower_system_prompt() -> str:
+    """Indirection so test fixtures can monkeypatch the prompt source.
 
-Style: warm, concise, no boilerplate. Refer to the borrower in
-second person ("your application", "you can…"). Don't restate what
-a tool returned verbatim — summarise. If a tool fails or returns
-an error, explain plainly and suggest a sensible next step.
+    Equivalent to ``prompts.get(_PROMPT_ID)`` in production. Kept as
+    a function rather than calling ``get`` at call-site so the lazy
+    import below doesn't repeat on every chat turn.
+    """
+    from mkopo.services.prompts import get as get_prompt
 
-You cannot read another borrower's data, see internal staff notes,
-or take actions outside the tool list. If asked, say so plainly."""
+    return get_prompt(_PROMPT_ID)
 
 
 @router.post("/me/chat/stream")
@@ -88,7 +88,7 @@ async def chat_stream(
             messages=payload.messages,
             user_message=payload.user_message,
             tool_resume=payload.tool_resume.model_dump() if payload.tool_resume else None,
-            system_prompt=_BORROWER_SYSTEM_PROMPT,
+            system_prompt=_get_borrower_system_prompt(),
             audit_chat_message=True,  # compliance value — borrower side audits literal text
         ):
             yield chunk

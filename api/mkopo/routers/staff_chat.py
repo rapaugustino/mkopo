@@ -41,6 +41,11 @@ class ToolResume(BaseModel):
     name: str
     input: dict[str, Any] = Field(default_factory=dict)
     action: str  # "confirm" | "cancel"
+    # UUID of the LLM call that issued the original tool request.
+    # Echoed back from the ``confirm_required`` SSE event so the
+    # persisted ``tool_uses`` row can link to it. Optional for
+    # backwards compat.
+    call_id: str | None = None
 
 
 class StaffChatRequest(BaseModel):
@@ -50,28 +55,17 @@ class StaffChatRequest(BaseModel):
     tool_resume: ToolResume | None = None
 
 
-_STAFF_SYSTEM_PROMPT = """You are Mkopo's internal underwriting copilot.
-You help staff (underwriters, loan officers, admins) operate on a loan
-in the pipeline.
+# System prompt now lives in the ``prompts`` table; loaded per-turn
+# via prompts.get(). The identifier is kept as a constant so the
+# call-site reads obviously and refactors are search-friendly.
+_PROMPT_ID = "chat.staff.system"
 
-You have access to a set of tools matched to the caller's role. Use
-them whenever the staff member asks to look up data, modify the
-loan, or message the borrower — don't make up information.
 
-Style: direct, concise, no apologies. You're speaking to an expert
-who knows the domain — skip the explainer copy ("DSCR is the ratio
-of NOI to debt service…") unless they explicitly ask.
+def _get_staff_system_prompt() -> str:
+    """Indirection so test fixtures can monkeypatch the prompt source."""
+    from mkopo.services.prompts import get as get_prompt
 
-For destructive actions — overriding an extraction, advancing the
-loan to a new stage, sending a borrower-visible message — you MUST
-call the appropriate tool. The system pauses before the action runs
-and asks the user to confirm. Don't try to confirm yourself in
-prose; the tool catalog handles confirmation. Just propose the
-action by calling the tool.
-
-If asked something outside the tool list, say so plainly. Don't
-fabricate audit history, decision rationales, or rule outcomes —
-pull them via tools, or admit you can't see them."""
+    return get_prompt(_PROMPT_ID)
 
 
 @router.post("/chat/stream")
@@ -89,12 +83,17 @@ async def staff_chat_stream(
         async for chunk in run_chat_turn(
             user_id=uuid.UUID(user.user_id) if _is_uuid(user.user_id) else uuid.uuid4(),
             user_email=user.user_id,  # bearer dev-user has no real email
-            user_role="underwriter",  # TODO: derive from real user row
+            # ``user.role`` comes off the CurrentUser dataclass (set in
+            # ``mkopo.routers.auth.require_user``). The tool registry
+            # in ``mkopo.agents.tools.staff`` uses it to filter which
+            # tools the LLM can see, so passing it through is what
+            # actually enforces RBAC at the agent boundary.
+            user_role=user.role,
             loan_id=payload.loan_id,
             messages=payload.messages,
             user_message=payload.user_message,
             tool_resume=payload.tool_resume.model_dump() if payload.tool_resume else None,
-            system_prompt=_STAFF_SYSTEM_PROMPT,
+            system_prompt=_get_staff_system_prompt(),
             audit_chat_message=False,  # staff chat doesn't audit its raw text
         ):
             yield chunk

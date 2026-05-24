@@ -66,14 +66,11 @@ def threshold_for(field_name: str) -> float:
     return FIELD_THRESHOLDS.get(field_name, FIELD_THRESHOLDS["_default"])
 
 
-SYSTEM_PROMPT = """You are an expert loan document analyst.
-
-Extract the requested fields from this document. For each field:
-- value: the extracted value as a string (numbers as digits with no commas or symbols)
-- confidence: your confidence (0.0–1.0). Be honest — lower confidence on inferred or fuzzy values.
-- source_span: include the exact verbatim quote where you found the value (max 200 chars)
-
-If a field is not present in the document, omit it from the response. Do not invent values."""
+# Identifier used to look this prompt up out of the ``prompts`` table
+# (see mkopo.services.prompts.DEFAULTS for the canonical default body).
+# Kept as a module-level constant so the call site reads stably and
+# the registry-to-code mapping is searchable.
+PROMPT_ID = "tools.extractor.system"
 
 
 async def extract_fields(
@@ -86,12 +83,18 @@ async def extract_fields(
     """Extract a list of named fields from a document."""
     settings = get_settings()
     gateway = get_gateway()
+    # Pull the active version of the system prompt out of the
+    # process-level cache (warmed at startup, refreshed on edit).
+    # No I/O on the hot path; falls back to the code default if the
+    # cache is cold.
+    from mkopo.services.prompts import get as get_prompt
+
     user = (
         f"Document:\n```\n{document_text}\n```\n\nFields to extract: {', '.join(fields_to_extract)}"
     )
     result = await gateway.call_structured(
         model=model or settings.llm_default_model,
-        system=SYSTEM_PROMPT,
+        system=get_prompt(PROMPT_ID),
         user=user,
         schema=ExtractionResult,
     )

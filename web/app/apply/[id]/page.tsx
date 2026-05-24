@@ -15,7 +15,6 @@ import {
   IconFlagCheck,
   IconGavel,
   IconLoader2,
-  IconLogout,
   IconMicroscope,
   IconShieldCheck,
   IconX,
@@ -24,6 +23,9 @@ import { motion } from "motion/react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/app/borrower/AuthProvider";
+import { DocumentViewer } from "@/app/components/DocumentViewer";
+import { ReauthPromptModal } from "@/app/components/ReauthPromptModal";
+import { humanizeDocType } from "@/lib/humanize";
 import { borrowerAuthApi } from "@/lib/borrowerApi";
 import { BorrowerChat } from "./BorrowerChat";
 
@@ -35,7 +37,21 @@ interface BorrowerStatus {
   stage: string;
   next_step: string;
   submitted_at: string;
-  documents: { filename: string; uploaded_at: string; size_bytes: number }[];
+  /** "personal" or "business" — lets the docs upload card show the
+   *  right checklist (pay stubs / tax returns / ID for personal,
+   *  appraisal / rent roll / operating statements for business). */
+  loan_class: string;
+  /** Doc-type strings (``"loan_application"``, ``"tax_return"``,
+   *  etc.) the rules engine will refuse to advance the loan without.
+   *  Sorted alphabetically; the UI humanises them via humanizeDocType. */
+  required_docs: string[];
+  documents: {
+    id: string;
+    filename: string;
+    uploaded_at: string;
+    size_bytes: number;
+    content_type: string;
+  }[];
 }
 
 const STAGES = [
@@ -123,36 +139,20 @@ export default function ApplyStatusPage({
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Borrower-facing header row: back-nav on the left, user chip
-          + logout on the right. Always visible — the borrower
-          should always see who they're signed in as and have one
-          click to sign out. */}
-      <div className="flex items-center justify-between gap-3">
-        <Link
-          href="/apply"
-          className="inline-flex w-fit items-center gap-1.5 rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-2.5 py-1.5 text-[12px] text-[var(--color-text-primary)] hover:bg-[var(--color-background-secondary)]"
-        >
-          <IconArrowLeft size={13} />
-          Start a new application
-        </Link>
-        {auth.user && (
-          <div className="flex items-center gap-2 text-[12px] text-[var(--color-text-secondary)]">
-            <span className="hidden sm:inline">
-              Signed in as <strong>{auth.user.email}</strong>
-            </span>
-            <button
-              type="button"
-              onClick={() => {
-                void auth.logout().then(() => router.push("/"));
-              }}
-              className="inline-flex items-center gap-1 rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-2 py-1 text-[11.5px] hover:bg-[var(--color-background-secondary)]"
-            >
-              <IconLogout size={11} />
-              Sign out
-            </button>
-          </div>
-        )}
-      </div>
+      {/* Secondary nav: back-link to the borrower's dashboard.
+          The signed-in chip + sign-out lives in the layout header now,
+          so this row only carries the in-page navigation.
+          ``/account`` is the borrower's home — listing all their
+          applications — so "All my applications" is the right verb,
+          not "Start a new application" (which was a forward action
+          dressed as a back arrow). */}
+      <Link
+        href="/account"
+        className="inline-flex w-fit items-center gap-1.5 text-[11.5px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+      >
+        <IconArrowLeft size={12} />
+        All my applications
+      </Link>
       {!status && !statusQuery.error && (
         <div className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-5 py-6 text-center text-[12.5px] text-[var(--color-text-tertiary)]">
           Loading your application status…
@@ -272,6 +272,9 @@ export default function ApplyStatusPage({
           </section>
 
           <DocsUploader
+            loanId={id}
+            loanClass={status.loan_class}
+            requiredDocs={status.required_docs}
             uploading={upload.isPending}
             onFiles={(files) => files.forEach((f) => upload.mutate(f))}
             documents={status.documents}
@@ -305,17 +308,126 @@ const IMMUTABLE_STAGES = new Set([
 
 // ---- documents uploader ----------------------------------------------------
 
+/** Required-docs checklist surfaced on the borrower portal.
+ *
+ *  Driven by the backend's ``required_docs`` list (sourced from the
+ *  rules engine's REQUIRED_DOCS_* sets), so the checklist always
+ *  matches what underwriting will actually demand at the prereq
+ *  gate. Each item is marked satisfied when its doc_type appears
+ *  in the borrower's uploaded files — heuristic match against the
+ *  ``content_type`` and filename since the borrower-side doesn't
+ *  classify uploads by doc_type at upload time.
+ *
+ *  The checklist is informational + motivating, not a hard gate:
+ *  the borrower can upload anything (a paystub uploaded as a JPG
+ *  still satisfies the rule once the back-office tags it). The
+ *  point is to set expectations early so they don't think they're
+ *  done after a single upload. */
+function RequiredDocsChecklist({
+  required,
+  uploadedDocs,
+}: {
+  required: string[];
+  uploadedDocs: { filename: string }[];
+}) {
+  // Heuristic match: filename contains a humanised form of the doc
+  // type. Not foolproof — the staff side does the real tagging — but
+  // good enough to tick "Tax return" green when ``2024_tax_return.pdf``
+  // is uploaded.
+  const filenames = uploadedDocs.map((d) => d.filename.toLowerCase());
+  const matched = (docType: string) => {
+    const needles = docType.replace(/_/g, " ").split(" ");
+    return filenames.some((fn) =>
+      needles.every((n) => n.length > 2 && fn.includes(n)),
+    );
+  };
+
+  return (
+    <div className="mb-3 rounded-md border-[0.5px] border-dashed border-[var(--color-border-tertiary)] bg-[var(--color-background-secondary)] px-3 py-2.5">
+      <p className="mb-1.5 text-[10.5px] font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
+        What we'll need
+      </p>
+      <ul className="flex flex-col gap-1">
+        {required.map((docType) => {
+          const done = matched(docType);
+          return (
+            <li
+              key={docType}
+              className="flex items-center gap-2 text-[12px]"
+              style={{
+                color: done
+                  ? "var(--color-text-secondary)"
+                  : "var(--color-text-primary)",
+              }}
+            >
+              <span
+                className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full"
+                style={{
+                  background: done
+                    ? "var(--color-background-success)"
+                    : "var(--color-background-primary)",
+                  border: done
+                    ? "none"
+                    : "0.5px solid var(--color-border-tertiary)",
+                  color: done
+                    ? "var(--color-brand)"
+                    : "var(--color-text-tertiary)",
+                }}
+              >
+                {done && <IconCheck size={9} />}
+              </span>
+              <span
+                style={{
+                  textDecoration: done ? "line-through" : "none",
+                }}
+              >
+                {humanizeDocType(docType)}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 function DocsUploader({
+  loanId,
+  loanClass,
+  requiredDocs,
   uploading,
   onFiles,
   documents,
 }: {
+  loanId: string;
+  loanClass: string;
+  requiredDocs: string[];
   uploading: boolean;
   onFiles: (files: File[]) => void;
-  documents: { filename: string; uploaded_at: string; size_bytes: number }[];
+  documents: {
+    id: string;
+    filename: string;
+    uploaded_at: string;
+    size_bytes: number;
+    content_type: string;
+  }[];
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  // viewing-document state — DocumentViewer fetches the presigned
+  // URL via the callback below and renders the bytes inline.
+  const [viewing, setViewing] = useState<(typeof documents)[number] | null>(
+    null,
+  );
+
+  // Class-aware upload copy. Personal-loan applicants should never
+  // see "upload the appraisal, rent roll" — there's no property
+  // securing the loan. Business borrowers get the commercial
+  // packet vocabulary.
+  const isPersonal = loanClass === "personal";
+  const introCopy = isPersonal
+    ? "Upload your pay stubs, tax returns, bank statements, and a government ID. PDFs and images are extracted automatically. Click any document below to view it."
+    : "Attach the loan packet, appraisal, rent roll, financials, or anything else relevant. PDFs are extracted automatically. Click any document below to view it.";
 
   return (
     <section className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-5 py-4">
@@ -323,16 +435,28 @@ function DocsUploader({
         Documents
       </p>
       <p className="mt-1 mb-3 text-[12px] text-[var(--color-text-tertiary)]">
-        Attach the loan packet, appraisal, rent roll, financials, or anything
-        else relevant. PDFs are extracted automatically.
+        {introCopy}
       </p>
+
+      {/* Required-docs checklist. Driven by the rules engine's
+          REQUIRED_DOCS_* sets via the borrower-status endpoint, so
+          what we ask for here is exactly what underwriting will
+          refuse to advance without — no surprise gates later. */}
+      {requiredDocs.length > 0 && (
+        <RequiredDocsChecklist
+          required={requiredDocs}
+          uploadedDocs={documents}
+        />
+      )}
 
       {documents.length > 0 && (
         <div className="mb-3 flex flex-col divide-y-[0.5px] divide-[var(--color-border-tertiary)]">
           {documents.map((d) => (
-            <div
-              key={d.filename + d.uploaded_at}
-              className="flex items-center justify-between gap-3 py-2 text-[12.5px]"
+            <button
+              type="button"
+              key={d.id}
+              onClick={() => setViewing(d)}
+              className="-mx-2 flex w-full items-center justify-between gap-3 rounded-md px-2 py-2 text-left text-[12.5px] transition-colors hover:bg-[var(--color-background-secondary)] focus:outline-none focus-visible:bg-[var(--color-background-secondary)]"
             >
               <span className="flex items-center gap-2">
                 <IconFileText
@@ -344,9 +468,19 @@ function DocsUploader({
               <span className="text-[11px] text-[var(--color-text-tertiary)]">
                 {new Date(d.uploaded_at).toLocaleDateString()}
               </span>
-            </div>
+            </button>
           ))}
         </div>
+      )}
+
+      {viewing && (
+        <DocumentViewer
+          fetchUrl={() =>
+            borrowerAuthApi.getDocumentDownloadUrl(loanId, viewing.id)
+          }
+          filename={viewing.filename}
+          onClose={() => setViewing(null)}
+        />
       )}
 
       <motion.div
@@ -597,9 +731,16 @@ function WithdrawCard({ loanId, stage }: { loanId: string; stage: string }) {
   const queryClient = useQueryClient();
   const [confirming, setConfirming] = useState(false);
   const [reason, setReason] = useState("");
+  // Two-step destructive flow: reason → password. We surface the
+  // password modal only after the user has typed a reason and hit
+  // "Withdraw application" — otherwise we'd prompt for the password
+  // first and then bounce them back to type a reason, which is
+  // confusing UX.
+  const [promptingPassword, setPromptingPassword] = useState(false);
 
   const withdraw = useMutation({
-    mutationFn: () => borrowerAuthApi.withdrawLoan(loanId, reason),
+    mutationFn: (challengeToken: string) =>
+      borrowerAuthApi.withdrawLoan(loanId, reason, challengeToken),
     onSuccess: async () => {
       toast.success("Application withdrawn", {
         description:
@@ -608,6 +749,7 @@ function WithdrawCard({ loanId, stage }: { loanId: string; stage: string }) {
       await queryClient.invalidateQueries({
         queryKey: ["borrower-status", loanId],
       });
+      setPromptingPassword(false);
       router.push("/account");
     },
     onError: (e) => {
@@ -677,7 +819,7 @@ function WithdrawCard({ loanId, stage }: { loanId: string; stage: string }) {
         </button>
         <button
           type="button"
-          onClick={() => withdraw.mutate()}
+          onClick={() => setPromptingPassword(true)}
           disabled={withdraw.isPending || reason.trim().length === 0}
           className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium disabled:opacity-45"
           style={{
@@ -688,6 +830,18 @@ function WithdrawCard({ loanId, stage }: { loanId: string; stage: string }) {
           {withdraw.isPending ? "Withdrawing…" : "Withdraw application"}
         </button>
       </div>
+      {promptingPassword && (
+        <ReauthPromptModal
+          title="Withdraw your application?"
+          description="This action is final — your application will be closed and you'd need to start a new one to come back. Confirm your password to continue."
+          confirmLabel="Withdraw application"
+          variant="danger"
+          onConfirm={async (token) => {
+            await withdraw.mutateAsync(token);
+          }}
+          onClose={() => setPromptingPassword(false)}
+        />
+      )}
     </div>
   );
 }

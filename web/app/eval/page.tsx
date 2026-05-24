@@ -1,17 +1,32 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { IconChartLine, IconListSearch, IconRefresh } from "@tabler/icons-react";
+import {
+  IconActivity,
+  IconAlertOctagon,
+  IconArrowRight,
+  IconChartLine,
+  IconGauge,
+  IconListSearch,
+  IconRefresh,
+  IconRobot,
+} from "@tabler/icons-react";
 import { toast } from "sonner";
 import {
   api,
+  type EvalAgentReliabilityRow,
+  type EvalConfidenceBucket,
+  type EvalDiagnostics,
+  type EvalFailureRow,
   type EvalFieldRow,
   type EvalSummary,
   type EvalTrend,
 } from "@/lib/api";
-import { humanizeField } from "@/lib/humanize";
+import { titleCase, humanizeField } from "@/lib/humanize";
+import { AgentRunDrawer } from "@/app/observability/AgentRunDrawer";
+import { LLMCallDrawer } from "@/app/observability/LLMCallDrawer";
 import { BrandHeader } from "@/app/components/BrandHeader";
 import { Pill } from "@/app/components/Pill";
 import { PrimaryButton } from "@/app/components/PrimaryButton";
@@ -253,6 +268,13 @@ function FieldBar({ row }: { row: EvalFieldRow }) {
 export default function EvalDashboardPage() {
   const queryClient = useQueryClient();
 
+  // Open-drawer state for the "Recent failures" deep-links. The eval
+  // page reuses the observability drawers so an operator can drill
+  // from "X failed" all the way to the prompt hash + structured
+  // payload without leaving the eval workflow.
+  const [openCallId, setOpenCallId] = useState<string | null>(null);
+  const [openRunId, setOpenRunId] = useState<string | null>(null);
+
   const summaryQuery = useQuery<EvalSummary, Error>({
     queryKey: ["eval-summary"],
     queryFn: () => api.getEvalSummary(),
@@ -268,6 +290,15 @@ export default function EvalDashboardPage() {
     queryFn: () => api.getEvalTrend(30),
   });
 
+  const diagnosticsQuery = useQuery<EvalDiagnostics, Error>({
+    queryKey: ["eval-diagnostics"],
+    queryFn: () => api.getEvalDiagnostics(),
+    // Cheaper than summary (no aggregation across task_runs); poll a
+    // little faster so the "recent failures" list feels live during
+    // an agent run that's actively producing them.
+    refetchInterval: 20_000,
+  });
+
   const refresh = useMutation({
     mutationFn: () => api.refreshDrift(),
     onSuccess: async (result) => {
@@ -275,10 +306,22 @@ export default function EvalDashboardPage() {
         queryClient.invalidateQueries({ queryKey: ["eval-summary"] }),
         queryClient.invalidateQueries({ queryKey: ["eval-fields"] }),
         queryClient.invalidateQueries({ queryKey: ["eval-trend", 30] }),
+        queryClient.invalidateQueries({ queryKey: ["eval-diagnostics"] }),
       ]);
-      toast.success("Drift monitor ran", {
-        description: `Wrote ${result.fields_written} production field${result.fields_written === 1 ? "" : "s"}.`,
-      });
+      if (result.fields_written === 0) {
+        // Most common failure mode in a fresh demo: the user clicks
+        // Refresh but there are <5 resolved extractions, so the drift
+        // monitor skips every field. Be explicit about why.
+        toast.info("Drift monitor ran — no fields written", {
+          description:
+            "Need at least 5 accepted/overridden extractions per field. Run intake on a loan, then accept or override a few in the review queue.",
+          duration: 8_000,
+        });
+      } else {
+        toast.success("Drift monitor ran", {
+          description: `Wrote ${result.fields_written} production field${result.fields_written === 1 ? "" : "s"}.`,
+        });
+      }
     },
     onError: (e) =>
       toast.error("Drift monitor failed", {
@@ -289,6 +332,19 @@ export default function EvalDashboardPage() {
   const summary = summaryQuery.data;
   const fields = fieldsQuery.data ?? [];
   const trend = trendQuery.data ?? { days: 30, points: [] };
+  const diagnostics = diagnosticsQuery.data;
+  // Width of the LLM "trend" line on the tiles depends on which
+  // window the backend actually carried the stats from. "Last 24h" is
+  // the happy path; "Last 7 days" / "All-time" means demo install with
+  // no recent traffic — we want the operator to see that distinction
+  // at a glance rather than puzzling at the "—".
+  const windowLabel = summary?.llm_window_label ?? "24h";
+  const windowReadable =
+    windowLabel === "24h"
+      ? "last 24h"
+      : windowLabel === "7d"
+        ? "last 7d"
+        : "all-time";
 
   const driftBadge = useMemo(() => {
     if (!summary || summary.fields_drifting === 0) return null;
@@ -374,14 +430,14 @@ export default function EvalDashboardPage() {
                 ? "—"
                 : `${summary.llm_p95_latency_seconds.toFixed(2)}s`
             }
-            trend={`${summary.llm_calls_24h} calls / 24h`}
+            trend={`${summary.llm_calls_24h} calls · ${windowReadable}`}
           />
         </div>
         <div className="rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)]">
           <StatTile
             label="LLM error rate"
             value={PCT(summary.llm_error_rate_24h)}
-            trend="last 24h"
+            trend={windowReadable}
             trendColor={
               (summary.llm_error_rate_24h ?? 0) > 0.05
                 ? "var(--color-text-danger)"
@@ -436,6 +492,358 @@ export default function EvalDashboardPage() {
           </div>
         )}
       </div>
+
+      {/* Diagnostics row — confidence calibration + review queue +
+          agent reliability + recent failures. The eval page is about
+          "is the AI doing the job well", and these four cards each
+          answer a different facet of that question without
+          duplicating the observability page (which answers "is the
+          system healthy"). */}
+      <div className="grid grid-cols-2 gap-2">
+        <ConfidenceCard diagnostics={diagnostics} />
+        <ReviewQueueCard diagnostics={diagnostics} />
+      </div>
+
+      <AgentReliabilityCard diagnostics={diagnostics} />
+
+      <RecentFailuresCard
+        diagnostics={diagnostics}
+        onOpenCall={setOpenCallId}
+        onOpenRun={setOpenRunId}
+      />
+
+      {/* Reuse the observability drawers — drilling into a failure
+          from here lands the operator in the same prompt-hash / step
+          payload view they'd get from /observability. */}
+      <AgentRunDrawer
+        runId={openRunId}
+        onClose={() => setOpenRunId(null)}
+        onOpenLLMCall={(id) => {
+          setOpenRunId(null);
+          setOpenCallId(id);
+        }}
+      />
+      <LLMCallDrawer callId={openCallId} onClose={() => setOpenCallId(null)} />
     </div>
   );
+}
+
+
+// ---- Diagnostics cards ---------------------------------------------------
+
+
+/**
+ * Confidence calibration — accept rate per confidence band.
+ *
+ * The extractor reports a confidence per field; the auto-accept
+ * threshold treats anything ≥0.85 as "good enough" to skip the
+ * review queue. The story this card tells is whether that threshold
+ * holds: in a calibrated extractor, the ≥0.95 band should approach
+ * 100% accept-rate and the lower bands should slope down. If the
+ * top band is well below 100% the model is over-confident and the
+ * threshold needs raising.
+ */
+function ConfidenceCard({ diagnostics }: { diagnostics: EvalDiagnostics | undefined }) {
+  const buckets = diagnostics?.confidence_buckets ?? [];
+  const total = buckets.reduce((s, b) => s + b.n, 0);
+  return (
+    <div className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-4 py-3">
+      <p className="mb-1 flex items-center gap-1.5 text-[13px] font-medium">
+        <IconGauge size={14} />
+        Confidence calibration
+      </p>
+      <p className="mb-3 text-[11.5px] text-[var(--color-text-secondary)]">
+        Accept rate per confidence band over {total.toLocaleString()} resolved
+        extractions. Well-calibrated = ≥0.95 band near 100%.
+      </p>
+      {total === 0 ? (
+        <p className="text-[12px] text-[var(--color-text-secondary)]">
+          No resolved extractions yet. Calibration becomes meaningful once
+          intake has run on at least one loan + a few extractions have been
+          accepted or overridden.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          {buckets.map((b) => (
+            <ConfidenceRow key={b.label} bucket={b} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ConfidenceRow({ bucket }: { bucket: EvalConfidenceBucket }) {
+  const rate = bucket.n === 0 ? null : bucket.accepted / bucket.n;
+  const bar = rate == null
+    ? "var(--color-background-secondary)"
+    : rate >= 0.92
+      ? "var(--color-text-success)"
+      : rate >= 0.75
+        ? "var(--color-text-warning)"
+        : "var(--color-text-danger)";
+  const width = rate == null ? 0 : Math.max(2, Math.round(rate * 100));
+  return (
+    <div className="flex items-center gap-2 text-[11.5px]">
+      <span className="w-[78px] text-[var(--color-text-secondary)] tabular-nums">
+        {bucket.label}
+      </span>
+      <div className="h-1.5 flex-1 overflow-hidden rounded bg-[var(--color-background-secondary)]">
+        <div
+          className="h-full rounded"
+          style={{ width: `${width}%`, background: bar }}
+        />
+      </div>
+      <span className="w-[46px] text-right font-medium tabular-nums">
+        {PCT(rate, 0)}
+      </span>
+      <span className="w-[52px] text-right text-[11px] text-[var(--color-text-tertiary)] tabular-nums">
+        n={bucket.n}
+      </span>
+    </div>
+  );
+}
+
+
+/**
+ * Review queue burn-down. Three numbers: open count, last-7-day
+ * resolution count, median age of open items. The relationship
+ * between them tells the operator whether reviewers are keeping
+ * pace with intake.
+ */
+function ReviewQueueCard({ diagnostics }: { diagnostics: EvalDiagnostics | undefined }) {
+  const stats = diagnostics?.review_queue;
+  return (
+    <div className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-4 py-3">
+      <p className="mb-1 flex items-center gap-1.5 text-[13px] font-medium">
+        <IconListSearch size={14} />
+        Review queue throughput
+      </p>
+      <p className="mb-3 text-[11.5px] text-[var(--color-text-secondary)]">
+        Low-confidence extractions queued for human review.
+      </p>
+      <div className="grid grid-cols-3 gap-2">
+        <Counter
+          label="Open"
+          value={stats?.open}
+          tone={
+            (stats?.open ?? 0) > 25 ? "warning" : "default"
+          }
+        />
+        <Counter
+          label="Resolved 7d"
+          value={stats?.resolved_7d}
+        />
+        <Counter
+          label="Median age"
+          value={
+            stats?.median_open_age_hours == null
+              ? null
+              : `${stats.median_open_age_hours.toFixed(1)}h`
+          }
+        />
+      </div>
+      {stats && stats.open > 0 && (
+        <Link
+          href="/review-queue"
+          className="mt-3 inline-flex items-center gap-1 text-[11.5px] text-[var(--color-text-info)] hover:underline"
+        >
+          Open review queue
+          <IconArrowRight size={11} />
+        </Link>
+      )}
+    </div>
+  );
+}
+
+function Counter({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number | string | null | undefined;
+  tone?: "default" | "warning";
+}) {
+  const colour = tone === "warning" ? "var(--color-text-warning)" : "var(--color-text-primary)";
+  const display = value == null ? "—" : typeof value === "number" ? value.toLocaleString() : value;
+  return (
+    <div className="rounded-md bg-[var(--color-background-secondary)] px-2.5 py-2">
+      <p className="text-[10px] uppercase tracking-wider text-[var(--color-text-secondary)]">
+        {label}
+      </p>
+      <p
+        className="font-editorial mt-0.5 text-[18px] leading-none tabular-nums"
+        style={{ color: colour }}
+      >
+        {display}
+      </p>
+    </div>
+  );
+}
+
+
+/**
+ * Agent reliability — per-agent run counts and outcomes over the
+ * last 7 days. The "worst step wins" status per run means a single
+ * failed step downgrades the whole run.
+ */
+function AgentReliabilityCard({ diagnostics }: { diagnostics: EvalDiagnostics | undefined }) {
+  const rows = diagnostics?.agent_reliability ?? [];
+  return (
+    <div className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-4 py-3">
+      <p className="mb-1 flex items-center gap-1.5 text-[13px] font-medium">
+        <IconRobot size={14} />
+        Agent reliability (last 7 days)
+      </p>
+      <p className="mb-3 text-[11.5px] text-[var(--color-text-secondary)]">
+        Per-agent run outcomes. <em>Interrupted</em> counts HITL pauses;
+        a real failure shows up as <em>failed</em>.
+      </p>
+      {rows.length === 0 ? (
+        <p className="text-[12px] text-[var(--color-text-secondary)]">
+          No agent runs in the last 7 days.
+        </p>
+      ) : (
+        <div className="flex flex-col">
+          {rows.map((r) => (
+            <AgentReliabilityBar key={r.agent_name} row={r} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AgentReliabilityBar({ row }: { row: EvalAgentReliabilityRow }) {
+  const okPct = row.runs === 0 ? 0 : (row.ok / row.runs) * 100;
+  const intPct = row.runs === 0 ? 0 : (row.interrupted / row.runs) * 100;
+  const failPct = row.runs === 0 ? 0 : (row.failed / row.runs) * 100;
+  return (
+    <div className="flex items-center gap-3 border-t-[0.5px] border-[var(--color-border-tertiary)] py-2 text-[12px] first:border-t-0">
+      <span className="w-[140px] truncate font-medium">
+        {titleCase(row.agent_name)}
+      </span>
+      <div className="flex h-2 flex-1 overflow-hidden rounded bg-[var(--color-background-secondary)]">
+        {okPct > 0 && (
+          <div
+            style={{ width: `${okPct}%`, background: "var(--color-text-success)" }}
+            title={`${row.ok} ok`}
+          />
+        )}
+        {intPct > 0 && (
+          <div
+            style={{ width: `${intPct}%`, background: "var(--color-text-warning)" }}
+            title={`${row.interrupted} interrupted (HITL pause)`}
+          />
+        )}
+        {failPct > 0 && (
+          <div
+            style={{ width: `${failPct}%`, background: "var(--color-text-danger)" }}
+            title={`${row.failed} failed`}
+          />
+        )}
+      </div>
+      <span className="w-[60px] text-right tabular-nums text-[11.5px]">
+        {row.runs} run{row.runs === 1 ? "" : "s"}
+      </span>
+      <span className="w-[150px] text-right text-[11px] text-[var(--color-text-secondary)] tabular-nums">
+        {row.ok}/{row.interrupted}/{row.failed}
+        <span className="ml-1 text-[10px] uppercase tracking-wider opacity-70">
+          ok/int/fail
+        </span>
+      </span>
+    </div>
+  );
+}
+
+
+/**
+ * Recent failures — the actionable list. Each row links into the
+ * existing observability drawer for that LLM call or agent run, so
+ * the operator can see the prompt hash + structured payload that
+ * caused the failure.
+ */
+function RecentFailuresCard({
+  diagnostics,
+  onOpenCall,
+  onOpenRun,
+}: {
+  diagnostics: EvalDiagnostics | undefined;
+  onOpenCall: (id: string) => void;
+  onOpenRun: (id: string) => void;
+}) {
+  const rows = diagnostics?.recent_failures ?? [];
+  return (
+    <div className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-4 py-3">
+      <p className="mb-1 flex items-center gap-1.5 text-[13px] font-medium">
+        <IconAlertOctagon size={14} />
+        Recent failures
+        {rows.length > 0 && (
+          <Pill variant="danger">{rows.length}</Pill>
+        )}
+      </p>
+      <p className="mb-3 text-[11.5px] text-[var(--color-text-secondary)]">
+        Most recent LLM and agent-step failures, freshest first. Click
+        a row to drill into the prompt and step payload.
+      </p>
+      {rows.length === 0 ? (
+        <p className="text-[12px] text-[var(--color-text-success)]">
+          No recent failures. <IconActivity size={11} className="inline" />
+        </p>
+      ) : (
+        <div className="flex flex-col">
+          {rows.map((r) => (
+            <FailureRow
+              key={`${r.kind}-${r.id}-${r.at}`}
+              row={r}
+              onClick={() =>
+                r.kind === "llm" ? onOpenCall(r.id) : onOpenRun(r.id)
+              }
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FailureRow({
+  row,
+  onClick,
+}: {
+  row: EvalFailureRow;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex flex-col items-start gap-0.5 border-t-[0.5px] border-[var(--color-border-tertiary)] py-2 text-left text-[12px] hover:bg-[var(--color-background-secondary)] first:border-t-0"
+    >
+      <div className="flex w-full items-center gap-2">
+        <Pill variant={row.kind === "llm" ? "danger" : "warn"}>
+          {row.kind === "llm" ? "LLM" : "agent"}
+        </Pill>
+        <span className="flex-1 truncate font-medium">{row.summary}</span>
+        <span className="text-[11px] text-[var(--color-text-tertiary)] tabular-nums">
+          {relativeTime(row.at)}
+        </span>
+      </div>
+      {row.detail && (
+        <span className="line-clamp-1 text-[11px] text-[var(--color-text-secondary)]">
+          {row.detail}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
+  return new Date(iso).toLocaleDateString();
 }

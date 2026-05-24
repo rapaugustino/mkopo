@@ -32,7 +32,7 @@ from mkopo.models import Document, DocumentType
 from mkopo.services.audit import Actor, record
 from mkopo.services.ingest import embed_document
 from mkopo.services.pdf import extract_text as extract_pdf_text
-from mkopo.services.storage import get_storage
+from mkopo.services.storage import StorageAuthzError, get_storage, mint_download_url
 
 router = APIRouter(prefix="/loans/{loan_id}/documents", tags=["documents"])
 
@@ -154,4 +154,59 @@ async def upload_document(
         "storage_uri": uri,
         "chunks_embedded": chunk_count,
         "extract": extract_stats,
+    }
+
+
+@router.get("/{document_id}/download-url", status_code=status.HTTP_200_OK)
+async def get_document_download_url(
+    loan_id: uuid.UUID,
+    document_id: uuid.UUID,
+    user: CurrentUserDep,
+    db: DbSessionDep,
+) -> dict[str, object]:
+    """Mint a short-lived presigned download URL for one document.
+
+    The caller (DocsPanel / DocumentViewer on the frontend) opens
+    this URL in an iframe / new tab; the browser fetches the bytes
+    directly from object storage with no further auth, then the URL
+    expires. The audit event written here closes the read-side
+    accountability loop.
+
+    Cross-checks the document_id against the loan_id in the URL so a
+    valid presigned URL for one loan's appraisal can't be coerced
+    into reading a different loan's appraisal — the storage layer
+    does its own URI ↔ loan_id check inside ``mint_download_url``.
+    """
+    doc = (
+        await db.execute(
+            select(Document).where(
+                Document.id == document_id,
+                Document.loan_id == loan_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found")
+
+    try:
+        url = await mint_download_url(
+            db,
+            loan_id=loan_id,
+            document_id=doc.id,
+            storage_uri=doc.storage_uri,
+            actor=Actor.user(user.user_id),
+            purpose="preview",
+            expires_in=300,
+        )
+    except StorageAuthzError as e:
+        # The URI doesn't belong to this loan — bug or tampering.
+        # Surface as 403 not 500 so the client can react predictably.
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(e)) from e
+
+    await db.commit()
+    return {
+        "url": url,
+        "filename": doc.filename,
+        "content_type": doc.content_type,
+        "expires_in_seconds": 300,
     }
