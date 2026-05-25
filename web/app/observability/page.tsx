@@ -6,7 +6,9 @@ import {
   IconActivity,
   IconAlertOctagon,
   IconBolt,
+  IconBug,
   IconClockHour4,
+  IconCoin,
   IconReload,
   IconSparkles,
 } from "@tabler/icons-react";
@@ -14,6 +16,9 @@ import {
   api,
   type AgentRunRow,
   type AgentSummary,
+  type ErrorClassStat,
+  type InfrastructureErrorRow,
+  type InfrastructureErrorSummary,
   type LLMCallRow,
   type LLMSummary,
   type ModelStats,
@@ -38,6 +43,14 @@ const PCT = (v: number | null | undefined, digits = 1) =>
   v == null ? "—" : `${(v * 100).toFixed(digits)}%`;
 const SEC = (v: number | null | undefined) =>
   v == null ? "—" : `${v.toFixed(2)}s`;
+/** Format USD with sensible precision: <$0.10 to 4dp, $0.10–$100 to
+ *  2dp, $100+ to whole dollars. Avoids "$0.00" lies on tiny rollups. */
+const USD = (v: number | null | undefined): string => {
+  if (v == null) return "—";
+  if (v < 0.1) return `$${v.toFixed(4)}`;
+  if (v < 100) return `$${v.toFixed(2)}`;
+  return `$${v.toFixed(0)}`;
+};
 
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -65,6 +78,9 @@ export default function ObservabilityPage() {
   // openCallId. Clicking an LLM-call row inside the agent-run drawer
   // hands the id back here so the LLM drawer can take over.
   const [openRunId, setOpenRunId] = useState<string | null>(null);
+  // ID of the infrastructure-error row whose detail drawer is open.
+  // Same pattern as the LLM/agent drawers above.
+  const [openErrorId, setOpenErrorId] = useState<string | null>(null);
 
   const llmQuery = useQuery<LLMSummary, Error>({
     queryKey: ["observability", "llm", windowHours],
@@ -77,8 +93,18 @@ export default function ObservabilityPage() {
     refetchInterval: 30_000,
   });
 
+  const errorsQuery = useQuery<InfrastructureErrorSummary, Error>({
+    queryKey: ["observability", "errors", windowHours],
+    // Errors are rare — a 24h view on a healthy install is usually
+    // empty. We honour the picker so the user can correlate against
+    // the LLM window, but the empty-state copy explains the cadence.
+    queryFn: () => api.getErrorsObservability(windowHours),
+    refetchInterval: 30_000,
+  });
+
   const llm = llmQuery.data;
   const agents = agentsQuery.data;
+  const errors = errorsQuery.data;
 
   return (
     <div className="flex flex-col gap-3">
@@ -88,8 +114,12 @@ export default function ObservabilityPage() {
         actions={<WindowPicker hours={windowHours} onChange={setWindowHours} />}
       />
 
-      {/* Headline KPIs across the chosen window. */}
-      <div className="grid grid-cols-4 gap-2">
+      {/* Headline KPIs across the chosen window. Six tiles: LLM-side
+          health (calls / p95 / error rate / cost) + system-side
+          health (agent runs / server errors). The cost tile is the
+          one that turns abstract "the AI ran" into "the AI spent X
+          dollars" — the most important business signal here. */}
+      <div className="grid grid-cols-3 gap-2 lg:grid-cols-6">
         <div className="rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)]">
           {llm ? (
             <StatTile
@@ -132,6 +162,27 @@ export default function ObservabilityPage() {
           )}
         </div>
         <div className="rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)]">
+          {llm ? (
+            <StatTile
+              label="LLM cost"
+              value={USD(llm.total_cost_usd)}
+              trend={
+                llm.uncosted_calls > 0
+                  ? `${llm.uncosted_calls} uncosted`
+                  : `${llm.total_input_tokens.toLocaleString()} in · ${llm.total_output_tokens.toLocaleString()} out`
+              }
+              trendColor={
+                llm.uncosted_calls > 0
+                  ? "var(--color-text-warning)"
+                  : undefined
+              }
+              Icon={IconCoin}
+            />
+          ) : (
+            <SkeletonStat />
+          )}
+        </div>
+        <div className="rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)]">
           {agents ? (
             <StatTile
               label="Agent runs"
@@ -140,6 +191,25 @@ export default function ObservabilityPage() {
                 .map(([k, v]) => `${k}: ${v}`)
                 .join(" · ")}
               Icon={IconActivity}
+            />
+          ) : (
+            <SkeletonStat />
+          )}
+        </div>
+        <div className="rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)]">
+          {errors ? (
+            <StatTile
+              label="Server errors"
+              value={errors.total.toLocaleString()}
+              trend={
+                errors.total === 0
+                  ? "none in window — healthy"
+                  : `${errors.by_class.length} error class${errors.by_class.length === 1 ? "" : "es"}`
+              }
+              trendColor={
+                errors.total > 0 ? "var(--color-text-danger)" : undefined
+              }
+              Icon={IconBug}
             />
           ) : (
             <SkeletonStat />
@@ -200,11 +270,39 @@ export default function ObservabilityPage() {
         )}
       </div>
 
-      {/* Drill-in drawers. Both mount at the page root so the slide-in
-          isn't clipped by the table's container; both close via the
-          parent's setter. The agent-run drawer hands LLM-call ids back
-          up to ``setOpenCallId`` so clicking through goes call → run
-          → LLM call seamlessly. */}
+      {/* Server errors — what blew up before the LLM ever ran. Lives
+          at the bottom of the page because on a healthy install it's
+          mostly empty; when it's not, the headline "Server errors"
+          tile above will already have lit up red. */}
+      <div className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-4 py-3">
+        <SectionLabel
+          Icon={IconBug}
+          trailing={
+            errors
+              ? errors.total === 0
+                ? "none in window"
+                : `${errors.recent.length} most recent`
+              : ""
+          }
+        >
+          Server errors
+        </SectionLabel>
+        {errors ? (
+          <ErrorTable
+            classes={errors.by_class}
+            rows={errors.recent}
+            onSelect={setOpenErrorId}
+          />
+        ) : (
+          <RowSkeletons />
+        )}
+      </div>
+
+      {/* Drill-in drawers. All three mount at the page root so the
+          slide-in isn't clipped by the table's container; all close
+          via the parent's setter. The agent-run drawer hands LLM-call
+          ids back up to ``setOpenCallId`` so clicking through goes
+          call → run → LLM call seamlessly. */}
       <AgentRunDrawer
         runId={openRunId}
         onClose={() => setOpenRunId(null)}
@@ -214,6 +312,10 @@ export default function ObservabilityPage() {
         }}
       />
       <LLMCallDrawer callId={openCallId} onClose={() => setOpenCallId(null)} />
+      <ErrorDrawer
+        errorId={openErrorId}
+        onClose={() => setOpenErrorId(null)}
+      />
     </div>
   );
 }
@@ -289,17 +391,19 @@ function ModelTable({ rows }: { rows: ModelStats[] }) {
     <table className="w-full text-[12.5px]">
       <thead>
         <tr className="border-b-[0.5px] border-[var(--color-border-tertiary)]">
-          {["Model", "Calls", "p50", "p95", "Error rate", "Retry rate"].map((h, i) => (
-            <th
-              key={h}
-              className={
-                "px-2 py-2 text-[10px] font-medium uppercase tracking-[0.03em] text-[var(--color-text-secondary)] " +
-                (i === 0 ? "text-left" : "text-right")
-              }
-            >
-              {h}
-            </th>
-          ))}
+          {["Model", "Calls", "p50", "p95", "Error rate", "Retry rate", "Cost"].map(
+            (h, i) => (
+              <th
+                key={h}
+                className={
+                  "px-2 py-2 text-[10px] font-medium uppercase tracking-[0.03em] text-[var(--color-text-secondary)] " +
+                  (i === 0 ? "text-left" : "text-right")
+                }
+              >
+                {h}
+              </th>
+            ),
+          )}
         </tr>
       </thead>
       <tbody>
@@ -333,6 +437,16 @@ function ModelTable({ rows }: { rows: ModelStats[] }) {
               }}
             >
               {PCT(r.retry_rate)}
+            </td>
+            <td
+              className="px-2 py-2 text-right tabular-nums"
+              title={
+                r.cost_usd == null
+                  ? "Model not in pricing registry"
+                  : `${r.input_tokens.toLocaleString()} in / ${r.output_tokens.toLocaleString()} out tokens`
+              }
+            >
+              {USD(r.cost_usd)}
             </td>
           </tr>
         ))}
@@ -504,5 +618,207 @@ function AgentRunTable({
         ))}
       </tbody>
     </table>
+  );
+}
+
+
+// ----- Errors table + drawer ---------------------------------------------
+
+
+/**
+ * Renders the per-error-class rollup on top of a recent-rows table,
+ * with a click target into ErrorDrawer.
+ */
+function ErrorTable({
+  classes,
+  rows,
+  onSelect,
+}: {
+  classes: ErrorClassStat[];
+  rows: InfrastructureErrorRow[];
+  onSelect: (id: string) => void;
+}) {
+  if (rows.length === 0) {
+    return (
+      <p className="text-[12px] text-[var(--color-text-success)]">
+        No server errors in the selected window — healthy.
+      </p>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-3">
+      {classes.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {classes.map((c) => (
+            <span
+              key={c.error_class}
+              className="inline-flex items-center gap-1 rounded bg-[var(--color-background-secondary)] px-1.5 py-0.5 text-[11px]"
+              title={`Last seen ${new Date(c.last_seen).toLocaleString()}`}
+            >
+              <span className="font-medium text-[var(--color-text-danger)]">
+                {c.error_class}
+              </span>
+              <span className="text-[var(--color-text-tertiary)]">× {c.count}</span>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <table className="w-full text-[12.5px]">
+        <thead>
+          <tr className="border-b-[0.5px] border-[var(--color-border-tertiary)]">
+            {["Time", "Method", "Path", "Class", "Message"].map((h) => (
+              <th
+                key={h}
+                className="px-2 py-2 text-left text-[10px] font-medium uppercase tracking-[0.03em] text-[var(--color-text-secondary)]"
+              >
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr
+              key={r.id}
+              onClick={() => onSelect(r.id)}
+              className="cursor-pointer border-b-[0.5px] border-[var(--color-border-tertiary)] hover:bg-[var(--color-background-secondary)] last:border-b-0"
+            >
+              <td className="px-2 py-2 text-[var(--color-text-secondary)]">
+                {relativeTime(r.created_at)}
+              </td>
+              <td className="px-2 py-2 font-mono text-[11px]">{r.method}</td>
+              <td className="px-2 py-2 font-mono text-[11px] text-[var(--color-text-info)]">
+                {r.path}
+              </td>
+              <td className="px-2 py-2 font-medium text-[var(--color-text-danger)]">
+                {r.error_class}
+              </td>
+              <td className="px-2 py-2 truncate text-[var(--color-text-secondary)]">
+                {r.error_message}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+
+/**
+ * Drill-in drawer for one error row. Shows the full traceback in a
+ * mono pre block plus the path/method/user/request-id forensics.
+ * Reuses the same slide-in pattern as LLMCallDrawer and AgentRunDrawer.
+ */
+function ErrorDrawer({
+  errorId,
+  onClose,
+}: {
+  errorId: string | null;
+  onClose: () => void;
+}) {
+  const detailQuery = useQuery({
+    queryKey: ["error-detail", errorId],
+    queryFn: () => api.getErrorDetail(errorId!),
+    enabled: errorId != null,
+  });
+  const detail = detailQuery.data;
+
+  if (errorId == null) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex justify-end bg-black/30"
+      onClick={onClose}
+    >
+      <div
+        className="flex h-full w-full max-w-2xl flex-col overflow-y-auto bg-[var(--color-background-primary)] shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-3 border-b-[0.5px] border-[var(--color-border-tertiary)] px-5 py-4">
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-[var(--color-text-secondary)]">
+              Server error
+            </p>
+            <p className="mt-1 font-mono text-[13px] font-medium text-[var(--color-text-danger)]">
+              {detail?.error_class ?? "Loading…"}
+            </p>
+            {detail && (
+              <p className="mt-1 text-[12px] text-[var(--color-text-secondary)]">
+                {detail.method} <code className="font-mono">{detail.path}</code>
+                {" · "}
+                <span className="text-[var(--color-text-tertiary)]">
+                  {new Date(detail.created_at).toLocaleString()}
+                </span>
+              </p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md p-1 hover:bg-[var(--color-background-secondary)]"
+            aria-label="Close"
+          >
+            <IconBug size={14} />
+          </button>
+        </div>
+
+        {detailQuery.isPending ? (
+          <div className="flex-1 px-5 py-4">
+            <Skeleton width="w-full" height="h-32" />
+          </div>
+        ) : detail ? (
+          <div className="flex flex-col gap-3 px-5 py-4">
+            <section>
+              <p className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
+                Message
+              </p>
+              <p className="mt-1 text-[12.5px] text-[var(--color-text-primary)]">
+                {detail.error_message}
+              </p>
+            </section>
+
+            <section className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
+                  User
+                </p>
+                <p className="mt-1 font-mono text-[11.5px]">
+                  {detail.user_id ?? (
+                    <em className="text-[var(--color-text-tertiary)]">none</em>
+                  )}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
+                  Request ID
+                </p>
+                <p className="mt-1 font-mono text-[11.5px]">
+                  {detail.request_id ?? (
+                    <em className="text-[var(--color-text-tertiary)]">none</em>
+                  )}
+                </p>
+              </div>
+            </section>
+
+            {detail.traceback && (
+              <section>
+                <p className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
+                  Traceback
+                </p>
+                <pre className="mt-1 max-h-[60vh] overflow-auto rounded-md bg-[var(--color-background-secondary)] px-3 py-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-[var(--color-text-primary)]">
+                  {detail.traceback}
+                </pre>
+              </section>
+            )}
+          </div>
+        ) : (
+          <p className="px-5 py-4 text-[12px] text-[var(--color-text-danger)]">
+            Couldn&apos;t load detail.
+          </p>
+        )}
+      </div>
+    </div>
   );
 }

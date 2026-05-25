@@ -51,15 +51,18 @@ import logging
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
-from sqlalchemy import update
+from sqlalchemy import select, update
+from sqlalchemy import update as sa_update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from mkopo.agents.context import agent_run_context
 from mkopo.db import get_session
 from mkopo.models import AgentRun, AgentStep
+from mkopo.models.eval import LLMCall
 
 logger = structlog.get_logger()
 
@@ -314,6 +317,7 @@ async def stream_graph_run(
     extract_interrupt: Callable[[dict[str, Any]], Any | None] = lambda s: None,
     final_status_key: str = "status",
     on_complete: Callable[[dict[str, Any], bool], Awaitable[None]] | None = None,
+    replays_run_id: uuid.UUID | None = None,
 ) -> AsyncIterator[bytes]:
     """Run a graph and yield SSE-formatted events.
 
@@ -367,6 +371,14 @@ async def stream_graph_run(
     agent_run_id: uuid.UUID | None = None
     if persist:
         agent_run_id = uuid.uuid4()
+        # Initial payload — empty unless this run is a replay of an
+        # earlier one, in which case the original run id lands here so
+        # the drawer can render "Replays run X". This is the single
+        # source of truth for replay linkage; we deliberately don't
+        # add a column for it (payload is JSONB and queries are rare).
+        initial_payload: dict[str, Any] = {}
+        if replays_run_id is not None:
+            initial_payload["replays_run_id"] = str(replays_run_id)
         try:
             async with get_session() as session:
                 session.add(
@@ -376,7 +388,7 @@ async def stream_graph_run(
                         agent_name=agent_name,
                         thread_id=thread_id,
                         status="running",
-                        payload={},
+                        payload=initial_payload,
                     )
                 )
         except Exception:  # noqa: BLE001
@@ -701,23 +713,61 @@ async def _persist_step(
     ``started_at`` is a ``time.monotonic()`` reading captured when the
     node became active; we convert it to ``elapsed_ms`` here. The
     ``completed_at`` timestamp is "now".
+
+    After inserting, we backfill ``llm_calls.parent_step_id`` for any
+    calls that happened during this step's wall-clock window. The
+    streaming layer can't bind the step id via ContextVar ahead of
+    time (LangGraph's astream doesn't give us a node-entry hook, and
+    setting an FK to a row that doesn't exist yet would fail the
+    INSERT), so we link the parent post-hoc. The (thread_id,
+    started_at, ended_at) trio is enough to attribute each call to
+    exactly one step — calls are timestamped at completion and a
+    step's interval is non-overlapping with sibling steps' intervals.
     """
     if agent_run_id is None:
         return
+    ended_at = datetime.now(UTC)
     elapsed_ms = max(0, int((time.monotonic() - started_at) * 1000))
+    # Wall-clock window over which calls "inside" this step were
+    # recorded. We computed elapsed_ms above; subtract it from
+    # ``ended_at`` to get a clock-time start. Slight skew (~ms) is
+    # fine; LLM calls don't fire at clock-tick granularity.
+    window_start = ended_at - timedelta(milliseconds=elapsed_ms)
     try:
         async with get_session() as session:
-            session.add(
-                AgentStep(
-                    agent_run_id=agent_run_id,
-                    node=node,
-                    status=status,
-                    summary=summary,
-                    completed_at=datetime.now(UTC),
-                    elapsed_ms=elapsed_ms,
-                    payload=payload,
-                )
+            step = AgentStep(
+                agent_run_id=agent_run_id,
+                node=node,
+                status=status,
+                summary=summary,
+                completed_at=ended_at,
+                elapsed_ms=elapsed_ms,
+                payload=payload,
             )
+            session.add(step)
+            await session.flush()  # need step.id for the backfill
+
+            # Backfill llm_calls.parent_step_id. Match by thread_id +
+            # time window. ``parent_step_id IS NULL`` guards against
+            # double-attribution (a call near a node boundary could
+            # otherwise be re-assigned by the next step's backfill).
+            thread_id = await _thread_id_for_run(session, agent_run_id)
+            if thread_id is not None:
+                # Modest fuzz on the window edges (50ms each side) so
+                # calls that started just before the node was marked
+                # "started" or completed slightly after still get
+                # attributed correctly.
+                fuzz = timedelta(milliseconds=50)
+                await session.execute(
+                    sa_update(LLMCall)
+                    .where(
+                        LLMCall.thread_id == thread_id,
+                        LLMCall.parent_step_id.is_(None),
+                        LLMCall.created_at >= window_start - fuzz,
+                        LLMCall.created_at <= ended_at + fuzz,
+                    )
+                    .values(parent_step_id=step.id)
+                )
     except Exception:  # noqa: BLE001
         logger.exception(
             "agent_step_insert_failed",
@@ -725,6 +775,23 @@ async def _persist_step(
             node=node,
             status=status,
         )
+
+
+async def _thread_id_for_run(
+    session: AsyncSession, agent_run_id: uuid.UUID
+) -> str | None:
+    """Read ``agent_runs.thread_id`` so the backfill knows which
+    llm_calls belong to this run.
+
+    Cheap one-row lookup. Returns ``None`` if the run row has gone
+    missing (shouldn't happen mid-stream but we guard for it).
+    """
+    row = (
+        await session.execute(
+            select(AgentRun.thread_id).where(AgentRun.id == agent_run_id)
+        )
+    ).scalar_one_or_none()
+    return row
 
 
 async def _finalize_agent_run(

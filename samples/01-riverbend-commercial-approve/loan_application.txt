@@ -1,0 +1,47 @@
+LOAN APPLICATION — COMMERCIAL BRIDGE FACILITY
+Submitted: May 8, 2026
+Application reference: pre-LN-2026 (pending)
+
+1. BORROWER INFORMATION
+Legal Name: Riverbend Holdings, LLC
+State of Formation: Washington
+EIN: 92-8417033
+Business Address: 4108 18th Avenue NE, Seattle, WA 98105
+Authorized Signatory: Elena Park, Managing Member
+Phone: (206) 555-0144
+Email: elena@riverbendholdings.example
+
+2. GUARANTORS
+- Elena Park, Managing Member (recourse guaranty)
+- Joel Park, Member (recourse guaranty)
+
+3. LOAN REQUEST
+Amount: $2,000,000
+Purpose: Acquisition financing — value-add multifamily
+Loan Type: Bridge, 24 months interest-only
+Requested Rate Basis: SOFR + 350 bps
+Origination Fee Expected: 1.50%
+
+4. ASSET
+Subject Property: 12-unit garden-style multifamily building
+Address: 1622 East Republican Street, Seattle, WA 98112
+Year Built: 1989
+Unit Mix: 4 studios, 5 one-bedroom, 3 two-bedroom
+Current Occupancy: 100%
+
+5. USE OF PROCEEDS
+- Acquisition: $1,820,000
+- Closing costs: $58,000
+- Capex reserve (unit refresh): $122,000
+
+6. EXIT STRATEGY
+Refinance into a permanent loan at month 18-22 after completing
+the planned unit refresh and rent repositioning. Expected stabilised
+NOI supports refinancing at 70% LTV under current cap-rate assumptions.
+
+7. PREPARER CERTIFICATION
+The undersigned certifies that the information provided is true and
+complete to the best of their knowledge.
+
+Signed: Elena Park
+Date: May 8, 2026

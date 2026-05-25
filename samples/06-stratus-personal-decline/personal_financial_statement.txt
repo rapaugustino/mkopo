@@ -1,0 +1,46 @@
+PERSONAL FINANCIAL STATEMENT
+Applicant: Trevor Stratus
+For loan application: $22,000 unsecured personal loan
+As of: May 1, 2026
+
+ASSETS
+Checking (Bank of the West):                       $513
+Savings (Bank of the West):                        $284
+Brokerage:                                           $0
+401(k) (vested, ex-employer):                    $2,840
+Vehicle (2018 Toyota Corolla, KBB):              $9,200
+Personal property:                               $3,200
+
+TOTAL ASSETS:                                   $16,037
+
+LIABILITIES
+Auto loan (Toyota Financial, $384/mo, 30 mo):    $9,400
+Credit card balances (5 accounts):
+  - Capital One:                                 $4,840
+  - Discover:                                    $3,920
+  - Chase:                                       $5,640
+  - Synchrony:                                   $4,180
+  - Citi:                                        $6,100
+Personal loan (Lending Club, $214/mo):           $7,400
+
+TOTAL LIABILITIES:                              $41,480
+
+NET WORTH:                                    ($25,443)
+
+MONTHLY OBLIGATIONS (pre-new-loan)
+Rent:                                            $1,720
+Auto loan:                                         $384
+Credit card minimums (aggregate):                  $612
+Lending Club personal loan:                        $214
+Utilities + phone + insurance:                     $315
+Total monthly obligations:                       $3,245
+
+CREDIT
+FICO Score (Experian, pulled April 22, 2026):       612
+FICO band: subprime
+Recent delinquencies (last 12 mo): 2 (30-day late)
+Charge-offs (last 36 mo): 1 settled-for-less in 2024
+Total inquiries (last 6 months): 4
+
+Signed: Trevor Stratus
+Date: May 1, 2026

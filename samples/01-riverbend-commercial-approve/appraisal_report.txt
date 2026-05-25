@@ -1,0 +1,55 @@
+COMMERCIAL REAL ESTATE APPRAISAL REPORT
+Prepared for: Mkopo Lens (lender)
+Prepared by: Cascadia Valuation Partners, LLC
+
+SUBJECT PROPERTY
+Address: 1622 East Republican Street, Seattle, WA 98112
+Property Type: 12-unit multifamily (garden-style)
+Land Area: 0.18 acres
+Building Area: 9,840 SF rentable
+Year Built: 1989
+Last Renovation: 2018 (common areas, mechanicals)
+Occupancy at Inspection: 100% (12/12 units leased)
+
+INCOME APPROACH TO VALUE
+
+Gross Potential Rent:
+  - 4 studios @ $1,650/mo:          $79,200
+  - 5 one-bedrooms @ $2,025/mo:    $121,500
+  - 3 two-bedrooms @ $2,550/mo:     $91,800
+Gross Potential Rent (annual):     $292,500
+
+Other Income (storage, laundry):    $7,800
+Effective Gross Income:            $300,300
+
+Less: vacancy & collection (3.5%): ($10,511)
+Adjusted Effective Gross Income:   $289,789
+
+OPERATING EXPENSES
+Property taxes:                    $24,400
+Insurance:                          $4,800
+Utilities (common):                 $6,400
+Repairs & maintenance:             $11,200
+Management (5% EGI):               $14,500
+Reserves ($300/unit):               $3,600
+Total Operating Expenses:          $64,900
+
+NET OPERATING INCOME (NOI):       $224,889
+
+CAPITALISATION
+Market cap rate (multifamily, Capitol Hill submarket): 7.5%
+Indicated Value: $2,998,520
+
+Concluded As-Is Value: $3,000,000
+
+Comparable sales (3 sales within 6 months, Capitol Hill submarket):
+  - 14-unit @ 1418 E. Olive St:   $245,000/unit, May 2026
+  - 10-unit @ 1140 18th Ave E:    $260,000/unit, March 2026
+  - 16-unit @ 728 16th Ave E:     $240,000/unit, February 2026
+Subject implied: $250,000/unit — consistent with comp range.
+
+APPRAISAL DATE: April 22, 2026
+APPRAISED VALUE: $3,000,000
+
+Effective Date of Value: April 22, 2026
+Certified by: Christopher Hwang, MAI · Cert. State of WA, License 1101384

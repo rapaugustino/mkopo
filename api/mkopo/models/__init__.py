@@ -1,5 +1,10 @@
 """ORM models. Importing this module registers all models with Base.metadata."""
 
+from mkopo.models.annotation import (
+    Annotation,
+    AnnotationTargetKind,
+    AnnotationVerdict,
+)
 from mkopo.models.audit import (
     ActorType,
     AuditEvent,
@@ -17,6 +22,7 @@ from mkopo.models.document import (
     ReviewTask,
 )
 from mkopo.models.embedding import DocumentChunk
+from mkopo.models.errors import InfrastructureError
 from mkopo.models.eval import LLMCall, TaskRun, ToolUse
 from mkopo.models.loan import (
     VALID_TRANSITIONS,
@@ -37,6 +43,9 @@ __all__ = [
     "ActorType",
     "AgentRun",
     "AgentStep",
+    "Annotation",
+    "AnnotationTargetKind",
+    "AnnotationVerdict",
     "AuditEvent",
     "AutonomyLevel",
     "Base",
@@ -47,6 +56,7 @@ __all__ = [
     "DocumentType",
     "Extraction",
     "ExtractionStatus",
+    "InfrastructureError",
     "LLMCall",
     "Loan",
     "LoanClass",

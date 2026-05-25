@@ -1,0 +1,25 @@
+FORM 1040 — U.S. INDIVIDUAL INCOME TAX RETURN
+Tax Year: 2024
+
+Taxpayer: Trevor Stratus
+Filing Status: Single
+SSN: ***-**-7733
+
+INCOME
+1a   Total wages, salaries (W-2):                  $42,400.00
+1z   Total wage income:                            $42,400.00
+9    Total income:                                 $42,400.00
+11   Adjusted gross income (AGI):                  $42,400.00
+
+DEDUCTIONS
+12   Standard deduction (single):                  $14,600.00
+15   Taxable income:                                $27,800.00
+
+TAX AND PAYMENTS
+16   Tax:                                           $3,140.00
+25a  Federal income tax withheld:                   $3,840.00
+34   Refund:                                          $700.00
+
+W-2 attached: Northgate Warehousing LLC, EIN 47-8201442 (prior employer)
+Note: Filer changed jobs in September 2025; current 2025 income shown
+on application is higher due to position change.

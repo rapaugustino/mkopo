@@ -10,9 +10,16 @@ import {
   IconHistory,
   IconRefresh,
   IconRestore,
+  IconSparkles,
+  IconX,
 } from "@tabler/icons-react";
 import { toast } from "sonner";
-import { api, type PromptDetail, type PromptVersion } from "@/lib/api";
+import {
+  api,
+  type PromptDetail,
+  type PromptRewriteResult,
+  type PromptVersion,
+} from "@/lib/api";
 import { BrandHeader } from "@/app/components/BrandHeader";
 import { Pill } from "@/app/components/Pill";
 import { PrimaryButton } from "@/app/components/PrimaryButton";
@@ -117,6 +124,44 @@ export default function PromptDetailPage({
       }),
   });
 
+  // Rewrite-with-AI state. The panel is collapsible — closed by
+  // default so the editor isn't cluttered, opens on click. We hold
+  // the last rationale separately from the draft so the user can
+  // see it after they've already accepted the body change.
+  const [rewriteOpen, setRewriteOpen] = useState(false);
+  const [instruction, setInstruction] = useState("");
+  const [lastRationale, setLastRationale] = useState<string | null>(null);
+
+  const rewrite = useMutation({
+    mutationFn: () =>
+      api.rewritePrompt(identifier, {
+        current_body: draft,
+        instruction: instruction.trim(),
+      }),
+    onSuccess: (result: PromptRewriteResult) => {
+      // Load the rewritten body straight into the editor — the
+      // "Save & activate" button below now does its normal thing.
+      // Keeping the rationale visible lets the user judge whether
+      // the change was reasonable without re-reading the body.
+      setDraft(result.body);
+      setLastRationale(result.rationale);
+      // Seed a change-note draft so the user doesn't have to type
+      // one from scratch. They can still edit it.
+      if (!changeNote.trim()) {
+        setChangeNote(
+          `AI rewrite: ${instruction.trim().slice(0, 480)}`,
+        );
+      }
+      toast.success("Rewrite loaded into editor", {
+        description: "Review the body and save when ready.",
+      });
+    },
+    onError: (e) =>
+      toast.error("Rewrite failed", {
+        description: e instanceof Error ? e.message : String(e),
+      }),
+  });
+
   if (detailQuery.error) {
     return (
       <div className="flex flex-col gap-3">
@@ -198,6 +243,13 @@ export default function PromptDetailPage({
 
           <div className="flex items-end gap-2">
             <SecondaryButton
+              Icon={IconSparkles}
+              onClick={() => setRewriteOpen((o) => !o)}
+              disabled={!detail || save.isPending}
+            >
+              Rewrite with AI
+            </SecondaryButton>
+            <SecondaryButton
               Icon={IconRestore}
               onClick={() => {
                 if (!detail) return;
@@ -225,6 +277,74 @@ export default function PromptDetailPage({
             </PrimaryButton>
           </div>
         </div>
+
+        {/* Rewrite-with-AI inline panel. Folded by default; opens
+            below the action row when the user clicks the button so
+            the editor stays the focal point. The rewrite result
+            replaces the body in-place — the user reviews + saves
+            through the normal flow, so the audit trail records
+            exactly what shipped (no "AI generated this" magic). */}
+        {rewriteOpen && (
+          <div className="mt-3 rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-secondary)] px-3 py-3">
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="flex items-center gap-1.5 text-[12.5px] font-medium">
+                <IconSparkles size={13} />
+                Rewrite with AI
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setRewriteOpen(false);
+                  setInstruction("");
+                }}
+                className="inline-flex items-center gap-1 text-[11px] text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)]"
+                aria-label="Close rewrite panel"
+              >
+                <IconX size={11} />
+                Close
+              </button>
+            </div>
+            <p className="mt-1 text-[11.5px] text-[var(--color-text-secondary)]">
+              Describe the change you want. The current body in the
+              editor is the input — your unsaved edits are included.
+            </p>
+            <textarea
+              value={instruction}
+              onChange={(e) => setInstruction(e.target.value)}
+              disabled={rewrite.isPending}
+              rows={2}
+              maxLength={1000}
+              placeholder='e.g. "Make it more concise" · "Add a rule that the model must never recommend approval if any blocking rule failed" · "Soften the tone for borrowers"'
+              className="form-input mt-2 w-full text-[12px]"
+            />
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <span className="text-[11px] text-[var(--color-text-tertiary)]">
+                {instruction.trim().length < 4
+                  ? "Tell the AI what to change."
+                  : `${draft.length.toLocaleString()} chars in → AI`}
+              </span>
+              <PrimaryButton
+                Icon={IconSparkles}
+                onClick={() => rewrite.mutate()}
+                disabled={
+                  rewrite.isPending || instruction.trim().length < 4
+                }
+              >
+                {rewrite.isPending ? "Rewriting…" : "Rewrite"}
+              </PrimaryButton>
+            </div>
+            {lastRationale && (
+              <div className="mt-3 rounded-md bg-[var(--color-background-primary)] px-3 py-2">
+                <p className="text-[10.5px] font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
+                  AI rationale
+                </p>
+                <p className="mt-1 text-[12px] leading-relaxed text-[var(--color-text-primary)]">
+                  {lastRationale}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
 
         {!isDirty && detail && detail.versions.length === 0 && (
           <p className="mt-2 text-[11px] text-[var(--color-text-tertiary)]">

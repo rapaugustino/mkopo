@@ -1,0 +1,39 @@
+LOAN APPLICATION — UNSECURED PERSONAL LOAN
+Submitted: May 10, 2026
+
+1. APPLICANT INFORMATION
+Full Legal Name: Trevor Stratus
+Date of Birth: November 14, 1995
+SSN (last 4): ****-**-7733
+Current Address: 6412 Burnet Road, Apt 312, Austin, TX 78757
+Phone: (512) 555-0184
+Email: trevor.stratus@example.com
+
+2. EMPLOYMENT
+Employer: Vector Logistics Solutions, LLC
+Position: Dispatch coordinator
+Tenure: 8 months (since September 2025)
+Annual Gross Income: $48,600 (W-2)
+Employment status: Full-time, hourly
+
+3. LOAN REQUEST
+Amount: $22,000
+Purpose: Consolidate credit-card debt
+Requested Term: 48 months, fixed APR
+
+4. EXISTING OBLIGATIONS
+Auto loan: $384/mo, 30 mo remaining
+Credit card minimums (5 accounts): $612/mo aggregate
+Personal loan (Lending Club, 24% APR): $214/mo
+Rent: $1,720/mo
+
+Total monthly obligations (excluding rent): ~$1,210
+With rent: ~$2,930
+
+5. CREDIT HISTORY (self-declared)
+Two 30-day late payments in last 12 months (cited as transitional
+period during job change).
+One settled-for-less account: $4,200 charge-off settled in 2024.
+
+Signed: Trevor Stratus
+Date: May 10, 2026

@@ -15,16 +15,26 @@ Three reads + one write, all keyed off ``task_runs`` and ``llm_calls``:
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, status
+from pydantic import BaseModel, Field
 from sqlalchemy import case, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mkopo.deps import CurrentUserDep, DbSessionDep
-from mkopo.models import AgentRun, AgentStep, Extraction, ExtractionStatus, ReviewTask
+from mkopo.models import (
+    AgentRun,
+    AgentStep,
+    Annotation,
+    AnnotationTargetKind,
+    Extraction,
+    ExtractionStatus,
+    ReviewTask,
+)
 from mkopo.models.eval import LLMCall, TaskRun
+from mkopo.services import annotations as annotations_service
 from mkopo.services.drift import run_drift_monitor
 
 router = APIRouter(prefix="/eval", tags=["eval"])
@@ -713,6 +723,410 @@ async def _recent_failures(
 
     out.sort(key=lambda f: f.at, reverse=True)
     return out[:limit]
+
+
+# ----- annotations endpoints ------------------------------------------------
+#
+# Three thin HTTP wrappers around mkopo.services.annotations. Listed
+# here (instead of as their own router) because the eval page is the
+# canonical home for "what humans thought of these traces" — the
+# observability drawers consume the same endpoints but are not the
+# semantic owner of the resource.
+
+
+class AnnotationOut(BaseModel):
+    """One annotation, shaped for the drawer + dashboard reads."""
+
+    id: str
+    target_kind: str
+    target_id: str
+    verdict: str
+    note: str | None
+    created_by_user_id: str | None
+    created_at: datetime
+    spawned_review_task_id: str | None
+
+
+class AnnotationCreateIn(BaseModel):
+    """Inputs for ``POST /eval/annotations``.
+
+    The closed-set enums are validated server-side in the service
+    layer too; declaring them here gets the OpenAPI schema right and
+    rejects obvious bad payloads at the boundary.
+    """
+
+    target_kind: str = Field(
+        description=(
+            "One of llm_call, agent_run, agent_step — what kind of "
+            "trace this annotation applies to."
+        )
+    )
+    target_id: uuid.UUID
+    verdict: str = Field(
+        description="One of good, bad, incorrect.",
+    )
+    note: str | None = Field(default=None, max_length=4000)
+
+
+def _to_out(row: Annotation) -> AnnotationOut:
+    return AnnotationOut(
+        id=str(row.id),
+        target_kind=row.target_kind,
+        target_id=str(row.target_id),
+        verdict=row.verdict,
+        note=row.note,
+        created_by_user_id=(
+            str(row.created_by_user_id) if row.created_by_user_id else None
+        ),
+        created_at=row.created_at,
+        spawned_review_task_id=(
+            str(row.spawned_review_task_id)
+            if row.spawned_review_task_id
+            else None
+        ),
+    )
+
+
+@router.get("/annotations", response_model=list[AnnotationOut])
+async def list_annotations(
+    target_kind: str,
+    target_id: uuid.UUID,
+    user: CurrentUserDep,
+    db: DbSessionDep,
+) -> list[AnnotationOut]:
+    """List annotations on one trace row, newest first.
+
+    Drives the "Existing annotations" section the drawers render
+    under the verdict buttons.
+    """
+    if target_kind not in {k.value for k in AnnotationTargetKind}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unknown target_kind.",
+        )
+    rows = await annotations_service.list_for_target(
+        db, target_kind=target_kind, target_id=target_id
+    )
+    return [_to_out(r) for r in rows]
+
+
+@router.post(
+    "/annotations",
+    response_model=AnnotationOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_annotation(
+    payload: AnnotationCreateIn,
+    user: CurrentUserDep,
+    db: DbSessionDep,
+) -> AnnotationOut:
+    """Persist a verdict + optional note on a trace row.
+
+    "bad" or "incorrect" verdicts auto-spawn a ``review_tasks`` row
+    when we can link the trace back to a loan — see
+    mkopo.services.annotations for the linkage rules. The response
+    carries ``spawned_review_task_id`` so the frontend can render
+    "+ added to review queue" inline.
+    """
+    try:
+        row = await annotations_service.create(
+            db,
+            target_kind=payload.target_kind,
+            target_id=payload.target_id,
+            verdict=payload.verdict,
+            note=payload.note,
+            created_by_user_id=(
+                uuid.UUID(user.user_id) if _looks_like_uuid(user.user_id) else None
+            ),
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    await db.commit()
+    return _to_out(row)
+
+
+@router.delete(
+    "/annotations/{annotation_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_annotation(
+    annotation_id: uuid.UUID,
+    user: CurrentUserDep,
+    db: DbSessionDep,
+) -> None:
+    """Hard-delete one annotation. 204 on success, 404 if not found.
+
+    Spawned review tasks are NOT cascaded — see the service docstring.
+    A reviewer may have already picked the task up; the verdict tally
+    rolls back without disrupting in-flight work.
+    """
+    removed = await annotations_service.delete(db, annotation_id=annotation_id)
+    if not removed:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Annotation not found.",
+        )
+    await db.commit()
+
+
+def _looks_like_uuid(s: str) -> bool:
+    """``user.user_id`` is a string in dev (bearer dev-user) — coerce
+    safely. Same pattern as routers/staff_chat.py.
+    """
+    try:
+        uuid.UUID(s)
+        return True
+    except (ValueError, AttributeError):
+        return False
+
+
+# ----- LLM call regression-diff endpoint ----------------------------------
+#
+# Compares two ``llm_calls`` rows on the metadata we persist. We don't
+# store user prompts or response text (PII + size concerns), so the
+# diff is intentionally metadata-only: model match, latency delta,
+# token delta, cost delta, status / error match, same system-prompt
+# hash. That's what a regression check actually needs — "did the
+# expensive model creep back in?", "did latency spike on this prompt?"
+# rather than full prompt diffs.
+
+
+class LLMDiffField(BaseModel):
+    """One row of the side-by-side diff card.
+
+    ``label`` is the human-readable field name. ``a`` / ``b`` are the
+    formatted values for the two calls. ``delta`` is a short string
+    describing the change (e.g. ``"+0.42s"``, ``"+$0.0012"``,
+    ``"matches"``). ``flag`` is the visual cue:
+
+    - ``"match"``       — values agree
+    - ``"different"``   — values differ in a benign / informational way
+    - ``"regression"``  — b is worse than a (slower / more expensive
+                          / failed where a succeeded)
+    - ``"improvement"`` — b is better than a
+    """
+
+    label: str
+    a: str
+    b: str
+    delta: str
+    flag: str
+
+
+class LLMDiffResponse(BaseModel):
+    a_id: str
+    b_id: str
+    fields: list[LLMDiffField]
+    # Quick takeaway. Drives a one-liner in the UI like "B is 0.42s
+    # slower and $0.0008 more expensive on the same prompt."
+    summary: str
+
+
+@router.get("/diff/llm-calls", response_model=LLMDiffResponse)
+async def diff_llm_calls(
+    a: uuid.UUID,
+    b: uuid.UUID,
+    user: CurrentUserDep,
+    db: DbSessionDep,
+) -> LLMDiffResponse:
+    """Compare two ``llm_calls`` rows on stored metadata.
+
+    Used by the regression-diff card in ``LLMCallDrawer``. Returns
+    one row per compared field plus a one-line summary; the
+    frontend renders rows in a side-by-side table.
+    """
+    rows = (
+        await db.execute(
+            select(LLMCall).where(LLMCall.id.in_([a, b]))
+        )
+    ).scalars().all()
+    by_id = {r.id: r for r in rows}
+    row_a = by_id.get(a)
+    row_b = by_id.get(b)
+    if row_a is None or row_b is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="One or both LLM call ids not found.",
+        )
+
+    fields: list[LLMDiffField] = []
+
+    # Model
+    fields.append(
+        LLMDiffField(
+            label="Model",
+            a=row_a.model,
+            b=row_b.model,
+            delta="matches" if row_a.model == row_b.model else "different",
+            flag="match" if row_a.model == row_b.model else "different",
+        )
+    )
+
+    # System prompt hash — fingerprint match means we were running the
+    # exact same prompt body, which is the precondition for the diff
+    # being meaningful in the first place.
+    same_prompt = row_a.system_prompt_hash == row_b.system_prompt_hash
+    fields.append(
+        LLMDiffField(
+            label="System prompt",
+            a=row_a.system_prompt_hash[:12],
+            b=row_b.system_prompt_hash[:12],
+            delta="same hash" if same_prompt else "DIFFERENT prompt",
+            flag="match" if same_prompt else "regression",
+        )
+    )
+
+    # Status
+    same_status = row_a.status == row_b.status
+    flag_status = (
+        "match"
+        if same_status
+        else "regression" if row_b.status != "ok" and row_a.status == "ok"
+        else "improvement" if row_a.status != "ok" and row_b.status == "ok"
+        else "different"
+    )
+    fields.append(
+        LLMDiffField(
+            label="Status",
+            a=row_a.status,
+            b=row_b.status,
+            delta="matches" if same_status else f"{row_a.status} → {row_b.status}",
+            flag=flag_status,
+        )
+    )
+
+    # Latency
+    dt_lat = row_b.elapsed_seconds - row_a.elapsed_seconds
+    fields.append(
+        LLMDiffField(
+            label="Latency",
+            a=f"{row_a.elapsed_seconds:.2f}s",
+            b=f"{row_b.elapsed_seconds:.2f}s",
+            delta=f"{dt_lat:+.2f}s",
+            flag=(
+                "match" if abs(dt_lat) < 0.05
+                else "regression" if dt_lat > 0
+                else "improvement"
+            ),
+        )
+    )
+
+    # Tokens (input + output). Each direction can move independently;
+    # we render the deltas verbatim. Output tokens going up usually
+    # means the model wrote more, which can be regression (more cost,
+    # more latency) or improvement (richer answer).
+    fields.append(_token_field("Input tokens", row_a.input_tokens, row_b.input_tokens))
+    fields.append(_token_field("Output tokens", row_a.output_tokens, row_b.output_tokens))
+
+    # Cost — sum of input + output split. Some legacy rows have null
+    # cost (model not in the pricing registry); render "—" in that
+    # case and skip the regression flag.
+    cost_a = _total_cost(row_a)
+    cost_b = _total_cost(row_b)
+    if cost_a is None or cost_b is None:
+        fields.append(
+            LLMDiffField(
+                label="Cost",
+                a="—" if cost_a is None else f"${cost_a:.6f}",
+                b="—" if cost_b is None else f"${cost_b:.6f}",
+                delta="not priced",
+                flag="different",
+            )
+        )
+    else:
+        dc = cost_b - cost_a
+        fields.append(
+            LLMDiffField(
+                label="Cost",
+                a=f"${cost_a:.6f}",
+                b=f"${cost_b:.6f}",
+                delta=f"{'+' if dc >= 0 else ''}${dc:.6f}",
+                flag=(
+                    "match" if abs(dc) < 0.000005
+                    else "regression" if dc > 0
+                    else "improvement"
+                ),
+            )
+        )
+
+    # Attempt count — anything > 0 means schema retries fired. If
+    # one row needed retries and the other didn't, that's a signal
+    # the prompt's structured-output reliability changed.
+    same_att = row_a.attempt == row_b.attempt
+    fields.append(
+        LLMDiffField(
+            label="Attempts",
+            a=str(row_a.attempt),
+            b=str(row_b.attempt),
+            delta="matches" if same_att else f"{row_a.attempt} → {row_b.attempt}",
+            flag=(
+                "match" if same_att
+                else "regression" if row_b.attempt > row_a.attempt
+                else "improvement"
+            ),
+        )
+    )
+
+    summary = _diff_summary(fields)
+    return LLMDiffResponse(
+        a_id=str(a), b_id=str(b), fields=fields, summary=summary
+    )
+
+
+def _token_field(
+    label: str, a_val: int | None, b_val: int | None
+) -> LLMDiffField:
+    """Format a token-count delta row. Handles nulls (some legacy
+    rows have ``None``) by rendering "—" without flagging."""
+    if a_val is None or b_val is None:
+        return LLMDiffField(
+            label=label,
+            a="—" if a_val is None else str(a_val),
+            b="—" if b_val is None else str(b_val),
+            delta="not recorded",
+            flag="different",
+        )
+    d = b_val - a_val
+    return LLMDiffField(
+        label=label,
+        a=str(a_val),
+        b=str(b_val),
+        delta=f"{d:+d}",
+        flag=(
+            "match" if d == 0
+            else "regression" if d > 0
+            else "improvement"
+        ),
+    )
+
+
+def _total_cost(row: LLMCall) -> float | None:
+    """Sum of input + output cost. Returns ``None`` if either
+    side is null."""
+    if row.cost_input_usd is None or row.cost_output_usd is None:
+        return None
+    return float(row.cost_input_usd) + float(row.cost_output_usd)
+
+
+def _diff_summary(fields: list[LLMDiffField]) -> str:
+    """One-line takeaway for the diff card.
+
+    Counts regressions vs improvements vs matches and renders a
+    short sentence. The frontend pairs this with the per-field
+    table so the operator gets the gist + the detail.
+    """
+    regressions = sum(1 for f in fields if f.flag == "regression")
+    improvements = sum(1 for f in fields if f.flag == "improvement")
+    if regressions == 0 and improvements == 0:
+        return "Calls agree on every recorded field."
+    parts = []
+    if regressions:
+        parts.append(f"{regressions} regression{'' if regressions == 1 else 's'}")
+    if improvements:
+        parts.append(f"{improvements} improvement{'' if improvements == 1 else 's'}")
+    return f"B vs A: {' · '.join(parts)}."
 
 
 # Stats: total llm_calls so the dashboard can show a sparkline of

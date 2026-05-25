@@ -32,6 +32,7 @@ from sqlalchemy import desc, func, select
 
 from mkopo.deps import CurrentUserDep, DbSessionDep
 from mkopo.models import AgentRun, AgentStep, AuditEvent
+from mkopo.models.errors import InfrastructureError
 from mkopo.models.eval import LLMCall, ToolUse
 
 router = APIRouter(prefix="/observability", tags=["observability"])
@@ -57,6 +58,12 @@ class LLMCallRow(BaseModel):
     # the gateway on schema_failed / error rows so the table can hint
     # at the reason before the user opens the detail drawer.
     error_reason: str | None = None
+    # Parent step inside the agent run, if this call happened during
+    # one. Backfilled by mkopo.agents.streaming._persist_step using a
+    # wall-clock window match (see that function's docstring). The
+    # AgentRunDrawer uses this to nest calls under their owning step
+    # instead of rendering a flat list.
+    parent_step_id: str | None = None
 
 
 class ToolUseRow(BaseModel):
@@ -102,7 +109,12 @@ class LLMCallDetail(BaseModel):
 
 
 class ModelStats(BaseModel):
-    """Per-model rollup over the requested window."""
+    """Per-model rollup over the requested window.
+
+    ``cost_usd`` is the summed (input + output) dollars across the
+    window. Nullable so models without pricing data (third-party,
+    unknown) don't show up as $0 — which would understate the bill.
+    """
 
     model: str
     calls: int
@@ -110,6 +122,9 @@ class ModelStats(BaseModel):
     retry_rate: float | None  # fraction of calls with attempt > 0
     p50_seconds: float | None
     p95_seconds: float | None
+    cost_usd: float | None
+    input_tokens: int
+    output_tokens: int
 
 
 class LLMSummary(BaseModel):
@@ -121,8 +136,54 @@ class LLMSummary(BaseModel):
     schema_fail_rate: float | None
     p50_seconds: float | None
     p95_seconds: float | None
+    # Cost rollup. ``total_cost_usd`` is the sum of ``cost_input_usd
+    # + cost_output_usd`` across the window for rows that have a
+    # cost recorded; ``uncosted_calls`` counts rows that don't (the
+    # model wasn't in the pricing registry). The frontend uses the
+    # uncosted count to surface "cost is incomplete" when relevant.
+    total_cost_usd: float
+    uncosted_calls: int
+    total_input_tokens: int
+    total_output_tokens: int
     by_model: list[ModelStats]
     recent: list[LLMCallRow]
+
+
+class InfrastructureErrorRow(BaseModel):
+    """One row of the recent-errors table."""
+
+    id: str
+    created_at: datetime
+    path: str
+    method: str
+    status_code: int
+    error_class: str
+    error_message: str
+    user_id: str | None
+    request_id: str | None
+
+
+class InfrastructureErrorDetail(InfrastructureErrorRow):
+    """Drill-in shape — same row plus the full traceback."""
+
+    traceback: str | None
+
+
+class ErrorClassStat(BaseModel):
+    """One row of the per-error-class rollup."""
+
+    error_class: str
+    count: int
+    last_seen: datetime
+
+
+class InfrastructureErrorSummary(BaseModel):
+    """Headline shape for the errors surface."""
+
+    window_hours: int
+    total: int
+    by_class: list[ErrorClassStat]
+    recent: list[InfrastructureErrorRow]
 
 
 class AgentRunRow(BaseModel):
@@ -193,6 +254,15 @@ async def llm_observability(
         lats = sorted([c.elapsed_seconds for c in calls])
         errs = sum(1 for c in calls if c.status != "ok")
         retries = sum(1 for c in calls if c.attempt > 0)
+        # Per-model cost rollup. Any row missing a cost (model not in
+        # the pricing registry) contributes None here; we sum only
+        # what we have and surface model_cost=None when the *whole*
+        # model is uncosted so the UI knows to flag it.
+        model_cost = sum(
+            (float(c.cost_input_usd or 0) + float(c.cost_output_usd or 0))
+            for c in calls
+        )
+        has_cost = any(c.cost_input_usd is not None for c in calls)
         by_model_stats.append(
             ModelStats(
                 model=model,
@@ -201,8 +271,20 @@ async def llm_observability(
                 retry_rate=retries / len(calls) if calls else None,
                 p50_seconds=_percentile(lats, 50),
                 p95_seconds=_percentile(lats, 95),
+                cost_usd=round(model_cost, 4) if has_cost else None,
+                input_tokens=sum(c.input_tokens or 0 for c in calls),
+                output_tokens=sum(c.output_tokens or 0 for c in calls),
             )
         )
+
+    # Window-level cost totals. ``uncosted_calls`` is the count of
+    # rows with no cost (unknown model) so the UI can warn when the
+    # bill is incomplete.
+    total_cost = sum(
+        (float(r.cost_input_usd or 0) + float(r.cost_output_usd or 0))
+        for r in rows
+    )
+    uncosted = sum(1 for r in rows if r.cost_input_usd is None)
 
     # Pull the most recent ``limit`` rows for the raw-events table.
     recent_stmt = (
@@ -220,6 +302,10 @@ async def llm_observability(
         schema_fail_rate=schema_fails / len(rows) if rows else None,
         p50_seconds=_percentile(latencies_all, 50),
         p95_seconds=_percentile(latencies_all, 95),
+        total_cost_usd=round(total_cost, 4),
+        uncosted_calls=uncosted,
+        total_input_tokens=sum(r.input_tokens or 0 for r in rows),
+        total_output_tokens=sum(r.output_tokens or 0 for r in rows),
         by_model=by_model_stats,
         recent=[
             LLMCallRow(
@@ -503,6 +589,9 @@ async def agent_run_detail(
                 output_tokens=c.output_tokens,
                 system_prompt_hash=c.system_prompt_hash[:12],
                 error_reason=c.error_reason,
+                parent_step_id=(
+                    str(c.parent_step_id) if c.parent_step_id else None
+                ),
             )
             for c in llm_calls
         ],
@@ -513,3 +602,97 @@ async def agent_run_detail(
 # future "recent audit" endpoint can land without re-shuffling the
 # router imports.
 _ = AuditEvent
+
+
+# ----- infrastructure errors --------------------------------------------
+
+
+@router.get("/errors", response_model=InfrastructureErrorSummary)
+async def errors_observability(
+    user: CurrentUserDep,
+    db: DbSessionDep,
+    hours: int = 168,  # default 7d — errors are rarer than LLM calls
+    limit: int = 50,
+) -> InfrastructureErrorSummary:
+    """Recent server errors (uncaught exceptions / 5xx).
+
+    Fed by the FastAPI exception handler in
+    ``mkopo.services.error_capture``. The window default is wider than
+    the LLM rollup because errors should be rare — a 24h view on a
+    healthy install will usually be empty, but the 7d view tells the
+    "stable or trending up?" story.
+    """
+    hours = max(1, min(hours, 720))
+    limit = max(10, min(limit, 500))
+    cutoff = datetime.now(UTC) - timedelta(hours=hours)
+
+    rows = (
+        await db.execute(
+            select(InfrastructureError)
+            .where(InfrastructureError.created_at >= cutoff)
+            .order_by(desc(InfrastructureError.created_at))
+        )
+    ).scalars().all()
+
+    # Per-class rollup. Counts + most recent occurrence so the UI can
+    # show "OperationalError × 3 — last seen 2m ago" at a glance.
+    by_class_map: dict[str, list[InfrastructureError]] = {}
+    for r in rows:
+        by_class_map.setdefault(r.error_class, []).append(r)
+    by_class = [
+        ErrorClassStat(
+            error_class=cls,
+            count=len(items),
+            last_seen=max(i.created_at for i in items),
+        )
+        for cls, items in by_class_map.items()
+    ]
+    by_class.sort(key=lambda c: -c.count)
+
+    return InfrastructureErrorSummary(
+        window_hours=hours,
+        total=len(rows),
+        by_class=by_class,
+        recent=[
+            InfrastructureErrorRow(
+                id=str(r.id),
+                created_at=r.created_at,
+                path=r.path,
+                method=r.method,
+                status_code=r.status_code,
+                error_class=r.error_class,
+                error_message=r.error_message,
+                user_id=str(r.user_id) if r.user_id else None,
+                request_id=r.request_id,
+            )
+            for r in rows[:limit]
+        ],
+    )
+
+
+@router.get("/errors/{error_id}", response_model=InfrastructureErrorDetail)
+async def error_detail(
+    error_id: uuid.UUID,
+    user: CurrentUserDep,
+    db: DbSessionDep,
+) -> InfrastructureErrorDetail:
+    """One error's full traceback. Powers the drill-in drawer."""
+    row = (
+        await db.execute(
+            select(InfrastructureError).where(InfrastructureError.id == error_id)
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND)
+    return InfrastructureErrorDetail(
+        id=str(row.id),
+        created_at=row.created_at,
+        path=row.path,
+        method=row.method,
+        status_code=row.status_code,
+        error_class=row.error_class,
+        error_message=row.error_message,
+        traceback=row.traceback,
+        user_id=str(row.user_id) if row.user_id else None,
+        request_id=row.request_id,
+    )

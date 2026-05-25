@@ -1,10 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { IconX } from "@tabler/icons-react";
+import { IconGitCompare, IconX } from "@tabler/icons-react";
 import { AnimatePresence, motion } from "motion/react";
-import { api, type LLMCallDetail, type ToolUseRow } from "@/lib/api";
+import { api, type LLMCallDetail, type LLMCallDiff, type LLMCallRow, type ToolUseRow } from "@/lib/api";
 import { titleCase } from "@/lib/humanize";
+import { AnnotationPanel } from "@/app/components/AnnotationPanel";
 import { IconButton } from "@/app/components/IconButton";
 import { Pill, type PillVariant } from "@/app/components/Pill";
 import { SectionLabel } from "@/app/components/SectionLabel";
@@ -102,6 +104,11 @@ function statusVariant(status: string): PillVariant {
 function CallBody({ detail }: { detail: LLMCallDetail }) {
   return (
     <div className="flex flex-col gap-5">
+      {/* Human verdict on this call. Sits at the top so an operator
+          who clicked through from /eval's "recent failures" can
+          mark it in one motion. */}
+      <AnnotationPanel targetKind="llm_call" targetId={detail.id} />
+
       {/* Headline metadata grid. The numbers an operator wants to
           see first: when, status, latency, attempt count. Tokens
           live below as supporting evidence. */}
@@ -253,8 +260,120 @@ function CallBody({ detail }: { detail: LLMCallDetail }) {
           </table>
         )}
       </section>
+
+      {/* Regression diff. Lets the operator pick a same-prompt
+          neighbour and see a per-field side-by-side: latency, tokens,
+          cost, status, attempts. Metadata-only — we don't store the
+          user/response text, so prompt diffing is out of scope. The
+          point is to catch "model creep" or "this prompt got slower"
+          regressions, not to do source-level diffing. */}
+      {detail.related.length > 0 && (
+        <DiffSection thisCall={detail} candidates={detail.related} />
+      )}
     </div>
   );
+}
+
+
+// ---- diff section ---------------------------------------------------------
+
+
+function DiffSection({
+  thisCall,
+  candidates,
+}: {
+  thisCall: LLMCallDetail;
+  candidates: LLMCallRow[];
+}) {
+  const [otherId, setOtherId] = useState<string>("");
+  const diffQuery = useQuery<LLMCallDiff, Error>({
+    queryKey: ["llm-call-diff", thisCall.id, otherId],
+    queryFn: () => api.diffLLMCalls(otherId, thisCall.id),
+    enabled: otherId !== "",
+  });
+  return (
+    <section>
+      <SectionLabel Icon={IconGitCompare}>Compare to…</SectionLabel>
+      <p className="mt-1 text-[11.5px] text-[var(--color-text-secondary)]">
+        Pick a same-prompt neighbour to see per-field deltas. <strong>A</strong>{" "}
+        is the picked call; <strong>B</strong> is this one.
+      </p>
+      <select
+        value={otherId}
+        onChange={(e) => setOtherId(e.target.value)}
+        className="form-input mt-2 w-full text-[12px]"
+      >
+        <option value="">— pick a call —</option>
+        {candidates.map((r) => (
+          <option key={r.id} value={r.id}>
+            {relativeShort(r.created_at)} · {r.model} · {r.status} ·{" "}
+            {r.elapsed_seconds.toFixed(2)}s
+          </option>
+        ))}
+      </select>
+      {otherId !== "" && diffQuery.isPending && (
+        <p className="mt-2 text-[11.5px] text-[var(--color-text-tertiary)]">
+          Computing diff…
+        </p>
+      )}
+      {diffQuery.data && <DiffTable diff={diffQuery.data} />}
+    </section>
+  );
+}
+
+
+function DiffTable({ diff }: { diff: LLMCallDiff }) {
+  return (
+    <div className="mt-3 rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)]">
+      <div className="border-b-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-secondary)] px-3 py-2">
+        <p className="text-[12px] font-medium">{diff.summary}</p>
+      </div>
+      <table className="w-full text-[12px]">
+        <thead>
+          <tr className="border-b-[0.5px] border-[var(--color-border-tertiary)]">
+            {["Field", "A", "B", "Δ"].map((h, i) => (
+              <th
+                key={h}
+                className={
+                  "py-1.5 text-[10px] font-medium uppercase tracking-[0.03em] text-[var(--color-text-secondary)] " +
+                  (i === 0 ? "pl-2 text-left" : i === 3 ? "pr-2 text-right" : "px-2 text-left")
+                }
+              >
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {diff.fields.map((f) => (
+            <tr
+              key={f.label}
+              className="border-b-[0.5px] border-[var(--color-border-tertiary)] last:border-b-0"
+            >
+              <td className="py-1.5 pl-2 font-medium">{f.label}</td>
+              <td className="px-2 py-1.5 text-[var(--color-text-secondary)] tabular-nums">
+                {f.a}
+              </td>
+              <td className="px-2 py-1.5 tabular-nums">{f.b}</td>
+              <td
+                className="pr-2 py-1.5 text-right text-[11.5px] tabular-nums"
+                style={{ color: diffFlagColour(f.flag) }}
+              >
+                {f.delta}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function diffFlagColour(flag: string): string {
+  if (flag === "regression") return "var(--color-text-danger)";
+  if (flag === "improvement") return "var(--color-text-success)";
+  if (flag === "match") return "var(--color-text-tertiary)";
+  return "var(--color-text-secondary)";
 }
 
 function Meta({

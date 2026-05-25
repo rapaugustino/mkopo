@@ -647,6 +647,86 @@ async def history(
     return list(rows)
 
 
+# ----- rewrite-with-AI ------------------------------------------------------
+
+
+# The meta-prompt the rewrite endpoint uses. Deliberately *not* in the
+# DEFAULTS registry — making this user-editable would create a
+# "rewrite the rewriter" loop with no source of truth. If this needs
+# changing it's a code change in a reviewed PR.
+_REWRITE_META_SYSTEM = (
+    "You are an expert prompt engineer helping refine system prompts "
+    "for production LLM agents. The user will give you a current "
+    "system prompt and an instruction describing how they'd like it "
+    "changed.\n\n"
+    "Hard rules:\n"
+    "1. Return a complete, drop-in replacement body. Do not return a "
+    "diff or commentary disguised as the body.\n"
+    "2. Preserve hard-rule semantics. If the original prompt has "
+    "numbered rules, keep them numbered. If it forbids inventing "
+    "values, the rewrite must still forbid inventing values unless "
+    "the instruction explicitly says otherwise.\n"
+    "3. Match the original prompt's tone and length envelope. A "
+    "concise prompt stays concise; a structured rule list stays a "
+    "structured rule list.\n"
+    "4. Do not introduce new behavioural directives the instruction "
+    "did not ask for.\n"
+    "5. The `rationale` field is a 1–3 sentence explanation of what "
+    "you changed and why — written for the engineer reviewing the "
+    "diff, not for the LLM consuming the prompt."
+)
+
+
+async def rewrite_prompt(
+    *,
+    current_body: str,
+    instruction: str,
+    identifier: str,
+    label: str,
+    description: str,
+) -> tuple[str, str]:
+    """Ask the gateway to rewrite a prompt under a natural-language
+    instruction. Returns ``(new_body, rationale)``.
+
+    Caller is responsible for actually persisting the result — this
+    function is read-only. The /prompts UI calls this, drops the
+    rewritten body into the editor, and the user reviews + saves as
+    a new version through the normal create-version flow.
+
+    The model used is the default (Sonnet); rewriting is light enough
+    that the heavy model isn't justified. If a rewrite returns garbage
+    the human will catch it in the review step.
+    """
+    # Lazy import to dodge the circular: services.prompts is imported
+    # by the gateway path at runtime, and gateway pulls in agents code.
+    from pydantic import BaseModel, Field
+
+    from mkopo.config import get_settings
+    from mkopo.llm_gateway import get_gateway
+
+    class _RewriteResult(BaseModel):
+        body: str = Field(min_length=10, max_length=8000)
+        rationale: str = Field(min_length=5, max_length=600)
+
+    gateway = get_gateway()
+    settings = get_settings()
+    user_block = (
+        f"Prompt identifier: {identifier}\n"
+        f"Prompt label: {label}\n"
+        f"Prompt description: {description}\n\n"
+        f"--- CURRENT BODY ---\n{current_body}\n--- END CURRENT BODY ---\n\n"
+        f"Instruction from the underwriting team:\n{instruction.strip()}\n\n"
+        f"Produce the rewritten body and a short rationale."
+    )
+    result: _RewriteResult = await gateway.call_structured(
+        model=settings.llm_default_model,
+        system=_REWRITE_META_SYSTEM,
+        user=user_block,
+        schema=_RewriteResult,
+    )
+    return result.body, result.rationale
+
+
 async def latest_active_per_identifier(
     session: AsyncSession,
 ) -> dict[str, Prompt]:

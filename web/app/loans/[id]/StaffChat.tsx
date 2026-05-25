@@ -21,6 +21,7 @@ import {
   type ConfirmRequiredEvent,
   type ToolResume,
 } from "@/lib/agentChat";
+import { BorrowerMessagePreviewModal } from "@/app/components/BorrowerMessagePreviewModal";
 import { MarkdownBlock } from "@/app/components/MarkdownBlock";
 
 /**
@@ -129,7 +130,15 @@ export function StaffChat({ loanId }: Props) {
   }, [userInput, status, runStream]);
 
   const confirm = useCallback(
-    async (action: "confirm" | "cancel") => {
+    async (
+      action: "confirm" | "cancel",
+      // Optional override for the tool's input args. Used by the
+      // preview-and-edit modal path for ``send_borrower_message``
+      // so the staff member's edits to the body land in the
+      // resume payload — the backend reads from ``input`` and
+      // executes the tool with whatever's there.
+      overrideArgs?: Record<string, unknown>,
+    ) => {
       if (!pendingConfirm) return;
       setTranscript((t) => [
         ...t,
@@ -145,7 +154,7 @@ export function StaffChat({ loanId }: Props) {
       const resume: ToolResume = {
         tool_use_id: pendingConfirm.id,
         name: pendingConfirm.name,
-        input: pendingConfirm.args,
+        input: overrideArgs ?? pendingConfirm.args,
         action,
       };
       setPendingConfirm(null);
@@ -229,12 +238,41 @@ export function StaffChat({ loanId }: Props) {
       </div>
 
       <AnimatePresence>
-        {pendingConfirm && (
-          <ConfirmModal
-            event={pendingConfirm}
-            onDecide={(action) => void confirm(action)}
-          />
-        )}
+        {pendingConfirm &&
+          (pendingConfirm.name === "send_borrower_message" ? (
+            // The borrower-message tool gets the rich preview-and-edit
+            // modal — same UX as the decision panel — so the staff
+            // member sees the actual text and can refine before it
+            // ships. Other destructive tools (stage transitions,
+            // overrides) use the read-only confirm modal because
+            // there's nothing useful to edit.
+            <BorrowerMessagePreviewModal
+              open
+              title={`Confirm: ${pendingConfirm.human_action || "send a message"}`}
+              description="The borrower will see this exact text on their /apply page."
+              initialBody={
+                typeof pendingConfirm.args.body === "string"
+                  ? pendingConfirm.args.body
+                  : ""
+              }
+              confirmLabel="Send"
+              onConfirm={({ body }) => {
+                // Merge the edited body into the original args so any
+                // other fields the LLM set (loan_id, etc.) flow through
+                // unchanged.
+                void confirm("confirm", {
+                  ...pendingConfirm.args,
+                  body,
+                });
+              }}
+              onClose={() => void confirm("cancel")}
+            />
+          ) : (
+            <ConfirmModal
+              event={pendingConfirm}
+              onDecide={(action) => void confirm(action)}
+            />
+          ))}
       </AnimatePresence>
     </section>
   );

@@ -441,6 +441,18 @@ class LLMGateway:
         """
         system_hash = hashlib.sha256(system.encode("utf-8")).hexdigest()
 
+        # Compute the per-call dollar cost. Both halves stay ``None``
+        # when the model isn't in the pricing registry — the rollup
+        # endpoints filter on IS NOT NULL so an unknown-model call
+        # doesn't show up as $0 (which would understate the bill).
+        from mkopo.services.pricing import compute_cost
+
+        cost_in, cost_out = compute_cost(
+            model=model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+
         # Note: we deliberately don't log `user` (could be a whole
         # document) or `response_text` (could be PII) — only metadata.
         logger.info(
@@ -454,6 +466,8 @@ class LLMGateway:
             elapsed_seconds=round(elapsed_seconds, 3),
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            cost_input_usd=float(cost_in) if cost_in is not None else None,
+            cost_output_usd=float(cost_out) if cost_out is not None else None,
             error_reason=error_reason,
         )
 
@@ -473,6 +487,8 @@ class LLMGateway:
                         elapsed_seconds=elapsed_seconds,
                         input_tokens=input_tokens,
                         output_tokens=output_tokens,
+                        cost_input_usd=cost_in,
+                        cost_output_usd=cost_out,
                         status=status,
                         schema_name=schema_name,
                         attempt=attempt,
@@ -485,6 +501,18 @@ class LLMGateway:
                         # is part of mkopo.agents, whose package __init__
                         # imports decision.py which imports this gateway.
                         thread_id=_current_thread_id(),
+                        # ``parent_step_id`` is intentionally left
+                        # null here. The streaming layer's
+                        # ``_persist_step`` writes the step row
+                        # *after* the node completes, so by the time
+                        # we'd want to set this column the calls have
+                        # already happened and the step's row doesn't
+                        # yet exist (FK violation). Instead the
+                        # streaming layer backfills this column once
+                        # the step row lands, time-window matching
+                        # llm_calls against the step's [start, end]
+                        # interval. Calls outside any step (eval CI,
+                        # ad-hoc utilities) stay null.
                     )
                 )
         except Exception:

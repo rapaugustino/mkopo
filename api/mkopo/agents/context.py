@@ -34,11 +34,30 @@ from contextvars import ContextVar
 _current_thread_id: ContextVar[str | None] = ContextVar(
     "mkopo_current_thread_id", default=None
 )
+# ``None`` outside any step; a UUID string while a step is executing.
+# Stacks under thread_id — a run binds thread_id at the start, then
+# each node binds the step id around its execution. Calls made inside
+# the node carry both; calls made outside any node (rare —
+# orchestrator-level helpers) carry only thread_id.
+_current_step_id: ContextVar[str | None] = ContextVar(
+    "mkopo_current_step_id", default=None
+)
 
 
 def current_thread_id() -> str | None:
     """The LangGraph thread id of the currently-active agent run, if any."""
     return _current_thread_id.get()
+
+
+def current_step_id() -> str | None:
+    """The agent_steps.id of the currently-executing node, if any.
+
+    Read by ``LLMGateway._record_call`` to populate
+    ``llm_calls.parent_step_id`` so the AgentRunDrawer can nest LLM
+    calls under their owning step. Pairs with :func:`current_thread_id`
+    — thread_id is the run; step_id is the node inside it.
+    """
+    return _current_step_id.get()
 
 
 @contextmanager
@@ -57,3 +76,19 @@ def agent_run_context(thread_id: str) -> Iterator[None]:
         yield
     finally:
         _current_thread_id.reset(token)
+
+
+@contextmanager
+def agent_step_context(step_id: str) -> Iterator[None]:
+    """Bind the current ``agent_steps.id`` for the duration of a node.
+
+    Wrap a node's body in this so any LLM calls it makes get
+    ``parent_step_id`` set on their llm_calls row. Nests cleanly
+    under :func:`agent_run_context` — the var is independent so
+    leaving this block leaves the thread_id binding intact.
+    """
+    token = _current_step_id.set(step_id)
+    try:
+        yield
+    finally:
+        _current_step_id.reset(token)

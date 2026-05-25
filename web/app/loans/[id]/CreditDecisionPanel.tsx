@@ -22,6 +22,7 @@ import { toast } from "sonner";
 import { humanizeStatus } from "@/lib/humanize";
 import { useAgentRun } from "@/lib/useAgentRun";
 import { AgentProgress } from "@/app/components/AgentProgress";
+import { BorrowerMessagePreviewModal } from "@/app/components/BorrowerMessagePreviewModal";
 import { MarkdownBlock } from "@/app/components/MarkdownBlock";
 import { Pill } from "@/app/components/Pill";
 import { PrimaryButton } from "@/app/components/PrimaryButton";
@@ -312,14 +313,19 @@ function ActionBar({
   result: DecisionResult;
 }) {
   const queryClient = useQueryClient();
+  // Whether the preview modal is open. The send-to-borrower button
+  // doesn't fire the mutation directly anymore — it opens this modal,
+  // and the modal's onConfirm passes the edited body into the
+  // mutation. Adds the missing "last-mile review" step that used to
+  // be missing from the panel.
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const sendDecisionToBorrower = useMutation({
-    mutationFn: async () => {
-      const body = composeBorrowerMessage(result);
+    mutationFn: async (editedBody: string) => {
       // Note first so the timeline records the message even if the
       // stage transition then fails (e.g. someone advanced the loan
       // in another tab and the transition is now invalid).
-      await api.addNote(loanId, body, "borrower_reply");
+      await api.addNote(loanId, editedBody, "borrower_reply");
       const target = targetStageFor(selectedPath);
       await api.transitionStage(
         loanId,
@@ -335,6 +341,7 @@ function ActionBar({
       queryClient.invalidateQueries({ queryKey: ["loan", loanId, "audit"] });
       queryClient.invalidateQueries({ queryKey: ["loan", loanId] });
       queryClient.invalidateQueries({ queryKey: ["loan", loanId, "materials"] });
+      setPreviewOpen(false);
       toast.success(
         selectedPath === "decline"
           ? "Adverse action letter sent. Loan moved to declined."
@@ -373,51 +380,80 @@ function ActionBar({
         : "To revise the term sheet, re-run the decision agent with adjusted inputs.",
     );
 
-  if (selectedPath === "decline") {
-    return (
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <SecondaryButton Icon={IconPencil} onClick={editStub}>
-          Edit letter
-        </SecondaryButton>
-        {/* Danger primary — distinct from brand-green because the
-            consequence (adverse action letter) is the most loaded action
-            in the system. */}
-        <button
-          onClick={() => sendDecisionToBorrower.mutate()}
-          disabled={sendDecisionToBorrower.isPending}
-          className="flex items-center gap-1 rounded-md px-3 py-1.5 text-xs font-medium disabled:opacity-50"
-          style={{
-            background: "var(--color-text-danger)",
-            color: "var(--color-background-danger)",
-          }}
-        >
-          {sendDecisionToBorrower.isPending
-            ? "Sending…"
-            : "Send adverse action letter"}
-        </button>
-      </div>
-    );
-  }
+  // Pre-compose the draft body once so the modal opens populated. The
+  // modal owns local edits from there; this string is just the seed.
+  const previewBody = composeBorrowerMessage(result);
+  const isDecline = selectedPath === "decline";
+  const principalReasons = isDecline
+    ? result.adverse_action_letter?.principal_reasons
+    : undefined;
+
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2">
-      <SecondaryButton Icon={IconPencil} onClick={editStub}>
-        Edit term sheet
-      </SecondaryButton>
-      <div className="flex gap-1.5">
-        <SecondaryButton
-          onClick={() => sendToCommittee.mutate()}
-          disabled={sendToCommittee.isPending}
-        >
-          Send to committee
-        </SecondaryButton>
-        <PrimaryButton
-          onClick={() => sendDecisionToBorrower.mutate()}
-          disabled={sendDecisionToBorrower.isPending}
-        >
-          {sendDecisionToBorrower.isPending ? "Sending…" : "Send to borrower"}
-        </PrimaryButton>
-      </div>
-    </div>
+    <>
+      {isDecline ? (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <SecondaryButton Icon={IconPencil} onClick={editStub}>
+            Edit letter
+          </SecondaryButton>
+          {/* Danger primary — distinct from brand-green because the
+              consequence (adverse action letter) is the most loaded action
+              in the system. Opens the preview modal instead of firing
+              directly so the staff member gets a last-mile review of the
+              text the borrower will read. */}
+          <button
+            onClick={() => setPreviewOpen(true)}
+            disabled={sendDecisionToBorrower.isPending}
+            className="flex items-center gap-1 rounded-md px-3 py-1.5 text-xs font-medium disabled:opacity-50"
+            style={{
+              background: "var(--color-text-danger)",
+              color: "var(--color-background-danger)",
+            }}
+          >
+            Review &amp; send adverse action letter
+          </button>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <SecondaryButton Icon={IconPencil} onClick={editStub}>
+            Edit term sheet
+          </SecondaryButton>
+          <div className="flex gap-1.5">
+            <SecondaryButton
+              onClick={() => sendToCommittee.mutate()}
+              disabled={sendToCommittee.isPending}
+            >
+              Send to committee
+            </SecondaryButton>
+            <PrimaryButton onClick={() => setPreviewOpen(true)}>
+              Review &amp; send to borrower
+            </PrimaryButton>
+          </div>
+        </div>
+      )}
+
+      <BorrowerMessagePreviewModal
+        open={previewOpen}
+        title={
+          isDecline
+            ? "Send adverse action letter"
+            : "Send decision to borrower"
+        }
+        description={
+          isDecline
+            ? "The borrower will see this exact text. ECOA Reg B requires each principal reason to be referenced by name in the body."
+            : "Review and edit before sending. The borrower will see this text on their /apply page."
+        }
+        variant={isDecline ? "danger" : "default"}
+        initialBody={previewBody}
+        principalReasons={principalReasons}
+        confirmLabel={
+          isDecline ? "Send adverse action letter" : "Send to borrower"
+        }
+        isSubmitting={sendDecisionToBorrower.isPending}
+        onConfirm={({ body }) => sendDecisionToBorrower.mutate(body)}
+        onClose={() => setPreviewOpen(false)}
+      />
+    </>
   );
 }
 

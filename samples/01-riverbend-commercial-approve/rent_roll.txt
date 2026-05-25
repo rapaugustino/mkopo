@@ -1,0 +1,34 @@
+RENT ROLL — Riverbend Holdings, LLC
+Property: 1622 East Republican Street, Seattle, WA 98112
+As of: May 1, 2026
+
+Unit  Type        Tenant                  Sq Ft   Rent/mo   Lease End    Status
+----  ----------  ----------------------  ------  --------  ----------   --------
+101   Studio      Saanvi Rao                480    $1,650   2027-01-31   Current
+102   Studio      Marco Velasquez           480    $1,650   2026-09-30   Current
+103   1BR         Hannah Friedman           640    $2,025   2026-11-30   Current
+104   1BR         Daniel Okafor             640    $2,025   2027-02-28   Current
+105   2BR         Priya & Anand Iyer        910    $2,550   2027-04-30   Current
+201   Studio      Riley Chen                480    $1,650   2026-08-31   Current
+202   Studio      Olivia Park               480    $1,650   2027-03-31   Current
+203   1BR         Caleb Mendoza             640    $2,025   2026-10-31   Current
+204   1BR         Sofia Klein               640    $2,025   2027-01-15   Current
+205   2BR         Theodore Wallace          910    $2,550   2026-12-31   Current
+301   1BR         Aliya Patel               640    $2,025   2027-02-28   Current
+302   2BR         Marcus & Jin Reyes        910    $2,550   2027-05-31   Current
+
+Total monthly scheduled rent: $24,375
+Total annual scheduled rent: $292,500
+
+Lease maturity profile:
+  - Within 6 months (by Oct 2026):  3 units (25.0%)
+  - 6–12 months:                    5 units (41.7%)
+  - 12+ months:                     4 units (33.3%)
+
+Concessions in place: none
+Delinquencies > 5 days: none
+Pre-leased units: N/A (100% occupied)
+
+Prepared by: Anika Patel, Property Manager
+Building Operations, Riverbend Holdings LLC
+Phone: (206) 555-0119

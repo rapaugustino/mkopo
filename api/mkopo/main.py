@@ -33,6 +33,7 @@ from mkopo.routers import (
 from mkopo.routers import (
     prompts as prompts_router,
 )
+from mkopo.services.error_capture import persist_uncaught_exception
 from mkopo.startup_check import run_startup_checks
 
 
@@ -114,6 +115,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Capture uncaught exceptions into ``infrastructure_errors`` so the
+# Observability / Eval pages can surface "what's broken". Mounted at
+# ``Exception`` so anything not handled by an earlier registered
+# handler (HTTPException, RequestValidationError) lands here. The
+# handler itself is bullet-proofed against persist failures — see
+# error_capture.persist_uncaught_exception.
+app.add_exception_handler(Exception, persist_uncaught_exception)
 
 
 @app.get("/health/live", tags=["health"])

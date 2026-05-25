@@ -1,0 +1,32 @@
+LOAN APPLICATION — COMMERCIAL BRIDGE FACILITY
+Submitted: May 4, 2026
+
+1. BORROWER INFORMATION
+Legal Name: Fern Industrial Partners, LP
+State of Formation: Texas
+EIN: 47-1929044
+Business Address: 8420 Westpark Drive, Houston, TX 77063
+Authorized Signatory: Priya Kapoor, General Partner
+
+2. GUARANTORS
+- Priya Kapoor (general partner, recourse guaranty)
+
+3. LOAN REQUEST
+Amount: $3,200,000
+Purpose: Acquisition + light capex
+Loan Type: Bridge, 30 months interest-only
+Requested Rate Basis: SOFR + 400 bps
+
+4. ASSET
+Subject Property: 62,000 SF Class-B industrial warehouse
+Address: 12440 West Bellfort Avenue, Houston, TX 77072
+Year Built: 2002
+Single-tenant, 6 yrs remaining on triple-net lease
+
+5. USE OF PROCEEDS
+Acquisition: $2,940,000
+Closing costs: $96,000
+Light capex (roof + dock seals): $164,000
+
+Signed: Priya Kapoor
+Date: May 4, 2026

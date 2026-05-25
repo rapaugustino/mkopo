@@ -1,0 +1,33 @@
+FORM 1040 — U.S. INDIVIDUAL INCOME TAX RETURN
+Tax Year: 2024
+
+Taxpayer: Maria Aguilar
+Filing Status: Single
+SSN: ***-**-2086
+Occupation: Clinical Pharmacist
+
+INCOME
+1a   Total wages, salaries (Form W-2, Box 1):     $106,820.00
+1z   Total wage income:                           $106,820.00
+2b   Taxable interest:                                $284.00
+7    Capital gain or (loss):                         $1,240.00
+9    Total income:                                 $108,344.00
+11   Adjusted gross income (AGI):                  $108,344.00
+
+DEDUCTIONS
+12   Standard deduction (single):                  $14,600.00
+15   Taxable income:                                $93,744.00
+
+TAX AND PAYMENTS
+16   Tax (per tax tables):                          $14,944.00
+25a  Federal income tax withheld (W-2):             $16,210.00
+33   Total payments:                                $16,210.00
+34   Refund:                                         $1,266.00
+
+W-2 attached: Pacific Northwest Health System, EIN 94-3014892
+1099-INT attached: First Tech Federal Credit Union
+1099-B attached: Vanguard Brokerage Services
+
+Preparer signature: Carolyn Brennan, CPA
+PTIN: P00428133
+Date filed (electronic): April 8, 2025

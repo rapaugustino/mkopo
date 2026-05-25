@@ -19,8 +19,9 @@ See migration ``0005_eval`` for the matching DDL.
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 
-from sqlalchemy import Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Float, ForeignKey, Index, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -98,6 +99,24 @@ class LLMCall(Base):
     # through call signatures. ``None`` for ad-hoc calls outside an
     # agent run (eval CI, smoke tests, manual scripts).
     thread_id: Mapped[str | None] = mapped_column(String(128))
+    # ``agent_steps.id`` of the node this call ran inside, when the
+    # call happened during a graph step. Mirror of ``thread_id``'s
+    # ContextVar plumbing — the streaming layer binds the var on
+    # node entry and the gateway reads it on _record_call. Lets the
+    # AgentRunDrawer nest calls under their owning step instead of
+    # showing a flat list. Nullable so ad-hoc calls and pre-migration
+    # rows behave the same as before.
+    parent_step_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("agent_steps.id", ondelete="SET NULL"),
+    )
+    # Computed dollar cost split into input vs output. NULL when the
+    # model isn't in the pricing registry (unknown name, third-party
+    # provider, etc.) or when the call failed before token counts
+    # were available. Numeric(10, 6) preserves fractional-cent
+    # precision so aggregations over thousands of calls don't drift.
+    cost_input_usd: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
+    cost_output_usd: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
 
 
 class ToolUse(Base):

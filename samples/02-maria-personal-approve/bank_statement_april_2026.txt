@@ -1,0 +1,40 @@
+FIRST TECH FEDERAL CREDIT UNION
+Monthly Statement
+Account Holder: Maria Aguilar
+Account: Checking ****8420
+Statement Period: April 01, 2026 — April 30, 2026
+
+Opening balance:                                $12,418.04
+
+DEPOSITS / CREDITS
+04/02   Direct Deposit — PNW HEALTH PAYROLL        $3,418.00
+04/16   Direct Deposit — PNW HEALTH PAYROLL        $3,418.00
+04/22   Interest paid                                  $24.18
+Total deposits / credits:                          $6,860.18
+
+WITHDRAWALS / DEBITS
+04/01   ACH — BoA Mortgage (1840.00)              -$1,840.00
+04/01   ACH — Escrow (taxes & insurance)            -$560.00
+04/03   ACH — Honda Financial                       -$312.00
+04/05   Card — Trader Joe's                         -$184.22
+04/06   Card — Costco                               -$262.40
+04/08   ACH — Federal Student Loan Services         -$214.00
+04/10   Card — Shell #4824                           -$58.94
+04/12   ACH — Sacramento Utilities                  -$184.50
+04/15   Card — Whole Foods                          -$208.18
+04/18   Card — Apple Health (Rx coinsurance)         -$42.00
+04/20   Card — REI                                  -$118.80
+04/22   ACH — Chase Sapphire (cc payment, full)     -$408.20
+04/23   Card — Verizon                               -$98.00
+04/24   Card — Trader Joe's                         -$166.20
+04/27   ACH — Discover (cc payment, full)            -$214.40
+04/28   Card — gas, groceries, misc                 -$316.00
+Total withdrawals / debits:                        -$5,187.84
+
+Closing balance:                                  $14,090.38
+
+Average daily balance:                            $13,242.18
+Average daily balance, last 90 days:              $11,840.40
+
+Service fees this period: $0.00
+NSF / overdraft events this period: 0

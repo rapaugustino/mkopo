@@ -64,7 +64,15 @@ def _stream(generator: Any) -> StreamingResponse:
 
 
 @router.post("/intake/run")
-async def run_intake(loan_id: uuid.UUID, user: CurrentUserDep) -> StreamingResponse:
+async def run_intake(
+    loan_id: uuid.UUID,
+    user: CurrentUserDep,
+    # Optional. When present, ``agent_runs.payload`` for the new run
+    # records ``replays_run_id`` pointing at the original. The drawer
+    # uses this to render a "Replays run X" chip + a back-link. Set
+    # by the /eval replay flow; manual reruns leave it None.
+    replays_run_id: uuid.UUID | None = None,
+) -> StreamingResponse:
     """Kick off the intake agent, streaming progress as it executes.
 
     Frontends should read the response body chunk by chunk and parse SSE
@@ -72,7 +80,14 @@ async def run_intake(loan_id: uuid.UUID, user: CurrentUserDep) -> StreamingRespo
     interrupt, result}`` so existing post-run handlers (cache refresh,
     modal open on interrupt) keep working.
     """
-    thread_id = f"intake-{loan_id}"
+    # Distinct thread id for replays so the LangGraph checkpoint
+    # store doesn't collide with the original run. Manual reruns
+    # without ``replays_run_id`` keep the legacy id for backwards
+    # compatibility (resume flows expect it).
+    if replays_run_id is not None:
+        thread_id = f"intake-{loan_id}-replay-{uuid.uuid4().hex[:8]}"
+    else:
+        thread_id = f"intake-{loan_id}"
     config = {"configurable": {"thread_id": thread_id}}
 
     async def _after(state: dict[str, object], seen_interrupt: bool) -> None:
@@ -96,6 +111,7 @@ async def run_intake(loan_id: uuid.UUID, user: CurrentUserDep) -> StreamingRespo
             extract_result=lambda s: {"status": s.get("status")},
             extract_interrupt=_peek_intake_interrupt,
             on_complete=_after,
+            replays_run_id=replays_run_id,
         )
     )
 
@@ -151,18 +167,30 @@ def _peek_intake_interrupt(state: dict[str, Any]) -> Any | None:
 
 @router.post("/underwriting/run")
 async def run_underwriting(
-    loan_id: uuid.UUID, user: CurrentUserDep, db: DbSessionDep
+    loan_id: uuid.UUID,
+    user: CurrentUserDep,
+    db: DbSessionDep,
+    replays_run_id: uuid.UUID | None = None,
 ) -> StreamingResponse:
     """Stream the underwriting agent: rules → cited summary → persist.
 
     No HITL pause — the underwriting agent runs end-to-end. Frontends
     pick the ``result`` field off the terminal ``done`` event to
     populate the workspace.
+
+    ``replays_run_id`` (optional): the original ``agent_runs.id`` this
+    run is replaying. Lands in ``agent_runs.payload.replays_run_id``
+    so the drawer can render a back-link to the original.
     """
     if not await loan_service.get_loan(db, loan_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Loan not found")
 
-    thread_id = f"underwriting-{loan_id}"
+    # Replay needs a unique thread id so it doesn't resume the
+    # original's checkpoint. Manual reruns keep the legacy id.
+    if replays_run_id is not None:
+        thread_id = f"underwriting-{loan_id}-replay-{uuid.uuid4().hex[:8]}"
+    else:
+        thread_id = f"underwriting-{loan_id}"
     config = {"configurable": {"thread_id": thread_id}}
 
     async def _after(_state: dict[str, object], _interrupt: bool) -> None:
@@ -179,6 +207,7 @@ async def run_underwriting(
             agent_name="underwriting",
             extract_result=_extract_underwriting_result,
             on_complete=_after,
+            replays_run_id=replays_run_id,
         )
     )
 
@@ -197,18 +226,27 @@ def _extract_underwriting_result(state: dict[str, Any]) -> Any:
 
 @router.post("/decision/run")
 async def run_decision(
-    loan_id: uuid.UUID, user: CurrentUserDep, db: DbSessionDep
+    loan_id: uuid.UUID,
+    user: CurrentUserDep,
+    db: DbSessionDep,
+    replays_run_id: uuid.UUID | None = None,
 ) -> StreamingResponse:
     """Stream the decision agent: re-evaluate rules → draft package → persist.
 
     Conditional approve, full approve, and decline paths all flow
     through the same three nodes; the path determination happens
     inside ``draft_decision``.
+
+    ``replays_run_id`` (optional): when present, marks this run as a
+    replay of an earlier one. See run_intake docstring.
     """
     if not await loan_service.get_loan(db, loan_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Loan not found")
 
-    thread_id = f"decision-{loan_id}"
+    if replays_run_id is not None:
+        thread_id = f"decision-{loan_id}-replay-{uuid.uuid4().hex[:8]}"
+    else:
+        thread_id = f"decision-{loan_id}"
     config = {"configurable": {"thread_id": thread_id}}
 
     async def _after(_state: dict[str, object], _interrupt: bool) -> None:
@@ -225,6 +263,7 @@ async def run_decision(
             agent_name="decision",
             extract_result=_extract_decision_result,
             on_complete=_after,
+            replays_run_id=replays_run_id,
         )
     )
 

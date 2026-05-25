@@ -83,6 +83,28 @@ class CreateVersionIn(BaseModel):
     activate: bool = True
 
 
+class RewriteIn(BaseModel):
+    """Inputs for the rewrite-with-AI endpoint."""
+
+    # Current body the user is staring at — sent from the editor
+    # rather than re-read from the active row, so the user can apply
+    # the instruction against their in-progress unsaved changes.
+    current_body: str = Field(min_length=1, max_length=10000)
+    instruction: str = Field(min_length=4, max_length=1000)
+
+
+class RewriteOut(BaseModel):
+    """Rewritten body + a short rationale.
+
+    The rationale is intended for the human reviewer, not for the
+    downstream LLM. It explains what changed and why so the user can
+    accept / reject without re-reading the whole body.
+    """
+
+    body: str
+    rationale: str
+
+
 # ----- helpers -------------------------------------------------------------
 
 
@@ -264,6 +286,46 @@ async def activate_version(
             detail=str(exc),
         ) from exc
     return _row_to_version_out(row)
+
+
+@router.post("/{identifier}/rewrite", response_model=RewriteOut)
+async def rewrite_prompt_endpoint(
+    identifier: str,
+    payload: RewriteIn,
+    user: CurrentUserDep,
+    db: DbSessionDep,
+) -> RewriteOut:
+    """Ask the LLM gateway to rewrite the prompt body per an instruction.
+
+    Read-only — does NOT save the new body. The UI loads the result
+    into its editor and the user reviews + saves through the normal
+    create-version path, which keeps the audit trail intact (change
+    note + author land on the new row exactly as they would for a
+    hand-typed edit).
+    """
+    if identifier not in prompts_service.DEFAULTS:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown prompt identifier {identifier!r}.",
+        )
+    meta = prompts_service.DEFAULTS[identifier]
+    try:
+        new_body, rationale = await prompts_service.rewrite_prompt(
+            current_body=payload.current_body,
+            instruction=payload.instruction,
+            identifier=identifier,
+            label=meta.label,
+            description=meta.description,
+        )
+    except Exception as exc:
+        # Rewrite is a best-effort assist; failure shouldn't break
+        # the user's editing session. 502 keeps the failure visible
+        # as "upstream LLM problem" rather than 5xx-ing as our bug.
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Rewrite failed: {exc}",
+        ) from exc
+    return RewriteOut(body=new_body, rationale=rationale)
 
 
 @router.get("/{identifier}/default", response_model=dict)

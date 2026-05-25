@@ -1,0 +1,46 @@
+COMMERCIAL REAL ESTATE APPRAISAL REPORT
+Prepared by: Gulf Coast Valuation Advisors
+
+SUBJECT PROPERTY
+Address: 12440 West Bellfort Avenue, Houston, TX 77072
+Property Type: Class-B industrial warehouse (single-tenant, triple-net)
+Building Area: 62,000 SF
+Year Built: 2002
+Last Renovation: 2019 (HVAC + office build-out)
+
+INCOME APPROACH TO VALUE
+
+Tenant: National Logistics Co. (single-tenant NNN)
+Lease commencement: November 2020
+Lease expiration: October 2032 (6.5 yrs remaining at appraisal date)
+Annual contract rent: $441,200 ($7.12/SF NNN)
+Rent escalations: 2.5% annually
+
+Income:
+Contract rent (annual):                  $441,200
+Operating expense reimbursements (NNN):   $84,800
+Effective gross income:                  $526,000
+
+Operating expenses:
+Property taxes (reimbursed):             $58,400
+Insurance (reimbursed):                  $12,200
+Common-area / structural:                 $14,200
+Management fee (3% EGI):                 $15,780
+Total operating expenses:                $100,580
+
+Net operating income:                    $425,420
+
+VALUATION
+Cap rate (industrial, southwest Houston): 7.25%
+Indicated value:                       $5,868,000
+
+Concluded as-is value: $5,800,000
+
+Comparable sales (3 transactions, last 9 months):
+  - 58,000 SF industrial, NW Houston: $94/SF, March 2026
+  - 70,000 SF industrial, Pasadena TX: $92/SF, Jan 2026
+  - 48,000 SF cold storage, Houston: $98/SF, Sept 2025
+Subject implied: $93.5/SF
+
+APPRAISAL DATE: April 18, 2026
+APPRAISED VALUE: $5,800,000

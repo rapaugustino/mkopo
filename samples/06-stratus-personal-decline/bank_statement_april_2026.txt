@@ -1,0 +1,38 @@
+BANK OF THE WEST — Monthly Statement
+Account Holder: Trevor Stratus
+Account: Checking ****1146
+Statement Period: April 01, 2026 — April 30, 2026
+
+Opening balance:                                $824.18
+
+DEPOSITS / CREDITS
+04/04   Direct Deposit — VECTOR LOGISTICS         $1,418.40
+04/18   Direct Deposit — VECTOR LOGISTICS         $1,418.40
+04/22   Mobile deposit — personal check             $400.00
+Total deposits:                                  $3,236.80
+
+WITHDRAWALS / DEBITS
+04/01   ACH — Burnet Road Mgmt (rent)             -$1,720.00
+04/02   ACH — Toyota Financial                      -$384.00
+04/03   ACH — Lending Club                          -$214.00
+04/04   NSF fee                                      -$35.00
+04/05   Card — H-E-B                                -$118.40
+04/07   Card — Shell #2284                           -$48.20
+04/08   ACH — Capital One (cc min)                  -$118.00
+04/09   ACH — Discover (cc min)                      -$98.00
+04/11   ACH — Chase (cc min)                         -$135.00
+04/12   Card — Pizza Hut                             -$24.18
+04/13   NSF fee                                      -$35.00
+04/15   ACH — Synchrony (cc min)                    -$112.00
+04/18   ACH — Citi (cc min)                         -$149.00
+04/20   Card — H-E-B                                -$84.20
+04/22   ATM withdrawal                              -$200.00
+04/25   Card — McDonalds                             -$18.40
+04/27   Card — Shell #2284                           -$54.00
+Total withdrawals:                               -$3,547.38
+
+Closing balance:                                  $513.60
+
+Average daily balance:                            $448.20
+NSF / overdraft events this period: 2
+Service fees this period: $70.00

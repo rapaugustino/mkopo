@@ -409,6 +409,48 @@ export interface EvalDiagnostics {
   recent_failures: EvalFailureRow[];
 }
 
+// Trace annotations — verdicts humans recorded on LLM calls / agent
+// runs / agent steps. Surfaced inside the observability drawers and
+// rolled up on the eval dashboard. "bad"/"incorrect" auto-spawn a
+// review_task pointing at a routable extraction on the same loan.
+
+export type AnnotationTargetKind = "llm_call" | "agent_run" | "agent_step";
+export type AnnotationVerdict = "good" | "bad" | "incorrect";
+
+export interface Annotation {
+  id: string;
+  target_kind: AnnotationTargetKind;
+  target_id: string;
+  verdict: AnnotationVerdict;
+  note: string | null;
+  created_by_user_id: string | null;
+  created_at: string;
+  /** Non-null when this annotation auto-created a review_tasks row
+   *  (bad/incorrect verdicts with a linkable loan). The drawer
+   *  surfaces this as "+ added to review queue". */
+  spawned_review_task_id: string | null;
+}
+
+/** Regression-diff result for two LLM calls. Metadata-only — we
+ *  don't store prompts or response text. */
+export interface LLMCallDiffField {
+  label: string;
+  a: string;
+  b: string;
+  delta: string;
+  /** "match" | "different" | "regression" | "improvement" — drives
+   *  the row's colour in the diff table. */
+  flag: string;
+}
+
+export interface LLMCallDiff {
+  a_id: string;
+  b_id: string;
+  fields: LLMCallDiffField[];
+  /** Short one-line takeaway. */
+  summary: string;
+}
+
 export interface EvalFieldRow {
   field_name: string;
   production_accuracy: number | null;
@@ -478,6 +520,10 @@ export interface LLMCallRow {
   system_prompt_hash: string;
   /** Short one-line failure summary. Null for successful calls. */
   error_reason?: string | null;
+  /** Parent agent step, when the call happened inside one. Used by
+   *  AgentRunDrawer to nest calls under their step. Null for ad-hoc
+   *  calls (eval CI, rewrite assists, etc.) and for pre-backfill rows. */
+  parent_step_id?: string | null;
 }
 
 /** Full detail for one LLM call, with same-prompt neighbours.
@@ -511,6 +557,13 @@ export interface ModelStats {
   retry_rate: number | null;
   p50_seconds: number | null;
   p95_seconds: number | null;
+  /** Window total spend on this model (input + output combined).
+   *  ``null`` when the model isn't in the pricing registry — UI
+   *  shows "—" in that case so the operator sees the gap rather
+   *  than a misleading $0. */
+  cost_usd: number | null;
+  input_tokens: number;
+  output_tokens: number;
 }
 
 export interface LLMSummary {
@@ -520,8 +573,45 @@ export interface LLMSummary {
   schema_fail_rate: number | null;
   p50_seconds: number | null;
   p95_seconds: number | null;
+  /** Window total spend. ``uncosted_calls > 0`` means some rows
+   *  weren't priced and the dollar figure understates the bill. */
+  total_cost_usd: number;
+  uncosted_calls: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
   by_model: ModelStats[];
   recent: LLMCallRow[];
+}
+
+// ---- Infrastructure errors (Phase: cost + error tracking) ----
+
+export interface InfrastructureErrorRow {
+  id: string;
+  created_at: string;
+  path: string;
+  method: string;
+  status_code: number;
+  error_class: string;
+  error_message: string;
+  user_id: string | null;
+  request_id: string | null;
+}
+
+export interface InfrastructureErrorDetail extends InfrastructureErrorRow {
+  traceback: string | null;
+}
+
+export interface ErrorClassStat {
+  error_class: string;
+  count: number;
+  last_seen: string;
+}
+
+export interface InfrastructureErrorSummary {
+  window_hours: number;
+  total: number;
+  by_class: ErrorClassStat[];
+  recent: InfrastructureErrorRow[];
 }
 
 export interface AgentRunRow {
@@ -661,6 +751,39 @@ export const api = {
    *  eval page's "is the AI actually working?" framing. */
   getEvalDiagnostics: () => request<EvalDiagnostics>(`/eval/diagnostics`),
   refreshDrift: () => request<EvalRefreshResult>(`/eval/refresh`, { method: "POST" }),
+  // ---- Eval annotations ----
+  /** List annotations on one trace row, newest first. Drives the
+   *  "Existing annotations" section of LLMCallDrawer + AgentRunDrawer. */
+  listAnnotations: (
+    target_kind: AnnotationTargetKind,
+    target_id: string,
+  ) =>
+    request<Annotation[]>(
+      `/eval/annotations?target_kind=${encodeURIComponent(
+        target_kind,
+      )}&target_id=${encodeURIComponent(target_id)}`,
+    ),
+  /** Persist a verdict + optional note. bad/incorrect auto-spawn a
+   *  review_task when the trace is linkable to a loan. */
+  createAnnotation: (body: {
+    target_kind: AnnotationTargetKind;
+    target_id: string;
+    verdict: AnnotationVerdict;
+    note?: string | null;
+  }) =>
+    request<Annotation>(`/eval/annotations`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  deleteAnnotation: (id: string) =>
+    request<void>(`/eval/annotations/${id}`, { method: "DELETE" }),
+  // ---- Eval regression diff ----
+  /** Compare two LLM calls on stored metadata. Used by the
+   *  "Compare to…" panel inside LLMCallDrawer. */
+  diffLLMCalls: (a: string, b: string) =>
+    request<LLMCallDiff>(
+      `/eval/diff/llm-calls?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`,
+    ),
   // ---- Observability ----
   getLLMObservability: (hours = 24) =>
     request<LLMSummary>(`/observability/llm?hours=${hours}`),
@@ -670,6 +793,12 @@ export const api = {
     request<AgentSummary>(`/observability/agents?hours=${hours}`),
   getAgentRunDetail: (runId: string) =>
     request<AgentRunDetail>(`/observability/agents/${runId}`),
+  /** Recent 5xx errors. Default window is 7d because errors should
+   *  be rare — a 24h view on a healthy install is usually empty. */
+  getErrorsObservability: (hours = 168) =>
+    request<InfrastructureErrorSummary>(`/observability/errors?hours=${hours}`),
+  getErrorDetail: (errorId: string) =>
+    request<InfrastructureErrorDetail>(`/observability/errors/${errorId}`),
   // ---- Prompts ----
   /** List every registered prompt with its current active version. */
   listPrompts: () => request<PromptSummary[]>(`/prompts`),
@@ -695,6 +824,18 @@ export const api = {
     request<PromptVersion>(
       `/prompts/${encodeURIComponent(identifier)}/activate/${version}`,
       { method: "POST" },
+    ),
+  /** Ask the LLM gateway to rewrite the current body per a natural-
+   *  language instruction. Read-only — the result is loaded into the
+   *  editor; the user reviews and saves through the normal version
+   *  flow, which keeps the audit trail honest. */
+  rewritePrompt: (
+    identifier: string,
+    body: { current_body: string; instruction: string },
+  ) =>
+    request<PromptRewriteResult>(
+      `/prompts/${encodeURIComponent(identifier)}/rewrite`,
+      { method: "POST", body: JSON.stringify(body) },
     ),
 };
 
@@ -731,4 +872,13 @@ export interface PromptDetail {
   /** Newest first. Empty means we've never written a DB row for this
    *  identifier; ``default_body`` is what the runtime is using. */
   versions: PromptVersion[];
+}
+
+export interface PromptRewriteResult {
+  /** Drop-in replacement body for the editor. */
+  body: string;
+  /** 1–3 sentence summary of what the rewrite changed and why.
+   *  Shown next to the editor so the user can accept / reject
+   *  without re-reading the whole body. */
+  rationale: string;
 }
