@@ -44,6 +44,12 @@ dependencies = [
   "openai>=2.37.0",
   "tiktoken>=0.13.0",
   "pypdf>=6.12.0",
+  # PDF generation — used by the seed script to produce realistic
+  # PDF fixtures the intake agent can extract from. Not on the request
+  # path, just at seed time + the optional "regenerate sample PDFs"
+  # CLI. Reportlab is the canonical Python PDF library; the seed only
+  # uses ``canvas`` + a few text-flow helpers.
+  "reportlab>=4.2.0",
   # Auth — borrower self-service identity. bcrypt for password hashing,
   # pyjwt for short-lived session tokens in httpOnly cookies.
   "bcrypt>=4.2.0",
@@ -86,6 +92,11 @@ extend-immutable-calls = ["fastapi.File"]
 # storage.py is a local-filesystem-only implementation; the sync Path I/O
 # inside async methods is intentional for this portfolio scope.
 "mkopo/services/storage.py" = ["ASYNC240"]
+# storage_proxy.py reads small files from the local disk during dev only.
+# Production traffic flows through the S3 backend which doesn't hit this
+# code at all; the sync pathlib calls inside the async handler are fine
+# at dev volumes and the proxy never serves > ~10MB documents.
+"mkopo/routers/storage_proxy.py" = ["ASYNC240"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

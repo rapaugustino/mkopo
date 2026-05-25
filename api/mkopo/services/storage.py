@@ -3,7 +3,12 @@
 Selected via `STORAGE_BACKEND`:
 
 - `local` (default) — writes under `STORAGE_ROOT` on the local filesystem and
-  returns `file://` URIs. Zero external dependencies, ideal for the dev loop.
+  returns `file://` URIs as the canonical storage_uri. Presigned downloads,
+  however, are minted as short-lived JWT-signed HTTP URLs that point back at
+  this API's ``/storage/local/{token}`` proxy route. Browsers can't iframe
+  ``file://`` from an ``http://`` page (security model), so the dev-only
+  in-app viewer needs an HTTP origin even when the bytes themselves live on
+  the local disk.
 - `s3` — writes to `S3_BUCKET` via aioboto3 and returns `s3://` URIs. Point
   `S3_ENDPOINT_URL` at MinIO or LocalStack to exercise this path without
   needing a real AWS account.
@@ -154,14 +159,30 @@ class LocalStorage:
     async def presigned_url(
         self, uri: str, *, expected_loan_id: uuid.UUID, expires_in: int = 300
     ) -> str:
-        del expires_in
         if not uri.startswith("file://"):
             raise ValueError(f"LocalStorage cannot handle URI: {uri}")
         full = uri[len("file://") :]
         idx = full.find("loans/")
         key = full[idx:] if idx >= 0 else full
         _enforce_loan_match(_loan_id_from_key(key), expected_loan_id, uri)
-        return uri
+        # Mint a short-lived JWT that the proxy route below verifies.
+        # Returning the raw ``file://`` URI used to be enough for
+        # curl-based testing, but the in-app DocumentViewer iframes
+        # the URL — and browsers refuse to load ``file://`` resources
+        # from an ``http://`` page. So the dev loop has to go through
+        # an HTTP proxy on the API itself.
+        import time
+
+        import jwt as _jwt
+
+        settings = get_settings()
+        payload = {
+            "key": key,
+            "loan_id": str(expected_loan_id),
+            "exp": int(time.time()) + expires_in,
+        }
+        token = _jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+        return f"{settings.api_public_url.rstrip('/')}/api/v1/storage/local/{token}"
 
 
 class S3Storage:

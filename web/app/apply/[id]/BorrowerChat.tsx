@@ -20,6 +20,7 @@ import {
   type ConfirmRequiredEvent,
   type ToolResume,
 } from "@/lib/borrowerChat";
+import { humanizeStage } from "@/lib/humanize";
 import { MarkdownBlock } from "@/app/components/MarkdownBlock";
 
 /**
@@ -462,7 +463,11 @@ function summariseResult(name: string, result: unknown): string {
   const r = result as Record<string, unknown>;
   if (typeof r.message === "string") return r.message as string;
   if (name === "get_loan_status") {
-    return `Stage: ${r.stage}. ${r.next_step_for_you ?? ""}`.trim();
+    // Don't leak the raw ``intake`` / ``underwriting`` / ``decision``
+    // enum into a borrower-facing chat transcript. ``humanizeStage``
+    // turns it into "Intake review" / "Underwriting" / etc.
+    const stageStr = typeof r.stage === "string" ? r.stage : null;
+    return `Stage: ${humanizeStage(stageStr)}. ${r.next_step_for_you ?? ""}`.trim();
   }
   if (name === "list_documents") {
     return `${r.count ?? 0} document(s) on file.`;

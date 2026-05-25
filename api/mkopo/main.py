@@ -28,10 +28,15 @@ from mkopo.routers import (
     observability,
     parties,
     review,
+    search,
     staff_chat,
+    storage_proxy,
 )
 from mkopo.routers import (
     prompts as prompts_router,
+)
+from mkopo.routers import (
+    settings as settings_router,
 )
 from mkopo.services.error_capture import persist_uncaught_exception
 from mkopo.startup_check import run_startup_checks
@@ -190,3 +195,8 @@ app.include_router(borrower_auth.router, prefix="/api/v1")
 app.include_router(borrower_chat.router, prefix="/api/v1")
 app.include_router(borrower_portal.router, prefix="/api/v1")
 app.include_router(staff_chat.router, prefix="/api/v1")
+app.include_router(search.router, prefix="/api/v1")
+app.include_router(settings_router.router, prefix="/api/v1")
+# Local-storage HTTP proxy — only meaningful when STORAGE_BACKEND=local.
+# Production S3 backend mints its own URLs and bypasses this route.
+app.include_router(storage_proxy.router, prefix="/api/v1")

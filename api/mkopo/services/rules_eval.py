@@ -36,6 +36,40 @@ class EvaluationResult:
     flags: list[RiskFlag]
 
 
+# Friendly labels paired with each rule_id so the LLM has natural
+# prose to anchor on when drafting adverse-action letters. The
+# rule_id is the engine's stable identifier (kept in
+# ``principal_reasons`` for audit) and is intentionally code-shaped;
+# the label below is what the borrower should ever see written in
+# any letter body. Mirrors the frontend ``humanizeRuleId`` table.
+_RULE_LABELS: dict[str, str] = {
+    "ltv_under_cap": "loan-to-value ratio",
+    "dscr_above_floor": "debt-service coverage",
+    "debt_yield_above_floor": "debt yield",
+    "appraisal_age": "appraisal age",
+    "doc_completeness": "documentation completeness",
+    "guarantor_concentration": "guarantor concentration",
+    "credit_score_floor": "credit score",
+    "dti_under_cap": "debt-to-income ratio",
+    "lti_under_cap": "loan-to-income ratio",
+    "employment_tenure_minimum": "employment tenure",
+    "income_minimum": "minimum income",
+}
+
+
+def friendly_rule_label(rule_id: str) -> str:
+    """Borrower-facing label for a rule id.
+
+    Used in the decision agent's prompt context so the LLM has
+    natural language to anchor the letter prose on. The raw rule_id
+    still lives in ``principal_reasons`` for audit traceability;
+    only the letter body uses this label. Falls through to
+    title-cased underscores for unknown ids — same fallback the
+    frontend uses.
+    """
+    return _RULE_LABELS.get(rule_id) or rule_id.replace("_", " ")
+
+
 def _to_decimal(value: str) -> Decimal | None:
     try:
         return Decimal(value.replace(",", "").replace("$", "").strip())

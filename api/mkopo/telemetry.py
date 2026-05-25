@@ -48,8 +48,13 @@ def setup_telemetry(app: object) -> None:
     )
     provider = TracerProvider(resource=resource)
 
-    # Console exporter is always wired in dev so traces show up in the uvicorn log.
-    if settings.environment == "development":
+    # Console exporter is OFF by default — the OTel SDK emits one
+    # JSON span per DB query, which floods the uvicorn log to the
+    # point that real signal (errors, warnings, audit events) is
+    # invisible. Opt-in via OTEL_CONSOLE=1 when you actually want to
+    # see trace spans inline. The OTLP path below is the supported
+    # route for production tracing.
+    if os.environ.get("OTEL_CONSOLE", "").lower() in {"1", "true", "yes"}:
         provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
 
     # OTLP exporter when an endpoint is configured (Phoenix/Tempo/etc.).

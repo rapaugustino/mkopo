@@ -106,6 +106,14 @@ class Settings(BaseSettings):
 
     # Frontend
     frontend_url: str = "http://localhost:3000"
+    # Backend's own externally-reachable URL. Used to mint absolute
+    # links that point back at this API — e.g. local-storage presigned
+    # URLs that the in-app DocumentViewer iframes need to render
+    # (browsers refuse to load ``file://`` from an ``http://`` page,
+    # so the local backend proxies bytes through this URL instead).
+    # In production this should be the public hostname of the API,
+    # e.g. ``https://api.mkopo.dev``.
+    api_public_url: str = "http://localhost:8000"
 
     @property
     def is_production(self) -> bool:

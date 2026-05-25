@@ -39,7 +39,13 @@ export function BrandHeader({ title, sub, badge, actions, leading }: Props) {
         </div>
       </div>
       {actions && (
-        <div className="flex shrink-0 items-center gap-1.5">{actions}</div>
+        // ``flex-wrap`` so individual action buttons can wrap onto a
+        // second row on narrow viewports rather than forcing the
+        // header to overflow. ``shrink-0`` is reserved for desktop
+        // (≥sm) where there's room for the full button row.
+        <div className="flex flex-wrap items-center gap-1.5 sm:shrink-0">
+          {actions}
+        </div>
       )}
     </div>
   );

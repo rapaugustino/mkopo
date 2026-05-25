@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -11,16 +11,26 @@ import {
   IconGavel,
   IconListCheck,
   IconFlagCheck,
+  IconLayoutKanban,
+  IconLayoutList,
 } from "@tabler/icons-react";
 import { api, type Loan, type LoanStage, type Owner, type RiskBand } from "@/lib/api";
 import { NewLoanModal } from "./NewLoanModal";
+import { PipelineKanban } from "./PipelineKanban";
 import { EMPTY_FILTERS, PipelineFilters, type PipelineFilterState } from "./PipelineFilters";
 import { BrandHeader } from "./components/BrandHeader";
+import { EmptyState } from "./components/EmptyState";
+import { daysSince } from "@/lib/formatting";
 import { PrimaryButton } from "./components/PrimaryButton";
 import { RiskBadge } from "./components/RiskBadge";
 import { Skeleton } from "./components/Skeleton";
 import { StagePill } from "./components/StagePill";
 import { StatTile } from "./components/StatTile";
+
+/** Pipeline view mode. Persisted to localStorage so a user's choice
+ *  survives refreshes — same key the kanban toggle reads on mount. */
+type PipelineView = "list" | "kanban";
+const VIEW_STORAGE_KEY = "mkopo.pipeline.view";
 
 const STAGES: {
   stage: LoanStage;
@@ -39,9 +49,8 @@ function formatAmount(s: string): string {
   return `$${(n / 1_000_000).toFixed(1)}M`;
 }
 
-function daysSince(iso: string): number {
-  return Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000));
-}
+// ``daysSince`` lives in ``@/lib/formatting`` — shared with the
+// kanban so both views compute aging from the same boundary.
 
 function agingClass(days: number): string {
   if (days >= 7) return "text-[var(--color-text-danger)] font-medium";
@@ -298,6 +307,29 @@ export default function PipelinePage() {
   );
   const [newLoanOpen, setNewLoanOpen] = useState(false);
 
+  // View toggle (list / kanban). Initial render uses ``list`` so the
+  // SSR markup matches the client first-paint; we lift the persisted
+  // preference inside an effect so localStorage access doesn't break
+  // the server bundle and so we never render a flash of the wrong
+  // layout. The effect runs once on mount.
+  const [view, setView] = useState<PipelineView>("list");
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(VIEW_STORAGE_KEY);
+      if (saved === "list" || saved === "kanban") setView(saved);
+    } catch {
+      // localStorage can throw in restricted browser modes — ignore;
+      // the default "list" is a fine fallback.
+    }
+  }, []);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(VIEW_STORAGE_KEY, view);
+    } catch {
+      // ignore; same reason as above
+    }
+  }, [view]);
+
   /** Apply filters to the raw loan list.
    *
    *  - search is case-insensitive across reference + borrower name
@@ -393,6 +425,7 @@ export default function PipelinePage() {
         sub={pipelineSummary(loans)}
         actions={
           <>
+            <ViewToggle value={view} onChange={setView} />
             <PipelineFilters
               owners={owners}
               value={filters}
@@ -421,7 +454,14 @@ export default function PipelinePage() {
         onChange={setFilters}
       />
 
-      <div className="grid grid-cols-5 overflow-hidden rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)]">
+      {/* Stage-tile strip.
+          - Phones (default): 2-column grid, all 5 tiles wrap.
+          - Tablet (sm): 3 across.
+          - Desktop (md+): the original 5-across funnel layout.
+          Inter-tile separators flip from per-row borders on
+          mobile to per-column borders on desktop so the grid never
+          shows orphan border edges. */}
+      <div className="grid grid-cols-2 overflow-hidden rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] sm:grid-cols-3 md:grid-cols-5">
         {STAGES.map((s, i) => {
           const loansInStage = byStage.get(s.stage) ?? [];
           // Stage tiles double as a fast filter affordance: clicking a
@@ -436,6 +476,13 @@ export default function PipelinePage() {
             next.has(s.stage) ? next.delete(s.stage) : next.add(s.stage);
             setFilters({ ...filters, stages: next });
           };
+          // Desktop separator (right border on 4 of 5 tiles when
+          // they're in one row). On wrap layouts we use bottom
+          // borders instead so adjacent rows don't fight over edges.
+          const desktopRightBorder =
+            i < STAGES.length - 1
+              ? "md:border-r-[0.5px] md:border-[var(--color-border-tertiary)]"
+              : "";
           return (
             <button
               key={s.stage}
@@ -447,11 +494,10 @@ export default function PipelinePage() {
                   : `Filter to "${s.label}"`
               }
               className={
-                "text-left transition-opacity " +
-                (i < STAGES.length - 1
-                  ? "border-r-[0.5px] border-[var(--color-border-tertiary)]"
-                  : "") +
-                (dimmed ? " opacity-45" : " hover:bg-[var(--color-background-secondary)]/60")
+                "border-b-[0.5px] border-[var(--color-border-tertiary)] text-left transition-opacity md:border-b-0 " +
+                desktopRightBorder +
+                " " +
+                (dimmed ? "opacity-45" : "hover:bg-[var(--color-background-secondary)]/60")
               }
             >
               <StatTile
@@ -466,14 +512,25 @@ export default function PipelinePage() {
         })}
       </div>
 
+      {view === "kanban" ? (
+        <PipelineKanban loans={filteredLoans} />
+      ) : (
       <div className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-3">
+        {/* Pipeline table.
+            On phones we keep the layout as a table — same data, same
+            click targets — but hide the lower-signal columns (Borrower,
+            Aging, Owner) behind responsive utility classes so the row
+            fits on a 375px viewport. The hidden columns reappear at
+            ``sm`` (≥640px) and ``md`` (≥768px) thresholds in priority
+            order: Borrower returns first, then Owner, then Aging.
+            Reference + Amount + Stage + Risk are always visible. */}
         <table className="w-full text-[12.5px]">
           <thead>
             <tr className="border-b-[0.5px] border-[var(--color-border-tertiary)]">
               <th className="px-2 py-3 text-left text-[11px] font-medium uppercase tracking-[0.03em] text-[var(--color-text-secondary)]">
                 Loan
               </th>
-              <th className="px-2 py-3 text-left text-[11px] font-medium uppercase tracking-[0.03em] text-[var(--color-text-secondary)]">
+              <th className="hidden px-2 py-3 text-left text-[11px] font-medium uppercase tracking-[0.03em] text-[var(--color-text-secondary)] sm:table-cell">
                 Borrower
               </th>
               <th className="px-2 py-3 text-right text-[11px] font-medium uppercase tracking-[0.03em] text-[var(--color-text-secondary)]">
@@ -482,10 +539,10 @@ export default function PipelinePage() {
               <th className="px-2 py-3 text-left text-[11px] font-medium uppercase tracking-[0.03em] text-[var(--color-text-secondary)]">
                 Stage
               </th>
-              <th className="px-2 py-3 text-left text-[11px] font-medium uppercase tracking-[0.03em] text-[var(--color-text-secondary)]">
+              <th className="hidden px-2 py-3 text-left text-[11px] font-medium uppercase tracking-[0.03em] text-[var(--color-text-secondary)] md:table-cell">
                 Aging
               </th>
-              <th className="px-2 py-3 text-left text-[11px] font-medium uppercase tracking-[0.03em] text-[var(--color-text-secondary)]">
+              <th className="hidden px-2 py-3 text-left text-[11px] font-medium uppercase tracking-[0.03em] text-[var(--color-text-secondary)] sm:table-cell">
                 Owner
               </th>
               <th className="px-2 py-3 text-right text-[11px] font-medium uppercase tracking-[0.03em] text-[var(--color-text-secondary)]">
@@ -508,8 +565,17 @@ export default function PipelinePage() {
                     >
                       {loan.reference}
                     </Link>
+                    {/* On mobile, the Reference cell carries the
+                        borrower name underneath since Borrower is
+                        hidden as its own column. Keeps the row
+                        scannable without horizontal scroll. */}
+                    {loan.borrower?.name && (
+                      <p className="block truncate text-[11px] text-[var(--color-text-secondary)] sm:hidden">
+                        {loan.borrower.name}
+                      </p>
+                    )}
                   </td>
-                  <td className="px-2 py-3 text-[var(--color-text-primary)]">
+                  <td className="hidden px-2 py-3 text-[var(--color-text-primary)] sm:table-cell">
                     {loan.borrower?.name ?? (
                       <span className="text-[var(--color-text-tertiary)]">—</span>
                     )}
@@ -518,8 +584,10 @@ export default function PipelinePage() {
                   <td className="px-2 py-3">
                     <StagePill stage={loan.stage} />
                   </td>
-                  <td className={`px-2 py-3 ${agingClass(age)}`}>{age}d</td>
-                  <td className="px-2 py-3">
+                  <td className={`hidden px-2 py-3 md:table-cell ${agingClass(age)}`}>
+                    {age}d
+                  </td>
+                  <td className="hidden px-2 py-3 sm:table-cell">
                     {loan.owner ? (
                       <span
                         className="inline-flex h-[22px] w-[22px] items-center justify-center rounded-full bg-[var(--color-background-secondary)] text-[10px] font-medium text-[var(--color-text-secondary)]"
@@ -540,22 +608,99 @@ export default function PipelinePage() {
           </tbody>
         </table>
         {loans.length === 0 && (
-          <p className="p-6 text-center text-sm text-[var(--color-text-secondary)]">
-            No loans yet. Click{" "}
-            <strong>New loan</strong> to create one, or run{" "}
-            <code className="rounded bg-[var(--color-background-secondary)] px-1.5 py-0.5">
-              uv run python scripts/seed.py
-            </code>{" "}
-            for seeded demo data.
-          </p>
+          <EmptyState
+            variant="inbox"
+            title="No loans in the pipeline yet"
+            description={
+              <>
+                Click <strong>New loan</strong> to create one, or run{" "}
+                <code className="rounded bg-[var(--color-background-secondary)] px-1.5 py-0.5">
+                  uv run python scripts/seed.py
+                </code>{" "}
+                for a seeded demo dataset.
+              </>
+            }
+          />
         )}
         {loans.length > 0 && filteredLoans.length === 0 && (
-          <p className="p-6 text-center text-sm text-[var(--color-text-secondary)]">
-            No loans match the current filter. Adjust or clear filters above.
-          </p>
+          <EmptyState
+            variant="inbox"
+            size="compact"
+            title="No loans match the current filter"
+            description="Adjust or clear filters above to see results."
+          />
         )}
       </div>
+      )}
     </div>
+  );
+}
+
+/** Segmented control used in the header to swap between list and
+ *  kanban renderings of the pipeline. Mirrors the macOS finder
+ *  view-switcher idiom: two buttons in a single rounded container,
+ *  the active one filled. Kept inline here rather than promoted to
+ *  a shared primitive because this is the only place it appears
+ *  (so far) and externalizing it would just spread the styling
+ *  thin without saving anything.
+ */
+function ViewToggle({
+  value,
+  onChange,
+}: {
+  value: PipelineView;
+  onChange: (v: PipelineView) => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label="Pipeline view"
+      className="inline-flex items-center gap-0.5 rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] p-0.5"
+    >
+      <ViewToggleButton
+        active={value === "list"}
+        onClick={() => onChange("list")}
+        Icon={IconLayoutList}
+        label="List"
+      />
+      <ViewToggleButton
+        active={value === "kanban"}
+        onClick={() => onChange("kanban")}
+        Icon={IconLayoutKanban}
+        label="Kanban"
+      />
+    </div>
+  );
+}
+
+function ViewToggleButton({
+  active,
+  onClick,
+  Icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  Icon: React.ComponentType<{ size?: number }>;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      title={label}
+      className="flex items-center gap-1 rounded-[5px] px-2 py-1 text-[11.5px] font-medium transition-colors"
+      style={{
+        background: active ? "var(--color-background-secondary)" : "transparent",
+        color: active
+          ? "var(--color-text-primary)"
+          : "var(--color-text-secondary)",
+      }}
+    >
+      <Icon size={12} />
+      {label}
+    </button>
   );
 }
 

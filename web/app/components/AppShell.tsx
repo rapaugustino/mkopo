@@ -1,11 +1,21 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { BorrowerShell } from "./BorrowerShell";
+import { CommandPalette } from "./CommandPalette";
 import { GlobalNav } from "./GlobalNav";
 
 interface Props {
   children: React.ReactNode;
+}
+
+/** Detect ``Cmd+K`` (Mac) / ``Ctrl+K`` (Win/Linux). Used to wire the
+ *  command palette globally across the staff shell. We intentionally
+ *  do NOT capture ``K`` alone — that would conflict with browser
+ *  find-in-page and break native text editing. */
+function isPaletteShortcut(e: KeyboardEvent): boolean {
+  return (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k";
 }
 
 /**
@@ -37,6 +47,23 @@ interface Props {
  */
 export function AppShell({ children }: Props) {
   const pathname = usePathname() ?? "/";
+
+  // Command palette state — lives at the shell so the keybinding
+  // works on every staff page regardless of which child component
+  // currently has focus. Borrower / auth / self-layouted routes
+  // don't get the palette (no staff context to search from).
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isPaletteShortcut(e)) {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // Routes whose own ``layout.tsx`` already adds chrome — AppShell
   // must not double-wrap. ``/apply`` is the application wizard.
@@ -89,15 +116,20 @@ export function AppShell({ children }: Props) {
           logo has visual breathing room from the viewport edges. The
           brand-light bottom-edge stroke stays as the quiet brand cue. */}
       <nav
-        className="border-b-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-6 py-4"
+        className="border-b-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-3 py-3 sm:px-6 sm:py-4"
         style={{
           boxShadow: "inset 0 -1px 0 var(--color-brand-light)",
         }}
       >
-        <div className="mx-auto flex max-w-[1440px] items-center gap-6">
-          <div className="flex items-center gap-3">
+        {/* Brand bar uses a wrap layout on narrow screens — logo +
+            nav on the first row, palette trigger on the second. We
+            avoid a hamburger because the nav is only five items and
+            collapsing to icons-only (see GlobalNav) keeps everything
+            tappable without an extra interaction. */}
+        <div className="mx-auto flex max-w-[1440px] flex-wrap items-center gap-x-3 gap-y-2 sm:gap-x-6">
+          <div className="flex items-center gap-2.5 sm:gap-3">
             <div
-              className="flex h-8 w-8 items-center justify-center rounded-md text-[13px] font-semibold"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[13px] font-semibold"
               style={{
                 background: "var(--color-brand)",
                 color: "var(--color-brand-light)",
@@ -113,12 +145,42 @@ export function AppShell({ children }: Props) {
             </div>
           </div>
           <GlobalNav />
+          {/* Right-aligned Cmd+K trigger. Also makes the shortcut
+              discoverable to users who don't know it exists — they
+              see the chip, click it, and learn the keybinding from
+              the kbd hints inside the modal. On narrow screens we
+              keep just the icon-equivalent "Search…" and drop the
+              kbd hint, since touch users don't need the shortcut.
+              ``flex-1 sm:flex-none`` lets the search chip stretch
+              when the brand bar has wrapped, so it stays tappable
+              instead of squeezing to a sliver. */}
+          <button
+            type="button"
+            onClick={() => setPaletteOpen(true)}
+            className="ml-auto flex flex-1 items-center justify-between gap-2 rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-secondary)] px-2.5 py-1 text-[11.5px] text-[var(--color-text-secondary)] hover:bg-[var(--color-background-primary)] hover:text-[var(--color-text-primary)] sm:flex-none"
+            aria-label="Open command palette"
+            title="Search loans, borrowers, pages (⌘K)"
+          >
+            <span>Search…</span>
+            <span className="hidden items-center gap-0.5 sm:inline-flex">
+              <kbd className="inline-flex h-4 min-w-4 items-center justify-center rounded border border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-1 font-mono text-[10px] text-[var(--color-text-secondary)]">
+                ⌘
+              </kbd>
+              <kbd className="inline-flex h-4 min-w-4 items-center justify-center rounded border border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-1 font-mono text-[10px] text-[var(--color-text-secondary)]">
+                K
+              </kbd>
+            </span>
+          </button>
         </div>
       </nav>
       {/* Main content — 1440px max instead of 1280px. Wider monitors
           stop wasting the right edge, narrower monitors still center
-          gracefully. ``px-6`` matches the nav for visual alignment. */}
-      <main className="mx-auto max-w-[1440px] px-6 py-6">{children}</main>
+          gracefully. ``px-3 sm:px-6`` keeps content edge-padded on
+          phones without losing the comfortable padding on desktops. */}
+      <main className="mx-auto max-w-[1440px] px-3 py-4 sm:px-6 sm:py-6">
+        {children}
+      </main>
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </>
   );
 }

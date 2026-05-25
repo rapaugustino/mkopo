@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { api, type LoanDocument } from "@/lib/api";
 import { humanizeDocType } from "@/lib/humanize";
 import { DocumentViewer } from "@/app/components/DocumentViewer";
+import { EmptyState } from "@/app/components/EmptyState";
 import { Pill } from "@/app/components/Pill";
 import { SectionLabel } from "@/app/components/SectionLabel";
 
@@ -284,10 +285,12 @@ export function DocsPanel({ loanId }: Props) {
       </SectionLabel>
 
       {docs.length === 0 ? (
-        <p className="mb-2 px-1 text-[12px] text-[var(--color-text-tertiary)]">
-          Upload the loan packet to get the intake agent going. PDFs and plain
-          text are extracted automatically.
-        </p>
+        <EmptyState
+          variant="documents"
+          size="compact"
+          title="No documents uploaded yet"
+          description="Drop the loan packet below to get the intake agent going. PDFs and plain text are extracted automatically."
+        />
       ) : (
         <div className="mb-3 divide-y-[0.5px] divide-[var(--color-border-tertiary)]">
           {docs.map((d) => (

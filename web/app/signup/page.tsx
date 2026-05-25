@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
@@ -72,8 +72,17 @@ function SignupInner() {
     },
   });
 
+  // Already-authed users have nothing to do here. Bounce them to
+  // ``nextUrl`` from an effect — calling ``router.replace`` during
+  // render trips Next's "setState during render" warning because
+  // the router setter runs synchronously inside the render phase.
+  useEffect(() => {
+    if (auth.status === "authed") {
+      router.replace(nextUrl);
+    }
+  }, [auth.status, router, nextUrl]);
+
   if (auth.status === "authed") {
-    router.replace(nextUrl);
     return null;
   }
 

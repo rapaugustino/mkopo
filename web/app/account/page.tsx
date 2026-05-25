@@ -20,7 +20,7 @@ import {
 import { useAuth } from "@/app/borrower/AuthProvider";
 import { PrimaryButton } from "@/app/components/PrimaryButton";
 import { SecondaryButton } from "@/app/components/SecondaryButton";
-import { humanizeLoanType, humanizeStage } from "@/lib/humanize";
+import { humanizeLoanClass, humanizeLoanType, humanizeStage } from "@/lib/humanize";
 
 /**
  * Borrower dashboard — the landing surface after login.
@@ -171,7 +171,7 @@ function LoanRow({ loan }: { loan: MyLoanRow }) {
           </p>
           <p className="mt-0.5 truncate text-[11.5px] text-[var(--color-text-secondary)]">
             ${Number(loan.amount).toLocaleString()} · {humanizeLoanType(loan.loan_type)}{" "}
-            {loan.loan_class}
+            · {humanizeLoanClass(loan.loan_class)}
           </p>
           <p className="mt-1 line-clamp-1 text-[11px] text-[var(--color-text-tertiary)]">
             {loan.next_step}

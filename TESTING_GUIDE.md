@@ -65,6 +65,24 @@ personal: KAYA), reference numbers `LN-2026-1001` through
 `underwriting`, `decision`, `conditions`, `closing`, `approved`,
 `declined`.
 
+**Important — what the seed actually creates.** The seeded loans
+exist for the **staff side** to demo against: they have `Loan`,
+`Document`, `Party`, and `LoanParty` rows, and they're all owned
+by Jordan Davis (`owner_user_id`). They do **NOT** create borrower
+`User` accounts, so the borrower emails on those loans (e.g.
+`matthew@atlasholdings.example`, `ops@cedarridge.example`,
+`kaya.morales@example.com`) cannot sign in — they are display-only
+contact strings on `Party` rows.
+
+The **only** seeded `User` is `j.davis@mkopo.dev` (the underwriter),
+and even that account has no password — staff auth uses the dev
+bearer token (see Part 0.3).
+
+So when you're working through the borrower flows below, you're
+creating **new** users + loans via `/signup` + `/apply`. The
+seeded loans are what the staff side has to chew on; they're
+not the same loans the borrower flow exercises.
+
 ### 0.2 Start the servers
 
 ```bash
@@ -82,78 +100,169 @@ cd web && npm run dev
 
 ### 0.3 Accounts you'll use
 
-| Persona | Email | Sign-in route |
+There are **two separate auth systems** in this codebase today —
+read this carefully so you know what to expect:
+
+**Staff (the underwriter / loan-officer side)** uses a bearer
+token (`NEXT_PUBLIC_DEV_TOKEN` env var, default
+`dev-token-replace-me`) that the frontend ships automatically on
+every staff API call. **There is no staff login screen.** Open
+`http://localhost:3000` and you're already operating as the seeded
+underwriter Jordan Davis (`j.davis@mkopo.dev`, `role=admin`). This
+is a dev-mode shortcut — production staff auth should land on the
+same JWT system the borrower side uses (tracked separately; see the
+"Auth dual-system" note at the bottom of Part 0).
+
+**Borrowers (anyone using `/apply`, `/account`, the chat panel)**
+use real password + JWT auth. They have to sign up first.
+
+| Persona | Email | How to sign in |
 |---|---|---|
-| Underwriter (seeded) | `j.davis@mkopo.dev` | `/login` (dev bearer token) |
-| Borrower — Riverbend | `elena@riverbendholdings.example` | `/signup` then `/login` |
+| Underwriter (seeded) | `j.davis@mkopo.dev` | **No sign-in.** Open `localhost:3000` — you're already staff. |
+| Borrower — Riverbend | `elena@riverbendholdings.example` | `/signup` first (pick any 8+ char password), then `/login` |
 | Borrower — Maria | `maria.aguilar@example.com` | `/signup` then `/login` |
 | Borrower — Summit | `damian@summithospitality.example` | `/signup` then `/login` |
-| Borrower — Indigo (partial) | `nia@indigocapital.example` | created by staff invite (Flow S2) |
+| Borrower — Indigo (partial) | `nia@indigocapital.example` | created by staff invite (Flow S1) — uses magic link, no password |
 | Borrower — Trevor | `trevor.stratus@example.com` | `/signup` then `/login` |
+| Borrower — Aspen (real email) | your real email | created by staff invite — uses magic link, no password |
 
-The borrower portal uses real password + magic-link auth. Sign up
-with the email shown for each scenario; the dev environment skips
-real email send unless `RESEND_API_KEY` is set (you'll see the link
-in the API logs).
+**There are no seeded borrower passwords.** Whatever password you
+type at `/signup` is what you'll use at `/login`. The borrower
+portal sends magic-link emails for password reset + initial
+invites; the dev environment skips real email send unless
+`RESEND_API_KEY` is configured (you'll see the link in the API
+logs).
+
+> **Why the split?** The borrower-portal auth (signup / login /
+> JWT cookies / magic links / revocation / re-auth gates) is
+> production-ready. The staff bearer token is a deferred
+> placeholder from early development — see the "Auth dual-system"
+> note below before you ship anything based on this code.
+
+### 0.4 Auth dual-system — known gap
+
+The current state of staff vs borrower auth is, honestly, a mess:
+
+| Surface | Mechanism | Production-ready? |
+|---|---|---|
+| Staff (`/`, `/loans/*`, `/eval`, `/observability`, `/prompts`, `/review-queue`) | Shared bearer token `Authorization: Bearer ${DEV_TOKEN}` resolved by `routers/auth.py:resolve_current_user`. Same identity (`dev-user`, `role=admin`) for every staff call. | **No.** It's a dev-mode shortcut. No per-user identity, no revocation, no expiry. |
+| Borrower (`/apply/*`, `/account/*`, `/api/v1/borrower-auth/*`, `/api/v1/borrower-portal/*`) | Real JWT auth in an HttpOnly cookie. Sign-up, password hashing (argon2), JWT-with-jti revocation via Redis blacklist, per-purpose magic links, rate limiting, sensitive-op re-auth. | **Yes.** |
+
+**Why both still exist.** Borrower auth was built out properly
+(tasks #158, #167, #168, #169). Staff auth was deferred (task
+#155 — RBAC roles for internal users). The two systems were
+never reconciled, so today staff calls bypass everything the
+borrower side enforces.
+
+**What "fixed" looks like.** Staff should authenticate through
+the same JWT system the borrower side uses, with the user's
+`role` (admin / underwriter / loan_officer) driving the
+tool-registry filter (already wired in `agents/tools/staff.py`)
+and any other RBAC check. Staff login UI would mirror the
+borrower's, posting to a `/api/v1/auth/login` endpoint that
+issues a JWT cookie. The current dev-token shortcut would
+either be removed or kept only behind an `environment=dev` flag.
+
+This is the next thing to do if you intend to deploy. Until
+then, treat anything you're testing on the staff side as
+running in "trust everyone with the token" mode.
+
+The same `/login` route exists for borrowers, but **don't try to
+use it for staff** — it's not wired to anything that grants
+`role=admin`.
 
 ---
 
 ## Part 1 — Borrower flows
+
+> **The wizard is five steps, not six. Documents are uploaded
+> AFTER submit on the status page.** That's by design — the apply
+> wizard collects loan structure (class, type, amount, parties),
+> the submit creates the loan row, and document upload happens on
+> `/apply/[loan_id]` where the `DocsUploader` lives. Don't go
+> hunting for a docs step inside the wizard.
 
 ### Flow B1 · Self-service commercial application (clean approve)
 
 **Scenario.** Riverbend Holdings — `samples/01-riverbend-commercial-approve/`.
 
 1. Open `/signup`. Sign up as `elena@riverbendholdings.example` with
-   any 8-char+ password.
+   any 8-char+ password (e.g. `riverbend123`).
 2. Open `/apply` (or click the CTA from `/account`).
-3. **Wizard step 1 — class.** Pick "Business / commercial real estate".
-4. **Wizard step 2 — loan type + amount.** Pick "Bridge", enter
-   `$2,000,000`.
-5. **Wizard step 3 — borrower entity.** Enter
-   `Riverbend Holdings, LLC`, state of formation Washington.
-6. **Wizard step 4 — property.** Address `1622 East Republican Street,
-   Seattle, WA 98112`, type "Multifamily".
-7. **Wizard step 5 — guarantors.** Add `Elena Park` and `Joel Park`.
-8. **Wizard step 6 — documents.** Drag all four `.txt` files from
-   `samples/01-riverbend-commercial-approve/`.
-9. Click **Submit application**.
+3. **Step 1 — Loan type.** Pick "Business / commercial real estate"
+   and `Bridge` as the type.
+4. **Step 2 — Business.** Enter the entity name
+   `Riverbend Holdings, LLC`. Borrower email + name should already be
+   pre-filled from your signup — if not, you'll see a "set state during
+   render" issue (already fixed in the latest code).
+5. **Step 3 — The loan.** Amount `$2,000,000`, property address
+   `1622 East Republican Street, Seattle, WA 98112`, property type
+   `Multifamily`, purpose "Acquisition financing".
+6. **Step 4 — Guarantors.** Click **+ Add guarantor**, enter
+   `Elena Park` + `elena@riverbendholdings.example`. Click **+ Add
+   guarantor** again, enter `Joel Park` + `joel@riverbendholdings.example`.
+7. **Step 5 — Review.** Confirm the summary reads correctly,
+   then click **Submit application**.
 
-**Expected.**
-- You're redirected to `/apply/[loan_id]` (the status page).
+**Expected after submit.**
+- Redirected to `/apply/[loan_id]` (the status page — NOT the
+  wizard).
 - Pipeline (staff side) shows a new loan in `intake`.
-- Four documents listed in the loan's case file.
-- The "Required documents" checklist on the status page shows all
-  four boxes ticked.
+- "Required documents" checklist on the status page shows four
+  unticked items (loan application, appraisal, rent roll, PFS).
 
-**Touchpoint.** Backend writes a `Loan` (loan_class=`business`),
-four `Document` rows, and an `audit_events.action=loan_submitted`.
+**Now upload the documents.**
+
+8. On `/apply/[loan_id]`, scroll to the dashed upload box labelled
+   **"Drop files here or click to upload"**. (There's no "Add a
+   document" button — the dashed box *is* the uploader.)
+9. Drag all four `.txt` files from
+   `samples/01-riverbend-commercial-approve/` onto it.
+
+**Expected after upload.**
+- Each upload increments the checklist; eventually all four boxes
+  tick.
+- The tick is a **filename-heuristic match**, not a content match —
+  `loan_application.txt` ticks the "Loan application" box regardless
+  of what's actually inside. If you drop Maria's
+  `loan_application.txt` onto a business loan, it'll still tick
+  "Loan application" even though the content is for a personal
+  product. Real content classification happens during the intake
+  agent's run.
+- Pipeline / case-file shows four document rows.
+- Backend writes a `Loan` (loan_class=`business`), four `Document`
+  rows, and `audit_events.action=borrower_applied` +
+  `document_uploaded` rows.
 
 ### Flow B2 · Self-service personal application
 
 **Scenario.** Maria Aguilar — `samples/02-maria-personal-approve/`.
 
-1. Open a new private browser window. Sign up as
-   `maria.aguilar@example.com`.
-2. Open `/apply`. **Wizard step 1**, pick **"Personal / individual"**.
-3. **Wizard step 2.** Loan type "Personal", amount `$25,000`,
-   purpose "Home improvement".
-4. **Wizard step 3 — about you.** Name `Maria Aguilar`, SSN last-4
-   `2086`, employer `Pacific Northwest Health System`, annual income
-   `$108,400`.
-5. **Wizard step 4 — financial details.** Monthly debt payments
-   `$3,406`, credit score `745`, years at employer `6.4`.
-6. **Wizard step 5 — documents.** Drag all four files from
-   `samples/02-maria-personal-approve/`.
-7. Submit.
+1. Open a **new private browser window**. Sign up as
+   `maria.aguilar@example.com` with any 8-char+ password.
+2. Open `/apply`. **Step 1**, pick **"Personal / individual"**, loan
+   type `Permanent` (renders as "Long-term"), amount `$25,000`.
+3. **Step 2 — About you.** Name + email pre-filled from signup. Add
+   purpose "Home improvement (kitchen renovation)".
+4. **Step 3 — The loan.** (Personal flow doesn't ask for property.)
+5. **Step 4 — Finances.** Annual income `108400`, employer
+   `Pacific Northwest Health System`, credit score `745`, monthly
+   debt payments `3406`, years at employer `6.4`.
+6. **Step 5 — Review.** Submit.
 
-**Expected.**
+**Expected after submit.**
 - Status page renders the **personal-loan** required-doc checklist
   (loan application, tax return, bank statement, PFS) — NOT the
   commercial set.
-- Status copy refers to "your pay stubs / tax returns" rather than
-  "appraisal".
+- Status copy refers to pay stubs / tax returns / bank statement
+  rather than "appraisal".
 - `loan_class=personal` in the DB.
+
+**Upload the documents on the status page.**
+
+7. Drag all four files from `samples/02-maria-personal-approve/`
+   onto the uploader on `/apply/[loan_id]`.
+8. The checklist should tick all four boxes.
 
 **Touchpoint.** Verify `loan.meta` carries `annual_income`,
 `monthly_debt_payments`, `credit_score`, `years_employment` exactly
@@ -166,8 +275,9 @@ as entered.
 1. Stay on `/apply/[loan_id]`.
 2. Verify the page shows: reference number, current stage chip,
    "What's next" copy, the required-docs checklist, the timeline.
-3. Click "Add a document" — try uploading an unrelated file (e.g.
-   a `loan_application.txt` from a different scenario).
+3. Drag an unrelated file onto the "Drop files here or click to
+   upload" box (e.g. a `loan_application.txt` from a different
+   scenario).
 
 **Expected.** The file uploads but the doc-type doesn't tick the
 matching checklist box (heuristic filename match — different content).
@@ -228,6 +338,14 @@ and the audit log.
 
 **Scenario.** Indigo Capital partial intake —
 `samples/05-partial-intake-only/`.
+
+> **Variant for testing real email delivery.** Use
+> [`samples/07-aspen-real-email-test/`](./samples/07-aspen-real-email-test/)
+> with `rapaugustino@gmail.com` as the borrower email. If Resend is
+> configured (`RESEND_API_KEY`, `RESEND_FROM_ADDRESS`,
+> `RESEND_FROM_NAME`), a real email lands in that inbox. See the
+> scenario's README for the full step-by-step. Falls back to a
+> console-logged magic-link URL when Resend isn't configured.
 
 1. Log in as the seeded underwriter.
 2. From `/` (pipeline), click **+ New loan**.

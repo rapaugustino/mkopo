@@ -388,7 +388,7 @@ function ModelTable({ rows }: { rows: ModelStats[] }) {
     );
   }
   return (
-    <table className="w-full text-[12.5px]">
+    <div className="overflow-x-auto"><table className="w-full min-w-[480px] text-[12.5px]">
       <thead>
         <tr className="border-b-[0.5px] border-[var(--color-border-tertiary)]">
           {["Model", "Calls", "p50", "p95", "Error rate", "Retry rate", "Cost"].map(
@@ -451,7 +451,7 @@ function ModelTable({ rows }: { rows: ModelStats[] }) {
           </tr>
         ))}
       </tbody>
-    </table>
+    </table></div>
   );
 }
 
@@ -471,7 +471,7 @@ function LLMCallTable({
     );
   }
   return (
-    <table className="w-full text-[12.5px]">
+    <div className="overflow-x-auto"><table className="w-full min-w-[480px] text-[12.5px]">
       <thead>
         <tr className="border-b-[0.5px] border-[var(--color-border-tertiary)]">
           {["Time", "Model", "Schema", "Status", "Attempt", "Latency", "Tokens"].map(
@@ -539,7 +539,7 @@ function LLMCallTable({
           </tr>
         ))}
       </tbody>
-    </table>
+    </table></div>
   );
 }
 
@@ -564,7 +564,7 @@ function AgentRunTable({
     );
   }
   return (
-    <table className="w-full text-[12.5px]">
+    <div className="overflow-x-auto"><table className="w-full min-w-[480px] text-[12.5px]">
       <thead>
         <tr className="border-b-[0.5px] border-[var(--color-border-tertiary)]">
           {["Time", "Agent", "Status", "Thread", "Loan"].map((h, i) => (
@@ -617,7 +617,7 @@ function AgentRunTable({
           </tr>
         ))}
       </tbody>
-    </table>
+    </table></div>
   );
 }
 
@@ -664,7 +664,7 @@ function ErrorTable({
         </div>
       )}
 
-      <table className="w-full text-[12.5px]">
+      <div className="overflow-x-auto"><table className="w-full min-w-[480px] text-[12.5px]">
         <thead>
           <tr className="border-b-[0.5px] border-[var(--color-border-tertiary)]">
             {["Time", "Method", "Path", "Class", "Message"].map((h) => (
@@ -700,7 +700,7 @@ function ErrorTable({
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
     </div>
   );
 }

@@ -17,6 +17,7 @@ import { motion } from "motion/react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/app/borrower/AuthProvider";
+import { humanizeLoanType } from "@/lib/humanize";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -34,6 +35,11 @@ class ApplyConflictError extends Error {
 type LoanType = "bridge" | "permanent" | "construction" | "refinance";
 type LoanClass = "business" | "personal";
 
+interface GuarantorEntry {
+  name: string;
+  email: string;
+}
+
 interface FormState {
   loan_class: LoanClass;
   loan_type: LoanType;
@@ -47,8 +53,12 @@ interface FormState {
   // field) and for "passwordless / magic-link only" intent.
   borrower_password: string;
   borrower_type: "entity" | "person";
-  guarantor_name: string;
-  guarantor_email: string;
+  // Multiple guarantors supported. Each row is fully optional —
+  // the user adds rows as needed; the validator requires name +
+  // email when ANY row is non-empty (mixing empty + populated
+  // rows would otherwise allow a partially-typed entry to slip
+  // through with just a name and no contact).
+  guarantors: GuarantorEntry[];
   property_address: string;
   property_type: string;
   // Personal-loan-only inputs. Optional even when class is personal
@@ -69,8 +79,7 @@ const EMPTY: FormState = {
   borrower_email: "",
   borrower_password: "",
   borrower_type: "entity",
-  guarantor_name: "",
-  guarantor_email: "",
+  guarantors: [],
   property_address: "",
   property_type: "",
   annual_income: "",
@@ -142,7 +151,23 @@ const LOAN_TYPE_OPTIONS_PERSONAL: { value: LoanType; label: string; hint: string
 export default function ApplyPage() {
   const router = useRouter();
   const auth = useAuth();
-  const [form, setForm] = useState<FormState>(EMPTY);
+  // Seed the form with the signed-in user's name + email *on first
+  // paint*. Without this initialiser, an already-authed user lands
+  // on the page with empty fields and the Next button stuck disabled
+  // because the validator sees an empty email — a real bug we hit
+  // during testing. The setState-on-render block further down
+  // handles the mid-session "user signed in while page was open"
+  // edge case (rare, but cheap to support).
+  const [form, setForm] = useState<FormState>(() => {
+    if (auth.status === "authed" && auth.user) {
+      return {
+        ...EMPTY,
+        borrower_email: auth.user.email,
+        borrower_name: auth.user.name,
+      };
+    }
+    return EMPTY;
+  });
   const update = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
 
@@ -158,6 +183,21 @@ export default function ApplyPage() {
   // demo's data model) and let Phase 2's "My applications"
   // dashboard handle multi-application UX.
   // Pre-fill name/email when a signed-in borrower lands on /apply.
+  //
+  // Two cases this handles:
+  //
+  //   (1) User is already signed in on first paint. The form's
+  //       initial state already carries their values (see the
+  //       ``useState(() => { ... })`` initialiser above), so this
+  //       block does nothing — but if the user signs in mid-session
+  //       (rare, but possible if they had another tab open) the
+  //       transition below fires and the form catches up.
+  //
+  //   (2) User signs in after the page mounts (e.g. clicked the
+  //       "Sign in" toast action from the 409 path, came back). The
+  //       ``currentAuthUser !== seenAuthUser`` reference change
+  //       triggers, the form picks up their email + name.
+  //
   // React-19 "set state during render with a guard" — no effect, so
   // no cascading-render warning, and the user sees their pre-filled
   // form on the first paint instead of a flicker.
@@ -211,15 +251,17 @@ export default function ApplyPage() {
         // loan when this is set. Skipped for already-signed-in
         // users (they get the 409 path, handled in onError).
         borrower_password: form.borrower_password || null,
-        guarantors: form.guarantor_name
-          ? [
-              {
-                name: form.guarantor_name,
-                party_type: "person",
-                email: form.guarantor_email || null,
-              },
-            ]
-          : [],
+        // Only ship rows that are fully populated. Empty rows are
+        // valid in the UI (they're how the user "discards" one),
+        // but we don't want to round-trip them to the backend as
+        // Party stubs.
+        guarantors: form.guarantors
+          .filter((g) => g.name.trim() && g.email.trim())
+          .map((g) => ({
+            name: g.name.trim(),
+            party_type: "person" as const,
+            email: g.email.trim(),
+          })),
         property_address: form.property_address || null,
         property_type: form.property_type || null,
       };
@@ -338,7 +380,22 @@ export default function ApplyPage() {
         return "Enter your annual income (gross).";
       return true;
     }
-    if (currentKey === "guarantor") return true; // optional throughout
+    if (currentKey === "guarantor") {
+      // The whole step is optional — zero guarantors is a fine
+      // commercial application. But if a row has been started,
+      // both name + email must be filled. Half-filled rows would
+      // otherwise round-trip as Party rows with no contact info,
+      // which the case-file timeline can't email.
+      const half = form.guarantors.find(
+        (g) =>
+          (g.name.trim() && !/^[^@]+@[^@]+\.[^@]+$/.test(g.email)) ||
+          (!g.name.trim() && g.email.trim()),
+      );
+      if (half) {
+        return "Each guarantor needs both a name and a valid email — or remove the row.";
+      }
+      return true;
+    }
     return true;
   })();
 
@@ -743,33 +800,80 @@ export default function ApplyPage() {
         </SectionCard>
       )}
 
-      {/* ---- STEP 4 (business): Guarantor (optional) ------------------ */}
+      {/* ---- STEP 4 (business): Guarantors (optional, multi-row) ------- */}
       {currentKey === "guarantor" && (
       <SectionCard
         icon={IconUserCircle}
-        title="Guarantor"
-        description="Optional. If a person other than the borrower will personally guarantee, list them here."
+        title="Guarantors"
+        description="Optional. Add a row for each person who'll personally guarantee. Both name and a valid email are required per row — we route updates to them by email."
       >
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Guarantor name">
-            <input
-              type="text"
-              value={form.guarantor_name}
-              onChange={(e) => update("guarantor_name", e.target.value)}
-              placeholder="Matthew Chen"
-              className="form-input"
-            />
-          </Field>
-          <Field label="Guarantor email">
-            <input
-              type="email"
-              value={form.guarantor_email}
-              onChange={(e) => update("guarantor_email", e.target.value)}
-              placeholder="matthew@…"
-              className="form-input"
-            />
-          </Field>
-        </div>
+        {form.guarantors.length === 0 ? (
+          <p className="text-[12px] text-[var(--color-text-secondary)]">
+            No guarantors yet. Click <strong>Add guarantor</strong> below to
+            list one — or leave this step empty if the loan is non-recourse.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {form.guarantors.map((g, idx) => (
+              <div
+                key={idx}
+                className="grid grid-cols-[1fr_1fr_auto] items-end gap-3"
+              >
+                <Field label={`Guarantor ${idx + 1} — name`}>
+                  <input
+                    type="text"
+                    value={g.name}
+                    onChange={(e) => {
+                      const next = [...form.guarantors];
+                      next[idx] = { ...next[idx], name: e.target.value };
+                      update("guarantors", next);
+                    }}
+                    placeholder="Matthew Chen"
+                    className="form-input"
+                  />
+                </Field>
+                <Field label="Email">
+                  <input
+                    type="email"
+                    value={g.email}
+                    onChange={(e) => {
+                      const next = [...form.guarantors];
+                      next[idx] = { ...next[idx], email: e.target.value };
+                      update("guarantors", next);
+                    }}
+                    placeholder="matthew@…"
+                    className="form-input"
+                  />
+                </Field>
+                <button
+                  type="button"
+                  onClick={() => {
+                    update(
+                      "guarantors",
+                      form.guarantors.filter((_, i) => i !== idx),
+                    );
+                  }}
+                  className="inline-flex h-9 items-center gap-1 rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-2.5 text-[11.5px] text-[var(--color-text-secondary)] hover:bg-[var(--color-background-secondary)] hover:text-[var(--color-text-danger)]"
+                  aria-label={`Remove guarantor ${idx + 1}`}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() =>
+            update("guarantors", [
+              ...form.guarantors,
+              { name: "", email: "" },
+            ])
+          }
+          className="mt-3 inline-flex items-center gap-1 rounded-md border-[0.5px] border-dashed border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-3 py-1.5 text-[11.5px] font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-background-secondary)]"
+        >
+          + Add guarantor
+        </button>
       </SectionCard>
       )}
 
@@ -924,10 +1028,13 @@ function ReviewSummary({ form }: { form: FormState }) {
   const rows: { label: string; value: string }[] = [
     {
       label: "Loan type",
+      // Both halves of the review summary humanized — raw enum
+      // values like ``bridge`` or ``permanent`` shouldn't read in
+      // a borrower-facing recap.
       value:
         form.loan_class === "personal"
-          ? `Personal · ${form.loan_type}`
-          : `Business · ${form.loan_type}`,
+          ? `Personal · ${humanizeLoanType(form.loan_type)}`
+          : `Business · ${humanizeLoanType(form.loan_type)}`,
     },
     {
       label: form.loan_class === "personal" ? "Your name" : "Entity name",
@@ -943,14 +1050,23 @@ function ReviewSummary({ form }: { form: FormState }) {
     { label: "Purpose", value: form.purpose || "—" },
   ];
   if (form.loan_class === "business") {
+    // Only fully-populated rows count toward the summary — half-typed
+    // ones are dropped at submit too.
+    const validGuarantors = form.guarantors.filter(
+      (g) => g.name.trim() && g.email.trim(),
+    );
     rows.push(
       { label: "Property type", value: form.property_type || "—" },
       { label: "Property address", value: form.property_address || "—" },
       {
-        label: "Guarantor",
-        value: form.guarantor_name
-          ? `${form.guarantor_name}${form.guarantor_email ? ` · ${form.guarantor_email}` : ""}`
-          : "—",
+        label:
+          validGuarantors.length > 1 ? "Guarantors" : "Guarantor",
+        value:
+          validGuarantors.length === 0
+            ? "—"
+            : validGuarantors
+                .map((g) => `${g.name} · ${g.email}`)
+                .join("; "),
       },
     );
   } else {
@@ -1185,7 +1301,9 @@ function checkCompleteness(form: FormState, isAuthed: boolean): ChecklistItem[] 
     },
     {
       label: "Guarantor (if individual is signing)",
-      satisfied: form.guarantor_name.trim().length > 1,
+      satisfied: form.guarantors.some(
+        (g) => g.name.trim().length > 1 && /^[^@]+@[^@]+\.[^@]+$/.test(g.email),
+      ),
       required: false,
     },
   ];

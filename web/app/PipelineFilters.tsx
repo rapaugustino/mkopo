@@ -147,7 +147,11 @@ export function PipelineFilters({ owners, value, onChange }: Props) {
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -4, scale: 0.99 }}
               transition={{ duration: 0.14, ease: "easeOut" }}
-              className="absolute right-0 z-30 mt-1 w-[300px] rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] shadow-lg"
+              // ``w-[min(...)]`` caps at 300px on desktop but lets the
+              // popover shrink to fit narrower viewports — at 375px the
+              // dropdown stays inside the viewport instead of getting
+              // clipped at the right edge.
+              className="absolute right-0 z-30 mt-1 w-[min(300px,calc(100vw-1.5rem))] rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] shadow-lg"
               style={{
                 boxShadow:
                   "0 8px 24px -8px rgba(60, 60, 56, 0.18), 0 1px 0 rgba(60, 60, 56, 0.04)",

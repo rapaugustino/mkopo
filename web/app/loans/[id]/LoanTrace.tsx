@@ -175,7 +175,12 @@ function RunRow({
               dateStyle: "medium",
               timeStyle: "short",
             })}
-            <span className="ml-2 font-mono">{run.thread_id}</span>
+            {/* Thread id moves into the hover tooltip + the drawer
+                detail view. On the trace tab it was rendering as a
+                monospaced ``intake-<uuid>`` string that signalled
+                "internal token" without giving the auditor anything
+                they could act on. The drawer (one click away) still
+                has the full id when it's needed. */}
           </p>
         </div>
         <IconChevronRight

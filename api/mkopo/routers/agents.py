@@ -40,6 +40,7 @@ from mkopo.agents.streaming import (
 from mkopo.deps import CurrentUserDep, DbSessionDep
 from mkopo.schemas import ApproveEmailIn
 from mkopo.services import loans as loan_service
+from mkopo.services.loan_locks import raise_if_locked_for_agent
 
 router = APIRouter(prefix="/loans/{loan_id}/agents", tags=["agents"])
 
@@ -67,6 +68,7 @@ def _stream(generator: Any) -> StreamingResponse:
 async def run_intake(
     loan_id: uuid.UUID,
     user: CurrentUserDep,
+    db: DbSessionDep,
     # Optional. When present, ``agent_runs.payload`` for the new run
     # records ``replays_run_id`` pointing at the original. The drawer
     # uses this to render a "Replays run X" chip + a back-link. Set
@@ -80,6 +82,15 @@ async def run_intake(
     interrupt, result}`` so existing post-run handlers (cache refresh,
     modal open on interrupt) keep working.
     """
+    # Stage lock — refuses on locked stages with HTTP 409. See
+    # services/loan_locks for the policy: post-decision stages
+    # disallow agent runs to keep the audit trail consistent with
+    # the verdict the borrower has already seen.
+    loan = await loan_service.get_loan(db, loan_id)
+    if loan is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Loan not found")
+    raise_if_locked_for_agent(loan.stage, "intake")
+
     # Distinct thread id for replays so the LangGraph checkpoint
     # store doesn't collide with the original run. Manual reruns
     # without ``replays_run_id`` keep the legacy id for backwards
@@ -182,8 +193,10 @@ async def run_underwriting(
     run is replaying. Lands in ``agent_runs.payload.replays_run_id``
     so the drawer can render a back-link to the original.
     """
-    if not await loan_service.get_loan(db, loan_id):
+    loan = await loan_service.get_loan(db, loan_id)
+    if loan is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Loan not found")
+    raise_if_locked_for_agent(loan.stage, "underwriting")
 
     # Replay needs a unique thread id so it doesn't resume the
     # original's checkpoint. Manual reruns keep the legacy id.
@@ -240,8 +253,14 @@ async def run_decision(
     ``replays_run_id`` (optional): when present, marks this run as a
     replay of an earlier one. See run_intake docstring.
     """
-    if not await loan_service.get_loan(db, loan_id):
+    loan = await loan_service.get_loan(db, loan_id)
+    if loan is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Loan not found")
+    # Decision-agent re-runs after the loan moves on would rewrite
+    # the conditions list (persist deletes prior AI-drafted rows and
+    # reinserts) AND write a new ``decision_complete`` audit event
+    # that contradicts the verdict the borrower already saw. Reject.
+    raise_if_locked_for_agent(loan.stage, "decision")
 
     if replays_run_id is not None:
         thread_id = f"decision-{loan_id}-replay-{uuid.uuid4().hex[:8]}"

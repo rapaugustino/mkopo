@@ -138,7 +138,13 @@ export default function ReviewQueuePage() {
           </p>
         )}
         {tasks.length > 0 && (
-          <table className="w-full text-[12.5px]">
+          // Wrap in ``overflow-x-auto`` so the table can scroll
+          // *internally* on narrow viewports — the page itself
+          // stays at viewport width, no body-level horizontal
+          // scroll. ``min-w-[560px]`` sets a sensible floor so
+          // the headers stay legible.
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] text-[12.5px]">
             <thead>
               <tr className="border-b-[0.5px] border-[var(--color-border-tertiary)]">
                 <th className="px-2 py-3 text-left text-[11px] font-medium uppercase tracking-[0.03em] text-[var(--color-text-secondary)]">
@@ -202,6 +208,7 @@ export default function ReviewQueuePage() {
               })}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 

@@ -131,49 +131,65 @@ def _check_storage(settings: Settings) -> CheckResult:
 
 
 def _check_auth(settings: Settings) -> CheckResult:
+    """Staff bearer token. The dev default (`dev-token-replace-me`)
+    is a placeholder, not a "no-op" — anyone who can reach the API
+    with it has full admin. We always surface it as ``degraded`` (not
+    ``ok``) so the deployer sees the warning on every boot, regardless
+    of ``ENVIRONMENT`` value. Silent "ok" in dev was lulling people
+    into shipping the placeholder.
+    """
     if settings.dev_api_token == "dev-token-replace-me":
         return CheckResult(
             name="Auth (staff bearer)",
-            status="degraded" if settings.is_production else "ok",
-            message="dev bearer token is the placeholder default",
+            status="degraded",
+            message="DEV_API_TOKEN is the placeholder default — anyone with it has admin",
             hint=(
-                None
-                if not settings.is_production
-                else "DEV_API_TOKEN must not be the placeholder in production."
+                "Set DEV_API_TOKEN in api/.env to a random ≥32-char value. "
+                "Generate one with: python -c 'import secrets; print(secrets.token_urlsafe(32))'. "
+                "Also update NEXT_PUBLIC_DEV_TOKEN in web/.env.local to match. "
+                "Production deploys must change this; see task #186 (kill the dev bearer)."
             ),
         )
+    if len(settings.dev_api_token) < 24:
+        return CheckResult(
+            name="Auth (staff bearer)",
+            status="degraded",
+            message=f"DEV_API_TOKEN is only {len(settings.dev_api_token)} chars",
+            hint="Use a random secret of at least 24 characters.",
+        )
     return CheckResult(
-        name="Auth (staff bearer)", status="ok", message="dev bearer token configured"
+        name="Auth (staff bearer)",
+        status="ok",
+        message=f"DEV_API_TOKEN configured ({len(settings.dev_api_token)} chars)",
     )
 
 
 def _check_jwt(settings: Settings) -> CheckResult:
-    """Borrower-session JWT secret. The default is intentionally
-    insecure so dev works out of the box, but a production deployment
-    that forgets to override it would mint forgeable session tokens —
-    we surface that loudly here so the deployer catches it on the
-    first boot rather than the first incident."""
+    """Borrower-session JWT secret. The default is a placeholder
+    that mints forgeable tokens — every deployment that leaves it
+    in place shares the same signing key. We always report this as
+    ``degraded`` (not ``ok``), regardless of ``ENVIRONMENT``, so the
+    warning shows on every boot. Silent "ok" in dev was lulling
+    people into shipping the placeholder.
+    """
     default = "dev-jwt-secret-replace-me-min-32-chars"
     if settings.jwt_secret == default:
         return CheckResult(
             name="Auth (borrower JWT)",
-            status="degraded" if settings.is_production else "ok",
-            message="JWT signing secret is the placeholder default",
+            status="degraded",
+            message="JWT_SECRET is the placeholder default — session tokens are forgeable",
             hint=(
-                None
-                if not settings.is_production
-                else (
-                    "JWT_SECRET must be set to a unique random ≥32-char "
-                    "value in production — otherwise every deployment shares "
-                    "the same signing key and session tokens are forgeable."
-                )
+                "Set JWT_SECRET in api/.env to a unique random ≥32-char value. "
+                "Generate one with: python -c 'import secrets; print(secrets.token_urlsafe(48))'. "
+                "Production deploys MUST change this — otherwise every deployment "
+                "shares the same signing key and any borrower session can be forged."
             ),
         )
     if len(settings.jwt_secret) < 32:
         return CheckResult(
             name="Auth (borrower JWT)",
             status="degraded",
-            message=f"JWT signing secret is only {len(settings.jwt_secret)} chars",
+            message=f"JWT_SECRET is only {len(settings.jwt_secret)} chars",
             hint="Use a random secret of at least 32 characters (256 bits).",
         )
     return CheckResult(

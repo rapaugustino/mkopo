@@ -301,8 +301,12 @@ function RunHeader({
         // the side-by-side flow: open the original, compare its
         // steps + LLM calls to this one.
         <Meta label="Replays">
+          {/* Cross-link to the original run's drawer. Same observability
+              page, ``?run=<id>`` opens the drawer for that id. Was
+              previously ``href="#"`` (dead) — this is a real route
+              now so the back-link comparison flow works. */}
           <Link
-            href="#"
+            href={`/observability?run=${replaysRunId}`}
             className="inline-flex items-center gap-1 text-[12.5px] text-[var(--color-text-info)] hover:underline"
             title={`Original run id ${replaysRunId}`}
           >

@@ -22,6 +22,7 @@ from langgraph.types import interrupt
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
+from mkopo.agents._serde import make_serializer
 from mkopo.config import get_settings
 from mkopo.db import get_session
 from mkopo.llm_gateway import get_gateway
@@ -338,11 +339,52 @@ async def draft_doc_request(state: IntakeState) -> IntakeState:
             "financial statement for guarantors."
         )
     )
+
+    # Pull real identifiers off the loan so the LLM can address the
+    # borrower by name, reference the loan number, and sign off as the
+    # actual loan officer. Without this the draft comes back with
+    # template placeholders like [Loan Officer Name] / [Title] /
+    # [Email] which then need scrubbing before send.
+    loan_id = uuid.UUID(state["loan_id"])
+    async with get_session() as session:
+        from sqlalchemy.orm import selectinload
+
+        loan_stmt = (
+            select(Loan)
+            .options(selectinload(Loan.parties), selectinload(Loan.owner))
+            .where(Loan.id == loan_id)
+        )
+        loan = (await session.execute(loan_stmt)).scalar_one()
+        borrower_party = loan.borrower
+        owner_user = loan.owner
+
+    borrower_name = (
+        borrower_party.name if borrower_party else "the borrower"
+    )
+    loan_reference = loan.reference or "this application"
+    settings = get_settings()
+    officer_name = (owner_user.name if owner_user else "") or "Your loan officer"
+    officer_email = (
+        (owner_user.email if owner_user else None) or settings.resend_from_address
+    )
+    officer_title = "Loan Officer"
+    institution = settings.resend_from_name or "Mkopo Lens"
+
+    context_block = (
+        "Real identifiers — use these verbatim, no placeholders:\n"
+        f"- Borrower name (greeting / salutation): {borrower_name}\n"
+        f"- Loan reference (mention in opening or subject): {loan_reference}\n"
+        f"- Sign-off name: {officer_name}\n"
+        f"- Sign-off title: {officer_title}\n"
+        f"- Sign-off institution: {institution}\n"
+        f"- Sign-off email: {officer_email}\n"
+    )
+
     # Class-branched system prompt — managed through the /prompts UI.
-    # The product_context block above stays inline because it's
-    # mechanical, fact-bearing context the LLM needs but the
-    # underwriting team doesn't need to be able to edit (changing
-    # which documents we accept is a code change, not a prompt tweak).
+    # The product_context + identifier blocks stay inline because they
+    # carry mechanical, fact-bearing context the LLM needs from the
+    # specific loan row, not editorial copy the underwriting team
+    # would want to tune.
     from mkopo.services.prompts import get as get_prompt
 
     system = get_prompt(
@@ -352,12 +394,19 @@ async def draft_doc_request(state: IntakeState) -> IntakeState:
     )
     user = (
         f"{product_context}\n\n"
+        f"{context_block}\n"
         f"Items the borrower needs to send us (these are the underwriting "
         f"fields still missing — translate to the documents that would "
         f"contain them):\n{missing_str}\n\n"
         f"Suggested documents you can mention by name:\n{doc_asks}\n\n"
+        f"FORMAT — this is an email body sent via Resend / SMTP and "
+        f"rendered as plain text. **Do NOT use Markdown.** No asterisks, "
+        f"no hashes, no numbered lists with `1.` syntax. Plain prose "
+        f"paragraphs and (if you must enumerate) lettered bullets like "
+        f'"a)" / "b)" or simple inline phrasing. Greet the borrower by '
+        f"name. Reference the loan number once.\n"
         f"Tone: professional, friendly. Length: ≤120 words. "
-        f"Subject line should be specific."
+        f"Subject line should be specific and include the loan reference."
     )
     drafted = await gateway.call_structured(
         model=settings.llm_default_model,
@@ -500,6 +549,11 @@ async def build_intake_graph() -> AsyncIterator[Any]:
 
     # Postgres checkpointer — durable across restarts. Uses the libpq-format
     # DSN, not the SQLAlchemy one (psycopg rejects the `+psycopg` suffix).
-    async with AsyncPostgresSaver.from_conn_string(settings.database_url_libpq) as checkpointer:
+    # The custom serializer allowlists ``mkopo.schemas`` symbols so
+    # LangGraph stops warning about unregistered deserializations and
+    # keeps working when the default flips to strict — see _serde.py.
+    async with AsyncPostgresSaver.from_conn_string(
+        settings.database_url_libpq, serde=make_serializer()
+    ) as checkpointer:
         await checkpointer.setup()  # idempotent
         yield builder.compile(checkpointer=checkpointer)

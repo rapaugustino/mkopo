@@ -28,8 +28,12 @@ underwriting + decision end-to-end.
 
 ## Borrower
 
-`maria.aguilar@example.com` — sign up at `/signup` with this address to
-test the borrower-side flows on this loan.
+`maria.aguilar@example.com` — **not yet seeded**. Sign up with this
+email at `/signup` (pick any 8+ char password), then create the loan
+via the `/apply` wizard. The personal-loan wizard is 5 steps: class →
+about you → loan → finances → review. Documents (the four `.txt` files
+in this folder) go on the status page **after** submit, not in the
+wizard. See TESTING_GUIDE Flow B2.
 
 ## Files in this folder
 

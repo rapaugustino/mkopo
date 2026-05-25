@@ -18,6 +18,7 @@ can exercise every decision path and every HITL gate.
 | 04 | [Fern Industrial](./04-fern-conditional/) | business | **conditional** | Missing rent roll → conditions list. |
 | 05 | [Indigo Capital (partial)](./05-partial-intake-only/) | business | _intake interrupt_ | Drives the doc-request email + HITL approval. |
 | 06 | [Trevor Stratus](./06-stratus-personal-decline/) | personal | **decline** | Subprime FICO + DTI breach. Personal adverse-action. |
+| 07 | [Aspen Grove (real email)](./07-aspen-real-email-test/) | business | **approve** | Staff-invite → **real email to your inbox** → magic-link → upload. |
 
 ## How to use
 

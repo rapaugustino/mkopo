@@ -63,7 +63,20 @@ async def maybe_chain_after_intake(loan_id: uuid.UUID, completed_with: str) -> N
     """
     if completed_with != "complete":
         return
-    await _try_advance(loan_id, LoanStage.UNDERWRITING, after="intake")
+    # 1. Advance the stage. _try_advance is a no-op if the loan is
+    #    not autonomous, so this is safe to call unconditionally.
+    advanced = await _try_advance(
+        loan_id, LoanStage.UNDERWRITING, after="intake"
+    )
+    if not advanced:
+        return
+    # 2. Kick off the underwriting agent. Without this step the
+    #    stage moves but the agent never runs — the loan sits idle
+    #    in underwriting, which is the exact opposite of "agentic".
+    #    The agent's ``persist`` node will fire
+    #    :func:`maybe_chain_after_underwriting` on completion, which
+    #    in turn kicks the decision agent. That's the full chain.
+    await _run_underwriting_agent(loan_id)
 
 
 async def maybe_chain_after_underwriting(loan_id: uuid.UUID) -> None:
@@ -201,12 +214,65 @@ async def _try_advance(
     return True
 
 
+async def _create_running_agent_run(
+    loan_id: uuid.UUID, agent_name: str, thread_id: str
+) -> uuid.UUID | None:
+    """Insert a ``running`` AgentRun row + return its id.
+
+    Mirrors what ``stream_graph_run`` does at the start of an
+    SSE-driven invocation. The agent's ``persist`` node will later
+    UPDATE this row to ``complete`` with the result payload, the
+    same as the SSE path — but only if we create the row first AND
+    stamp the id into the agent's state. Without this, the
+    orchestrator's auto-fired runs leave no audit trail in
+    ``agent_runs`` (the persist node's UPDATE silently affects
+    zero rows because the id doesn't exist), and the loan-detail
+    UI's "rehydrate latest result" query returns null.
+
+    Returns ``None`` on insert failure — observability is
+    best-effort and shouldn't block the run.
+    """
+    from mkopo.models import AgentRun
+
+    agent_run_id = uuid.uuid4()
+    try:
+        async with get_session() as session:
+            session.add(
+                AgentRun(
+                    id=agent_run_id,
+                    loan_id=loan_id,
+                    agent_name=agent_name,
+                    thread_id=thread_id,
+                    status="running",
+                    payload={"triggered_by": "orchestrator"},
+                )
+            )
+    except Exception:
+        logger.exception(
+            "orchestrator_agent_run_insert_failed",
+            agent_name=agent_name,
+            loan_id=str(loan_id),
+        )
+        return None
+    return agent_run_id
+
+
 async def _run_decision_agent(loan_id: uuid.UUID) -> None:
     """Run the decision agent end-to-end. Used by the orchestrator
-    after auto-advancing into the decision stage."""
+    after auto-advancing into the decision stage.
+
+    Creates an ``agent_runs`` row first + stamps the id into the
+    agent's state — same contract the SSE layer follows so the
+    persist node's UPDATE lands on a real row. Without this the
+    orchestrator-driven run completes successfully but leaves no
+    trace on the observability page.
+    """
     thread_id = f"decision-{loan_id}"
     config = {"configurable": {"thread_id": thread_id}}
+    agent_run_id = await _create_running_agent_run(loan_id, "decision", thread_id)
     state: dict[str, Any] = {"loan_id": str(loan_id)}
+    if agent_run_id is not None:
+        state["agent_run_id"] = str(agent_run_id)
     try:
         async with build_decision_graph() as graph:
             await graph.ainvoke(state, config=config)
@@ -215,15 +281,39 @@ async def _run_decision_agent(loan_id: uuid.UUID) -> None:
 
 
 async def _run_underwriting_agent(loan_id: uuid.UUID) -> None:
-    """Same idea — kicks off underwriting after intake completes."""
+    """Run the underwriting agent end-to-end + chain to decision.
+
+    Used by the orchestrator after auto-advancing into the
+    underwriting stage. The graph's ``persist`` node writes the
+    AgentRun row + audit event the same way the SSE-driven path
+    does — but ``ainvoke`` does NOT trigger the streaming layer's
+    ``on_complete`` callback that normally fires
+    :func:`maybe_chain_after_underwriting`. Without explicitly
+    firing the next hook here, the chain would stop at underwriting
+    even on autonomous loans. We fire it ourselves so the same
+    contract holds regardless of which path drove the run.
+    """
     thread_id = f"underwriting-{loan_id}"
     config = {"configurable": {"thread_id": thread_id}}
+    agent_run_id = await _create_running_agent_run(
+        loan_id, "underwriting", thread_id
+    )
     state: dict[str, Any] = {"loan_id": str(loan_id)}
+    if agent_run_id is not None:
+        state["agent_run_id"] = str(agent_run_id)
     try:
         async with build_underwriting_graph() as graph:
             await graph.ainvoke(state, config=config)
     except Exception:
-        logger.exception("orchestrator_underwriting_agent_failed", loan_id=str(loan_id))
+        logger.exception(
+            "orchestrator_underwriting_agent_failed", loan_id=str(loan_id)
+        )
+        return
+    # Continue the chain: if the recommendation is
+    # ``proceed_to_decision``, this advances to decision and runs the
+    # decision agent. ``maybe_chain_after_underwriting`` is itself
+    # autonomy-gated, so it's safe to call here unconditionally.
+    await maybe_chain_after_underwriting(loan_id)
 
 
 # Public re-exports kept tidy; helpers stay underscored.

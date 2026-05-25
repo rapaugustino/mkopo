@@ -274,6 +274,92 @@ export interface Condition {
   created_at: string;
 }
 
+// ---- Institution settings ----
+
+/** Lender identity + ECOA Reg B disclosure triple. Edited via
+ *  the staff ``/settings`` page; threaded into every agent that
+ *  drafts a borrower-visible artifact so the LLM never emits
+ *  bracketed placeholders. */
+export interface InstitutionSettings {
+  lender_name: string | null;
+  lender_address: string | null;
+  lender_phone: string | null;
+  lender_email: string | null;
+  authorized_officer_name: string | null;
+  authorized_officer_title: string | null;
+  credit_reporting_agency_name: string | null;
+  credit_reporting_agency_address: string | null;
+  credit_reporting_agency_phone: string | null;
+  /** True iff *any* lender contact field is populated. The
+   *  settings page uses this to render a "complete setup" CTA
+   *  on first run. */
+  configured: boolean;
+}
+
+export type InstitutionSettingsPatch = Partial<
+  Omit<InstitutionSettings, "configured">
+>;
+
+// ---- Citations (grounded-AI hover) ----
+
+/** Resolved underwriting citation. Returned by
+ *  ``GET /loans/{id}/citations/{field}``. The frontend ``Cited``
+ *  chip fetches this on click to populate the side-drawer
+ *  preview with the exact document chunk the value came from.
+ */
+export interface Citation {
+  field_name: string;
+  value: string;
+  confidence: number;
+  document_id: string;
+  document_filename: string;
+  page: number | null;
+  /** The actual source span ("Address: 1622 East Republican Street, ..."). */
+  quote: string;
+  char_start: number | null;
+  char_end: number | null;
+  /** "accepted" | "overridden" | "proposed" — drives the
+   *  confidence chip colour in the drawer. */
+  status: string;
+}
+
+// ---- Stage-based locks ----
+
+/** Per-stage lock snapshot. Returned by ``GET /loans/{id}/locks``.
+ *  Same source of truth as the 409s thrown by the agent + document
+ *  endpoints — the frontend uses this to hide mutation actions and
+ *  surface a banner before the user clicks.
+ */
+export interface LockStatus {
+  stage: string;
+  is_terminal: boolean;
+  agents_locked: boolean;
+  documents_locked: boolean;
+  /** Banner copy ("Loan is finalized.") or null when no lock applies. */
+  headline: string | null;
+  /** Sub-copy describing what's still allowed. */
+  detail: string | null;
+}
+
+// ---- Global search (command palette / Cmd+K) ----
+
+export interface SearchHit {
+  /** "loan" | "party" — drives icon + section in the palette. */
+  kind: string;
+  id: string;
+  /** Primary text ("LN-2026-1003" or "Elena Park"). */
+  label: string;
+  /** Secondary text ("Riverbend Holdings · underwriting"). Nullable. */
+  sublabel: string | null;
+  /** Route to navigate to on Enter / click. */
+  href: string;
+}
+
+export interface SearchResults {
+  loans: SearchHit[];
+  parties: SearchHit[];
+}
+
 // ---- Review queue (Phase E) ----
 
 export interface ReviewTaskExtraction {
@@ -678,6 +764,16 @@ export const api = {
   // the SSE body as JSON and fail. The streaming hook is the only
   // sanctioned entry point.
   getConditions: (id: string) => request<Condition[]>(`/loans/${id}/conditions`),
+  /** Rehydrate the last completed underwriting agent result so the
+   *  workspace stays populated across page reloads. Backend returns
+   *  the full Pydantic dump stored under ``agent_runs.payload.result_json``
+   *  by the persist node. ``null`` means the agent has never run on
+   *  this loan. */
+  getLatestUnderwriting: (id: string) =>
+    request<UnderwritingResult | null>(`/loans/${id}/underwriting/latest`),
+  /** Mirror of ``getLatestUnderwriting`` for the decision agent. */
+  getLatestDecision: (id: string) =>
+    request<DecisionResult | null>(`/loans/${id}/decision/latest`),
   addNote: (id: string, text: string, kind: "internal_note" | "borrower_reply" = "internal_note") =>
     request<AuditEvent>(`/loans/${id}/notes`, {
       method: "POST",
@@ -696,6 +792,11 @@ export const api = {
       body: JSON.stringify({ value, notes }),
     }),
   getPartyProfile: (id: string) => request<PartyProfile>(`/parties/${id}/profile`),
+  /** Global search powering Cmd+K. Returns mixed loan + party hits
+   *  (capped at 8 each, server-side). The palette calls this on
+   *  every debounced keystroke ≥ 2 chars. */
+  search: (q: string) =>
+    request<SearchResults>(`/search?q=${encodeURIComponent(q)}`),
   // ---- Documents ----
   listDocuments: (loanId: string) =>
     request<LoanDocument[]>(`/loans/${loanId}/documents`),
@@ -715,6 +816,32 @@ export const api = {
     request<Record<string, string | null>>(`/loans/${loanId}/transitions`),
   getMaterialsStatus: (loanId: string) =>
     request<MaterialsStatus>(`/loans/${loanId}/materials/status`),
+  /** Stage-based lock snapshot. Mirrors the backend's
+   *  ``services.loan_locks`` policy — the UI uses it to hide
+   *  agent / upload buttons before the user clicks. */
+  getLockStatus: (loanId: string) =>
+    request<LockStatus>(`/loans/${loanId}/locks`),
+  /** Resolve a citation key (e.g. ``"property_address"``) back to
+   *  the extraction it came from, with the source span the LLM
+   *  read. Powers the side-panel hover preview on underwriting
+   *  citation chips. */
+  getCitation: (loanId: string, fieldName: string) =>
+    request<Citation>(
+      `/loans/${loanId}/citations/${encodeURIComponent(fieldName)}`,
+    ),
+  /** Read the singleton institution settings (lender contact +
+   *  authorized officer + credit reporting agency). Used by the
+   *  staff settings page and as the "is the lender configured"
+   *  signal on the nav. */
+  getInstitutionSettings: () =>
+    request<InstitutionSettings>(`/settings/institution`),
+  /** Patch one or more fields on the institution singleton. Empty
+   *  strings clear a field; omitted fields stay unchanged. */
+  updateInstitutionSettings: (body: InstitutionSettingsPatch) =>
+    request<InstitutionSettings>(`/settings/institution`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
   // ---- Staff + owner reassignment ----
   listStaffUsers: () =>
     request<StaffUser[]>(`/loans/staff/users`),

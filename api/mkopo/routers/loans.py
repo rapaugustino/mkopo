@@ -11,6 +11,7 @@ from sqlalchemy import select
 from mkopo.config import get_settings
 from mkopo.deps import CurrentUserDep, DbSessionDep
 from mkopo.models import (
+    AgentRun,
     AuditEvent,
     Condition,
     Extraction,
@@ -96,10 +97,28 @@ async def create_loan(
     except ValueError:
         klass = LoanClass.BUSINESS
 
+    # Auto-assign an owner. Preferred: the staff member who's
+    # creating the loan — they're the natural first reviewer. Falls
+    # back to the first available staff user when the caller's
+    # ``user_id`` isn't a real UUID (today this is the dev-bearer
+    # path: user.user_id is the string ``"dev-user"``, not a real
+    # PK). Without this the case file lands with "Owner: — Unassigned"
+    # and downstream actions that key off the owner have no one to
+    # attribute to.
+    from mkopo.services.loans import pick_default_owner
+
+    creator_uuid: uuid.UUID | None
+    try:
+        creator_uuid = uuid.UUID(user.user_id)
+    except (TypeError, ValueError):
+        creator_uuid = None
+    default_owner_id = creator_uuid or await pick_default_owner(db)
+
     loan = Loan(
         loan_type=payload.loan_type,
         loan_class=klass,
         amount=payload.amount,
+        owner_user_id=default_owner_id,
         meta={"borrower_email": payload.borrower_email},
     )
     db.add(loan)
@@ -212,6 +231,13 @@ async def transition(
             reason=payload.reason,
         )
         await db.commit()
+        # Refresh ``updated_at`` — the server-side ``onupdate=func.now()``
+        # default fired during the commit, which expires the attribute.
+        # Without an explicit refresh, Pydantic's response_model
+        # serialization hits a MissingGreenlet trying to lazy-load it
+        # outside the async context and the client sees a misleading
+        # 500 even though the transition itself committed cleanly.
+        await db.refresh(loan, attribute_names=["updated_at"])
         return loan
     except loan_service.IllegalStageTransitionError as e:
         # 422 is the right semantic for "the request is well-formed but
@@ -277,6 +303,8 @@ async def set_autonomy(
         },
     )
     await db.commit()
+    # See transition() for why this refresh is required.
+    await db.refresh(loan, attribute_names=["updated_at"])
     return loan
 
 
@@ -460,6 +488,152 @@ async def materials_status(
     )
 
 
+class CitationOut(BaseModel):
+    """Resolved citation — backs the "hover an underwriting citation,
+    see the source" interaction on the workspace.
+
+    The underwriting summary cites extracted fields by name (e.g.
+    ``citations: ["property_address"]``). This endpoint resolves a
+    citation key back to the underlying extraction row, then surfaces
+    the quote span and the document it came from. The frontend
+    renders this in a side panel so the underwriter can verify the
+    AI is reading from a real document rather than hallucinating.
+    """
+
+    field_name: str
+    value: str
+    confidence: float
+    document_id: str
+    document_filename: str
+    page: int | None
+    quote: str
+    char_start: int | None
+    char_end: int | None
+    # Status of the extraction — "accepted", "overridden", "proposed".
+    # The drawer renders a different chip per status so reviewers can
+    # see whether a human has signed off on the value or not.
+    status: str
+
+
+@router.get("/{loan_id}/citations/{field_name}", response_model=CitationOut)
+async def resolve_citation(
+    loan_id: uuid.UUID,
+    field_name: str,
+    user: CurrentUserDep,
+    db: DbSessionDep,
+) -> CitationOut:
+    """Resolve an underwriting citation back to its source extraction.
+
+    Picks the highest-confidence ACCEPTED extraction for the field;
+    falls back to OVERRIDDEN, then PROPOSED. The chain mirrors the
+    rules-engine's preference order: an accepted human-signed value
+    wins over a raw LLM-extracted one. Returns 404 if no extraction
+    of this field exists on the loan — citations should only refer
+    to extractions that were produced during intake, so a 404 is a
+    "stale citation" signal (probably means the prompt changed but
+    the underwriting result wasn't re-run).
+    """
+    if not await loan_service.get_loan(db, loan_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Loan not found")
+
+    # ``CASE WHEN status ...`` orders by a synthetic priority so the
+    # status ranking is part of the ORDER BY rather than chained
+    # queries. ACCEPTED (0) ranks above OVERRIDDEN (1) ranks above
+    # PROPOSED (2); anything else (3) is a long-tail status we
+    # don't expect but should still sort somewhere.
+    from sqlalchemy import case
+
+    from mkopo.models import Document, Extraction, ExtractionStatus
+
+    priority = case(
+        (Extraction.status == ExtractionStatus.ACCEPTED, 0),
+        (Extraction.status == ExtractionStatus.OVERRIDDEN, 1),
+        (Extraction.status == ExtractionStatus.PROPOSED, 2),
+        else_=3,
+    )
+
+    row = (
+        await db.execute(
+            select(Extraction, Document.filename)
+            .join(Document, Document.id == Extraction.document_id)
+            .where(
+                Document.loan_id == loan_id,
+                Extraction.field_name == field_name,
+            )
+            .order_by(priority, Extraction.confidence.desc())
+            .limit(1)
+        )
+    ).first()
+    if row is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            f"No extraction for {field_name!r} on this loan",
+        )
+    extraction, document_filename = row
+    span = extraction.source_span or {}
+    return CitationOut(
+        field_name=extraction.field_name,
+        value=extraction.value,
+        confidence=extraction.confidence,
+        document_id=str(extraction.document_id),
+        document_filename=document_filename,
+        page=span.get("page"),
+        quote=span.get("quote") or "",
+        char_start=span.get("char_start"),
+        char_end=span.get("char_end"),
+        status=(
+            extraction.status
+            if isinstance(extraction.status, str)
+            else extraction.status.value
+        ),
+    )
+
+
+class LockStatusOut(BaseModel):
+    """Per-stage lock state for the loan detail page banner.
+
+    Mirrors ``services.loan_locks.LoanLockStatus`` — the dataclass
+    isn't returned directly so the frontend gets a stable Pydantic
+    schema rather than a raw asdict-dump.
+    """
+
+    stage: str
+    is_terminal: bool
+    agents_locked: bool
+    documents_locked: bool
+    headline: str | None
+    detail: str | None
+
+
+@router.get("/{loan_id}/locks", response_model=LockStatusOut)
+async def get_lock_status(
+    loan_id: uuid.UUID, user: CurrentUserDep, db: DbSessionDep
+) -> LockStatusOut:
+    """Render-friendly lock snapshot. One read so the UI can hide
+    mutation buttons and surface a "Loan is finalized" banner without
+    re-implementing the stage-policy in TypeScript.
+
+    Same authoritative source as the 409s returned by the agent / doc
+    endpoints — :mod:`mkopo.services.loan_locks`. If they ever
+    disagree, this endpoint is wrong (it's purely a view) and the
+    server-side guard wins.
+    """
+    loan = await loan_service.get_loan(db, loan_id)
+    if not loan:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Loan not found")
+    from mkopo.services.loan_locks import loan_lock_status
+
+    snap = loan_lock_status(loan.stage)
+    return LockStatusOut(
+        stage=snap.stage,
+        is_terminal=snap.is_terminal,
+        agents_locked=snap.agents_locked,
+        documents_locked=snap.documents_locked,
+        headline=snap.headline,
+        detail=snap.detail,
+    )
+
+
 @router.get("/{loan_id}/extractions", response_model=list[ExtractionOut])
 async def list_extractions(
     loan_id: uuid.UUID, user: CurrentUserDep, db: DbSessionDep
@@ -523,6 +697,70 @@ async def get_rules_preview(
         "risk_flags": [f.model_dump(mode="json") for f in result.flags],
         "extractions": result.extractions,
     }
+
+
+async def _latest_agent_result(
+    db: DbSessionDep, loan_id: uuid.UUID, agent_name: str
+) -> dict[str, object] | None:
+    """Return ``payload.result_json`` from the most recent successful run
+    of ``agent_name`` for this loan, or ``None`` if no such run exists.
+
+    Used by the workspace + decision panel to rehydrate after a page
+    reload — the streaming SSE delivers the result live, but until
+    this endpoint existed the cache was lost when the user navigated
+    away and back. ``result_json`` is the full Pydantic dump of the
+    UnderwritingResult / DecisionResult written by the persist node.
+    """
+    row = (
+        await db.execute(
+            select(AgentRun.payload)
+            .where(
+                AgentRun.loan_id == loan_id,
+                AgentRun.agent_name == agent_name,
+                AgentRun.status == "complete",
+            )
+            .order_by(AgentRun.started_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if not row:
+        return None
+    # Older rows pre-date the result_json field. The query just
+    # returns ``None`` for those; the UI re-runs the agent to get
+    # a fresh payload (which now includes result_json).
+    return (row or {}).get("result_json")
+
+
+@router.get("/{loan_id}/underwriting/latest")
+async def get_latest_underwriting_result(
+    loan_id: uuid.UUID, user: CurrentUserDep, db: DbSessionDep
+) -> dict[str, object] | None:
+    """Rehydrate the most recent underwriting agent result.
+
+    Returns the full ``UnderwritingResult`` JSON (sections, KPIs,
+    risk_flags, recommendation, rationale, generated_at,
+    agent_run_id), or ``null`` if the agent has never completed on
+    this loan. Powers the workspace's "result survives refresh"
+    behavior so underwriters don't have to re-run the agent to see
+    what it last said.
+    """
+    if not await loan_service.get_loan(db, loan_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Loan not found")
+    return await _latest_agent_result(db, loan_id, "underwriting")
+
+
+@router.get("/{loan_id}/decision/latest")
+async def get_latest_decision_result(
+    loan_id: uuid.UUID, user: CurrentUserDep, db: DbSessionDep
+) -> dict[str, object] | None:
+    """Rehydrate the most recent decision agent result.
+
+    Same pattern as ``get_latest_underwriting_result`` — returns the
+    full ``DecisionResult`` JSON or ``null``.
+    """
+    if not await loan_service.get_loan(db, loan_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Loan not found")
+    return await _latest_agent_result(db, loan_id, "decision")
 
 
 @router.post("/{loan_id}/notes", response_model=AuditEventOut, status_code=status.HTTP_201_CREATED)

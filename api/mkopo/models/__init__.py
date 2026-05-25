@@ -24,6 +24,8 @@ from mkopo.models.document import (
 from mkopo.models.embedding import DocumentChunk
 from mkopo.models.errors import InfrastructureError
 from mkopo.models.eval import LLMCall, TaskRun, ToolUse
+from mkopo.models.institution import SINGLETON_ID as INSTITUTION_SINGLETON_ID
+from mkopo.models.institution import InstitutionSettings
 from mkopo.models.loan import (
     VALID_TRANSITIONS,
     AgentRun,
@@ -56,7 +58,9 @@ __all__ = [
     "DocumentType",
     "Extraction",
     "ExtractionStatus",
+    "INSTITUTION_SINGLETON_ID",
     "InfrastructureError",
+    "InstitutionSettings",
     "LLMCall",
     "Loan",
     "LoanClass",

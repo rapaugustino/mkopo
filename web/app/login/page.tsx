@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
@@ -89,8 +89,15 @@ function LoginInner() {
   });
 
   // Already signed in? Bounce out — they don't need to log in again.
+  // The redirect goes through an effect (not inline during render)
+  // to avoid Next's "setState during render" warning.
+  useEffect(() => {
+    if (auth.status === "authed") {
+      router.replace(nextUrl);
+    }
+  }, [auth.status, router, nextUrl]);
+
   if (auth.status === "authed") {
-    router.replace(nextUrl);
     return null;
   }
 

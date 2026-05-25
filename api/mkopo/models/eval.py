@@ -117,6 +117,17 @@ class LLMCall(Base):
     # precision so aggregations over thousands of calls don't drift.
     cost_input_usd: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
     cost_output_usd: Mapped[Decimal | None] = mapped_column(Numeric(10, 6))
+    # ``prompts.id`` of the active prompt row whose body fed this
+    # call. Stamped by the gateway via a ContextVar set inside
+    # :func:`mkopo.services.prompts.get`. Nullable: free-form calls
+    # outside the registry (rewrite-assist endpoint, eval CI, ad-hoc
+    # scripts) have no registry row, and pre-migration rows stay null
+    # too. The observability page joins on this to surface which
+    # prompt version produced any given output.
+    prompt_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("prompts.id", ondelete="SET NULL"),
+    )
 
 
 class ToolUse(Base):

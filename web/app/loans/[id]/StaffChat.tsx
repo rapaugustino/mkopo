@@ -23,6 +23,7 @@ import {
 } from "@/lib/agentChat";
 import { BorrowerMessagePreviewModal } from "@/app/components/BorrowerMessagePreviewModal";
 import { MarkdownBlock } from "@/app/components/MarkdownBlock";
+import { humanizeRisk, humanizeStage } from "@/lib/humanize";
 
 /**
  * Internal staff chat agent. Mirrors the borrower chat surface but:
@@ -494,7 +495,12 @@ function summariseStaffResult(name: string, result: unknown): string {
   if (typeof r.note === "string") return r.note as string;
   if (typeof r.message === "string") return r.message as string;
   if (name === "get_loan_overview") {
-    return `${r.reference}: ${r.stage}, $${Number(r.amount ?? 0).toLocaleString()}, risk ${r.risk_band ?? "—"}.`;
+    // Humanize both enum surfaces — even on a staff-facing chat
+    // a "$2,400,000, risk low" reads better than "risk low" and far
+    // better than "stage: underwriting" rendered raw.
+    const stageStr = typeof r.stage === "string" ? r.stage : null;
+    const riskStr = typeof r.risk_band === "string" ? r.risk_band : null;
+    return `${r.reference}: ${humanizeStage(stageStr)}, $${Number(r.amount ?? 0).toLocaleString()}, risk ${humanizeRisk(riskStr)}.`;
   }
   if (name === "list_recent_activity") {
     return `${r.count ?? 0} event(s) loaded.`;
@@ -510,7 +516,13 @@ function summariseStaffResult(name: string, result: unknown): string {
     return `Overrode ${r.field}: ${r.from} → ${r.to}.`;
   }
   if (name === "advance_loan_stage") {
-    return `Stage: ${r.from} → ${r.to}.`;
+    // ``r.from`` / ``r.to`` are raw enum strings from the tool
+    // result. Run them through ``humanizeStage`` so the transcript
+    // reads "Stage: Intake → Underwriting" rather than the
+    // snake_cased version.
+    const fromStr = typeof r.from === "string" ? r.from : null;
+    const toStr = typeof r.to === "string" ? r.to : null;
+    return `Stage: ${humanizeStage(fromStr)} → ${humanizeStage(toStr)}.`;
   }
   if (name === "send_borrower_message") {
     return `Message sent to borrower on ${r.reference}.`;

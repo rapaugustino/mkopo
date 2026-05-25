@@ -36,6 +36,7 @@ from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 
+from mkopo.agents._serde import make_serializer
 from mkopo.config import get_settings
 from mkopo.db import get_session
 from mkopo.llm_gateway import get_gateway
@@ -481,6 +482,16 @@ async def persist(state: UnderwritingState) -> UnderwritingState:
 
         materials_hash = await compute_materials_hash(session, loan_id)
 
+        # Persist the FULL Pydantic dump under ``result_json``. The
+        # streaming layer used to be the only path to the body of the
+        # result; that meant a page refresh wiped the workspace until
+        # the underwriter re-ran the agent (which was confusing and
+        # also wasted tokens). Now the result is in the AgentRun row,
+        # and the new ``/loans/{id}/underwriting/latest`` endpoint
+        # rehydrates it on mount. The other top-level keys are kept
+        # for the eval / observability code paths that read them
+        # directly without unmarshalling the full result.
+        result_json = summary.model_dump(mode="json")
         await session.execute(
             update(AgentRun)
             .where(AgentRun.id == summary.agent_run_id)
@@ -496,6 +507,7 @@ async def persist(state: UnderwritingState) -> UnderwritingState:
                     "has_blocking_failures": has_blocking_failures(
                         [_outcome_from_flag(f) for f in summary.risk_flags]
                     ),
+                    "result_json": result_json,
                 },
             )
         )
@@ -559,6 +571,8 @@ async def build_underwriting_graph() -> AsyncIterator[Any]:
     builder.add_edge("draft_summary", "persist")
     builder.add_edge("persist", END)
 
-    async with AsyncPostgresSaver.from_conn_string(settings.database_url_libpq) as checkpointer:
+    async with AsyncPostgresSaver.from_conn_string(
+        settings.database_url_libpq, serde=make_serializer()
+    ) as checkpointer:
         await checkpointer.setup()
         yield builder.compile(checkpointer=checkpointer)

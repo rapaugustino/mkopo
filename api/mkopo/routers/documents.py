@@ -28,9 +28,11 @@ from fastapi import APIRouter, File, HTTPException, UploadFile, status
 from sqlalchemy import select
 
 from mkopo.deps import CurrentUserDep, DbSessionDep
-from mkopo.models import Document, DocumentType
+from mkopo.models import Document
+from mkopo.services import loans as loan_service
 from mkopo.services.audit import Actor, record
 from mkopo.services.ingest import embed_document
+from mkopo.services.loan_locks import raise_if_locked_for_documents
 from mkopo.services.pdf import extract_text as extract_pdf_text
 from mkopo.services.storage import StorageAuthzError, get_storage, mint_download_url
 
@@ -97,6 +99,15 @@ async def upload_document(
     if not file.filename:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Filename required")
 
+    # Stage lock — uploads are frozen past ``conditions`` so the
+    # materials that fed the decision can't be retroactively
+    # changed. ``conditions`` itself stays open so borrowers can
+    # satisfy outstanding requirements.
+    loan = await loan_service.get_loan(db, loan_id)
+    if loan is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Loan not found")
+    raise_if_locked_for_documents(loan.stage)
+
     body = await file.read()
     content_type = file.content_type or "application/octet-stream"
 
@@ -116,10 +127,16 @@ async def upload_document(
     # adds no observable latency to the upload.
     import hashlib
 
+    # Classify by filename at upload time — same rationale as the
+    # borrower-portal upload path. Keeps the doc_type column populated
+    # so transition prereqs + rules engine see what the checklist UI
+    # sees.
+    from mkopo.services.doc_classify import classify_from_filename
+
     document = Document(
         loan_id=loan_id,
         filename=file.filename,
-        doc_type=DocumentType.UNKNOWN,
+        doc_type=classify_from_filename(file.filename),
         storage_uri=uri,
         content_type=content_type,
         size_bytes=len(body),

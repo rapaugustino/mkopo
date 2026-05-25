@@ -34,9 +34,22 @@ type AllowedTransitions = Record<string, string | null>;
  *  Decline is rendered separately as a destructive secondary; this is the
  *  "happy path" advance only. The decision tab has its own action bar for
  *  approve / conditional / decline, so we omit the decision stage here. */
+// Labels are deliberately "Start <phase>" rather than "Move to
+// <phase>" so the distinction from the per-tab "Generate summary"
+// buttons is obvious:
+//
+//   - "Start underwriting"     → advances loan.stage (state machine
+//                                 marker, no AI yet)
+//   - "Generate summary"        → on the Underwriting tab, fires the
+//                                 LangGraph agent that produces the
+//                                 cited summary + risk band
+//
+// Two separate concerns, two separate buttons — but until the
+// labels matched the verbs, users (rightly) read this as a
+// duplicated control.
 const FORWARD: Record<LoanStage, { to: LoanStage; label: string; Icon: React.ComponentType<{ size?: number }> } | null> = {
-  intake: { to: "underwriting", label: "Move to underwriting", Icon: IconMicroscope },
-  underwriting: { to: "decision", label: "Move to decision", Icon: IconGavel },
+  intake: { to: "underwriting", label: "Start underwriting", Icon: IconMicroscope },
+  underwriting: { to: "decision", label: "Start decision", Icon: IconGavel },
   decision: null, // handled by CreditDecisionPanel's action bar
   conditions: { to: "closing", label: "Move to closing", Icon: IconFlagCheck },
   approved: { to: "closing", label: "Move to closing", Icon: IconFlagCheck },
@@ -108,9 +121,27 @@ export function StageActions({ loanId, currentStage }: Props) {
         queryClient.invalidateQueries({ queryKey: ["loans"] }),
       ]);
       const isDecline = variables.to === "declined";
+      // Direct the user to the next concrete action. The stage change
+      // alone doesn't run any AI — for underwriting + decision the
+      // operator still needs to click "Generate summary" / "Generate
+      // decision draft" on the matching tab. Calling that out in the
+      // toast removes the "I clicked the button, why didn't anything
+      // happen?" surprise.
+      let nextStep: string | undefined = variables.reason;
+      if (!isDecline) {
+        if (variables.to === "underwriting") {
+          nextStep =
+            "Stage updated. Open the Underwriting tab and click " +
+            "Generate summary to run the AI analysis.";
+        } else if (variables.to === "decision") {
+          nextStep =
+            "Stage updated. Open the Decision tab and click Generate " +
+            "decision draft to produce the term sheet or letter.";
+        }
+      }
       toast[isDecline ? "warning" : "success"](
         isDecline ? "Loan declined" : `Moved to ${humanizeStage(variables.to)}`,
-        { description: variables.reason },
+        { description: nextStep },
       );
       setPendingTransition(null);
     },

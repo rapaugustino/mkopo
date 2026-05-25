@@ -303,7 +303,14 @@ async def transition_stage(
     This is the ONLY way ``loan.stage`` should ever change. Also resets
     ``stage_entered_at`` so pipeline aging is correct.
     """
-    stmt = select(Loan).where(Loan.id == loan_id).with_for_update()
+    # Scope the row lock to ``loans`` only. ``Loan.owner`` is
+    # ``lazy="joined"`` so the rendered SELECT includes a LEFT OUTER JOIN
+    # on ``users``; Postgres refuses ``FOR UPDATE`` on the nullable side
+    # of an outer join with ``FeatureNotSupportedError``. ``of=Loan``
+    # rewrites the lock clause to ``FOR UPDATE OF loans`` so only the
+    # loan row is locked — exactly what we want here anyway, since the
+    # owner row never changes inside this transaction.
+    stmt = select(Loan).where(Loan.id == loan_id).with_for_update(of=Loan)
     loan = (await session.execute(stmt)).scalar_one()
 
     from_stage = loan.stage
@@ -356,3 +363,50 @@ async def allowed_transitions(
 async def get_loan(session: AsyncSession, loan_id: uuid.UUID) -> Loan | None:
     result = await session.execute(select(Loan).where(Loan.id == loan_id))
     return result.scalar_one_or_none()
+
+
+# Staff roles eligible to own a newly created loan. Order matters
+# for the auto-assign pick: an underwriter is the preferred default,
+# falling through to loan-officer, then admin. ``borrower`` is
+# explicitly excluded — a borrower cannot own a loan they're applying
+# for (that's a Party row, not the assigned underwriter).
+_STAFF_OWNER_ROLES = ("underwriter", "loan_officer", "admin")
+
+
+async def pick_default_owner(session: AsyncSession) -> uuid.UUID | None:
+    """Return the user id that should own a newly-created loan.
+
+    Picks the oldest staff user whose role is in ``_STAFF_OWNER_ROLES``,
+    preferring underwriters over loan officers over admins. Returns
+    ``None`` only when no staff user exists at all (greenfield install
+    before anyone signs up), in which case the loan is left unassigned
+    and a staff member can claim it via the owner-reassignment dropdown.
+
+    Why oldest-first: the natural "on call" semantics in a fresh demo
+    is "Jordan Davis was here first, route to her". In production a
+    real load-balancing strategy would replace this — but the seam is
+    well-marked so swapping is local.
+
+    Used by both the borrower-self-service ``/borrower-portal/apply``
+    path and the staff manual ``/loans`` create path. Before this
+    helper existed, every freshly created loan landed with
+    ``owner_user_id IS NULL`` and the case file showed
+    "Owner: — Unassigned" until someone picked from the dropdown.
+    """
+    from mkopo.models import User as UserModel
+
+    for role in _STAFF_OWNER_ROLES:
+        user_id = (
+            await session.execute(
+                select(UserModel.id)
+                .where(
+                    UserModel.role == role,
+                    UserModel.deleted_at.is_(None),
+                )
+                .order_by(UserModel.created_at.asc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if user_id is not None:
+            return user_id
+    return None

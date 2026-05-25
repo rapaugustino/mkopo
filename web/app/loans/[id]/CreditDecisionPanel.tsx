@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   IconAlertTriangle,
@@ -12,14 +12,18 @@ import {
   IconSparkles,
   IconX,
 } from "@tabler/icons-react";
+import { AnimatePresence, motion } from "motion/react";
 import {
   api,
   type Condition,
   type DecisionPath,
   type DecisionResult,
+  type RiskFlag,
+  type UnderwritingResult,
 } from "@/lib/api";
 import { toast } from "sonner";
-import { humanizeStatus } from "@/lib/humanize";
+import { formatDateTime } from "@/lib/formatting";
+import { humanizeRuleId, humanizeStatus } from "@/lib/humanize";
 import { useAgentRun } from "@/lib/useAgentRun";
 import { AgentProgress } from "@/app/components/AgentProgress";
 import { BorrowerMessagePreviewModal } from "@/app/components/BorrowerMessagePreviewModal";
@@ -141,8 +145,13 @@ function AdverseActionLetterView({
         </p>
         <div className="mt-1 flex flex-wrap gap-1">
           {letter.principal_reasons.map((r) => (
-            <Pill key={r} variant="danger">
-              {r}
+            // The raw rule_id stays in the data model (audit trail
+            // needs the engine identifier) but the chip shows the
+            // friendly label. Hover to see the stable id if a
+            // reviewer needs to cross-reference against the rule
+            // registry.
+            <Pill key={r} variant="danger" title={r}>
+              {humanizeRuleId(r)}
             </Pill>
           ))}
         </div>
@@ -458,13 +467,81 @@ function ActionBar({
 }
 
 
+/** Animation phases for the verdict reveal cinematic.
+ *
+ *  Plays once per *fresh* decision result (i.e. when the SSE ``done``
+ *  event lands). Subsequent renders (page refresh, navigation back)
+ *  skip straight to ``"done"`` because we cache the last animated
+ *  agent_run_id and compare on mount.
+ *
+ *  - ``idle``    no result, or animation hasn't started yet
+ *  - ``rules``   rule outcomes cascading (≈ 600ms)
+ *  - ``verdict`` AI recommendation card fades + scales in (≈ 200ms)
+ *  - ``done``    everything visible; user can interact freely
+ */
+type CinematicPhase = "idle" | "rules" | "verdict" | "done";
+
+/** Build a sequenced reveal of risk-flag outcomes. Each flag chip
+ *  fades + slides in 80ms after the previous one — slow enough to
+ *  feel ceremonial, fast enough that a user who's seen it twice
+ *  doesn't feel they're waiting. ``passed`` flags get the brand
+ *  green check, failures get an X.
+ */
+function RuleCascade({ flags }: { flags: RiskFlag[] }) {
+  // Show only the BLOCK-severity rules — these are the deterministic
+  // gates the decision agent rides on. Warn-level flags are noise
+  // here; the verdict text covers them in prose.
+  const visible = useMemo(
+    () => flags.filter((f) => f.severity === "block").slice(0, 8),
+    [flags],
+  );
+  if (visible.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {visible.map((f, i) => (
+        <motion.span
+          key={f.rule_id}
+          initial={{ opacity: 0, y: -4, scale: 0.96 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ delay: i * 0.08, duration: 0.22, ease: "easeOut" }}
+          className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium"
+          style={{
+            background: f.passed
+              ? "var(--color-background-success)"
+              : "var(--color-background-danger)",
+            color: f.passed
+              ? "var(--color-text-success)"
+              : "var(--color-text-danger)",
+          }}
+        >
+          {f.passed ? <IconCheck size={10} /> : <IconX size={10} />}
+          {humanizeRuleId(f.rule_id)}
+        </motion.span>
+      ))}
+    </div>
+  );
+}
+
+// ``humanizeRuleId`` lives in ``@/lib/humanize`` — the central
+// helper is shared with the underwriting workspace + (any future)
+// rules-engine surface so a new rule registered in one place gets
+// the friendly label everywhere.
+
 export function CreditDecisionPanel({ loanId }: Props) {
   const queryClient = useQueryClient();
   const [selectedPath, setSelectedPath] = useState<DecisionPath | null>(null);
 
+  // Rehydrate the last completed decision result from the DB. See
+  // the matching comment in UnderwritingWorkspace.tsx for the full
+  // motivation — short version: previously a page reload wiped the
+  // verdict from the cache, forcing the underwriter to either re-run
+  // the agent (token burn) or navigate to the audit timeline to find
+  // the rationale. Now the persist node stores the full Pydantic
+  // dump under ``agent_runs.payload.result_json`` and this query
+  // pulls it back.
   const decisionQuery = useQuery<DecisionResult | null, Error>({
     queryKey: ["loan", loanId, "decision"],
-    queryFn: async () => null,
+    queryFn: () => api.getLatestDecision(loanId),
     staleTime: Infinity,
   });
 
@@ -472,6 +549,19 @@ export function CreditDecisionPanel({ loanId }: Props) {
     queryKey: ["loan", loanId, "conditions"],
     queryFn: () => api.getConditions(loanId),
   });
+
+  // Same lock-status read the underwriting workspace uses. Past the
+  // decision stage (``conditions``/``approved``/``closing``/terminal)
+  // the server returns 409 on agent runs — gate the button here so
+  // clicks don't fire those requests, and so the user gets a clear
+  // disabled-state hint instead of silent failure. ``staleTime: 30s``
+  // matches the LoanLockBanner so both queries share one cache hit.
+  const lockQuery = useQuery({
+    queryKey: ["loan", loanId, "lock-status"],
+    queryFn: () => api.getLockStatus(loanId),
+    staleTime: 30_000,
+  });
+  const agentsLocked = lockQuery.data?.agents_locked ?? false;
 
   // Decision agent streams via SSE — same three-node trail as
   // underwriting, with the final ``done`` event carrying the
@@ -517,27 +607,84 @@ export function CreditDecisionPanel({ loanId }: Props) {
     }
   }
 
+  // The latest underwriting result feeds the rule-cascade phase of
+  // the cinematic. Already cached by the workspace tab — querying
+  // here with the same key serves from cache instantly.
+  const underwritingQuery = useQuery<UnderwritingResult | null, Error>({
+    queryKey: ["loan", loanId, "underwriting"],
+    queryFn: () => api.getLatestUnderwriting(loanId),
+    staleTime: Infinity,
+  });
+
+  // Cinematic state machine — plays exactly once per fresh decision
+  // run. The trick: when a result arrives whose ``agent_run_id``
+  // we've never animated before, kick off the staged reveal; on
+  // re-mount with the same id (page refresh, navigation back), skip
+  // straight to ``done``. A ref tracks the last animated id so a
+  // re-render doesn't replay the animation gratuitously.
+  const [cinematicPhase, setCinematicPhase] = useState<CinematicPhase>(
+    result ? "done" : "idle",
+  );
+  const animatedRunId = useRef<string | null>(null);
+  useEffect(() => {
+    if (!result) return;
+    if (animatedRunId.current === result.agent_run_id) return;
+    animatedRunId.current = result.agent_run_id;
+    // Only animate if we just got the result fresh from the agent —
+    // detected by ``agentRun.isRunning`` having just flipped from
+    // true to false. On a page refresh we skip the animation: the
+    // user has already seen this verdict, replaying would be
+    // theatrical noise.
+    const isFresh = agentRun.nodes.length > 0;
+    if (!isFresh) {
+      setCinematicPhase("done");
+      return;
+    }
+    setCinematicPhase("rules");
+    const t1 = setTimeout(() => setCinematicPhase("verdict"), 720);
+    const t2 = setTimeout(() => setCinematicPhase("done"), 1100);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [result, agentRun.nodes.length]);
+
   return (
     <div className="flex flex-col gap-3">
+      {/* Same naming discipline as UnderwritingWorkspace: the button
+          here produces the decision artifact (term sheet / adverse-
+          action letter / conditions list). The stage transition to
+          ``decision`` happens via StageActions's "Start decision"
+          on the header. Two separate verbs for two separate things. */}
       <div className="flex items-center justify-between rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-4 py-3">
         <div>
           <p className="text-[13px] font-medium">Credit decision</p>
           <p className="mt-0.5 text-xs text-[var(--color-text-secondary)]">
-            Picks a path on top of the underwriting workup. Conditions are
-            written to the conditions table; an ECOA-compliant decline letter
-            cites the specific failed rules.
+            The button below picks a path (approve / conditional /
+            decline) on top of the underwriting workup, then drafts
+            the term sheet or ECOA-compliant adverse-action letter.
+            It does <strong>not</strong> transition the stage — the
+            decision panel below handles "send to borrower" + stage
+            change.
           </p>
         </div>
         <PrimaryButton
           Icon={IconSparkles}
           onClick={runDecision}
-          disabled={agentRun.isRunning}
+          disabled={agentRun.isRunning || agentsLocked}
+          title={
+            agentsLocked
+              ? "Loan is past the decision stage — agents are locked."
+              : undefined
+          }
         >
           {agentRun.isRunning
             ? "Running…"
-            : result
-              ? "Re-run agent"
-              : "Run decision agent"}
+            : agentsLocked
+              ? "Locked"
+              : result
+                ? "Re-generate decision draft"
+                : "Generate decision draft"}
         </PrimaryButton>
       </div>
 
@@ -554,7 +701,7 @@ export function CreditDecisionPanel({ loanId }: Props) {
       {!result && !agentRun.isRunning && agentRun.nodes.length === 0 && (
         <div className="rounded-lg border-[0.5px] border-dashed border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] p-8 text-center">
           <p className="text-sm text-[var(--color-text-secondary)]">
-            No decision run yet. Click <strong>Run decision agent</strong>.
+            No decision draft yet. Click <strong>Generate decision draft</strong>.
             (Best run after Underwriting has produced rule outcomes.)
           </p>
         </div>
@@ -562,11 +709,53 @@ export function CreditDecisionPanel({ loanId }: Props) {
 
       {result && (
         <>
+          {/* Cinematic prologue — only visible during the rule
+              cascade phase. Shows the deterministic gate outcomes
+              from the underwriting run cascading in one-by-one,
+              then folds away as the verdict crystalises. The "engine
+              first, language model second" separation rendered as
+              a moment in time. */}
+          <AnimatePresence>
+            {cinematicPhase === "rules" && underwritingQuery.data && (
+              <motion.div
+                key="prologue"
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] p-4"
+              >
+                <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
+                  Re-evaluating policy gates…
+                </p>
+                <RuleCascade flags={underwritingQuery.data.risk_flags} />
+              </motion.div>
+            )}
+          </AnimatePresence>
+
           {/* Recommendation card — the AI's call. Icon stays brand-green
               regardless of the chosen path: it's the "this is AI work"
               signal, not the verdict's signal. Verdict colour lives in
               the three path cards below. */}
-          <div className="grid grid-cols-[36px_1fr] items-start gap-3 rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] p-4">
+          <motion.div
+            // ``key`` includes the agent_run_id so a fresh result
+            // (new run) cleanly remounts and replays the entrance
+            // motion; ``staleTime: Infinity`` on the parent query
+            // means without this the card would just morph in place.
+            key={`verdict-${result.agent_run_id}`}
+            initial={
+              cinematicPhase === "rules" || cinematicPhase === "idle"
+                ? { opacity: 0, scale: 0.98, y: 6 }
+                : false
+            }
+            animate={
+              cinematicPhase === "verdict" || cinematicPhase === "done"
+                ? { opacity: 1, scale: 1, y: 0 }
+                : { opacity: 0, scale: 0.98, y: 6 }
+            }
+            transition={{ duration: 0.28, ease: "easeOut" }}
+            className="grid grid-cols-[36px_1fr] items-start gap-3 rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] p-4"
+          >
             <div
               className="flex h-9 w-9 items-center justify-center rounded-full"
               style={{
@@ -593,10 +782,22 @@ export function CreditDecisionPanel({ loanId }: Props) {
                 </MarkdownBlock>
               </div>
             </div>
-          </div>
+          </motion.div>
 
-          {/* 3 paths */}
-          <div className="flex gap-2">
+          {/* 3 paths — fade up after the verdict has crystallized
+              so the user reads the recommendation before the path
+              choices appear. On rehydrated views (cinematicPhase
+              starts as "done") this animation is a no-op. */}
+          <motion.div
+            initial={cinematicPhase !== "done" ? { opacity: 0, y: 6 } : false}
+            animate={
+              cinematicPhase === "done"
+                ? { opacity: 1, y: 0 }
+                : { opacity: 0, y: 6 }
+            }
+            transition={{ duration: 0.25, ease: "easeOut" }}
+            className="flex gap-2"
+          >
             {(["approve", "conditional", "decline"] as DecisionPath[]).map((p) => (
               <button
                 key={p}
@@ -609,7 +810,7 @@ export function CreditDecisionPanel({ loanId }: Props) {
                 />
               </button>
             ))}
-          </div>
+          </motion.div>
 
           {/* Conditions */}
           {selectedPath === "conditional" && (
@@ -674,8 +875,11 @@ export function CreditDecisionPanel({ loanId }: Props) {
           )}
 
           <p className="text-[10px] text-[var(--color-text-tertiary)]">
-            agent_run {result.agent_run_id.slice(0, 8)} ·{" "}
-            {new Date(result.generated_at).toLocaleString()}
+            {/* No raw agent_run_id here — that's an engineer-side
+                identifier and belongs on the Trace tab + the
+                observability page. Underwriters just want to know
+                "when was this drafted". */}
+            Drafted {formatDateTime(result.generated_at)}
           </p>
         </>
       )}

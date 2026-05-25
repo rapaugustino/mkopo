@@ -9,6 +9,7 @@ import {
   IconLayoutGrid,
   IconListSearch,
   IconPencil,
+  IconSettings,
 } from "@tabler/icons-react";
 import { api, type ReviewTask } from "@/lib/api";
 
@@ -29,6 +30,10 @@ const NAV: NavItem[] = [
   // agent uses. Staff-only by route gate (the underlying endpoint
   // requires CurrentUserDep).
   { href: "/prompts", label: "Prompts", Icon: IconPencil },
+  // Institution settings — lender identity + signing authority +
+  // credit reporting agency. Drives the "Real identifiers" block
+  // every borrower-visible agent threads into its LLM prompt.
+  { href: "/settings", label: "Settings", Icon: IconSettings },
 ];
 
 /**
@@ -60,15 +65,23 @@ export function GlobalNav() {
           <Link
             key={item.href}
             href={item.href}
+            // ``hidden xs:inline``-style behaviour for the label: on
+            // narrow screens we render the icon alone (with the
+            // human-readable label exposed via ``title`` + ``aria-label``
+            // for screen readers + tooltip). Five tappable icons fit
+            // comfortably on an iPhone-SE width row; five labelled
+            // items don't.
+            title={item.label}
+            aria-label={item.label}
             className={
-              "relative flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors " +
+              "relative flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors sm:px-2.5 " +
               (active
                 ? "text-[var(--color-text-primary)]"
                 : "text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]")
             }
           >
             <Icon size={14} />
-            {item.label}
+            <span className="hidden sm:inline">{item.label}</span>
             {item.href === "/review-queue" && openCount > 0 && (
               <span
                 className="inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-medium"

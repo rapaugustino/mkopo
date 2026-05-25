@@ -35,12 +35,28 @@ is active.
 from __future__ import annotations
 
 import uuid
+from contextvars import ContextVar
 from dataclasses import dataclass
 
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mkopo.models.prompt import Prompt
+
+# ContextVar that ``LLMGateway._record_call`` reads to stamp each
+# call's ``prompt_version_id``. Set as a side-effect of :func:`get`
+# so call sites don't have to thread the value through every helper.
+# Same pattern as ``current_thread_id`` / ``current_step_id``: a
+# new value sets, the old is restored when the ``await`` chain
+# unwinds. ``None`` for ad-hoc calls not anchored to a registry entry.
+_current_prompt_version_id: ContextVar[uuid.UUID | None] = ContextVar(
+    "mkopo_current_prompt_version_id", default=None
+)
+
+
+def current_prompt_version_id() -> uuid.UUID | None:
+    """The ``prompts.id`` of the prompt currently being applied, if any."""
+    return _current_prompt_version_id.get()
 
 # ----- registry -------------------------------------------------------------
 
@@ -87,7 +103,14 @@ _INTAKE_DRAFT_DOC_PERSONAL = (
     "missing items. Reference each item by its human-friendly name "
     "(\"your most recent pay stubs\", \"last 2 years of tax returns\", "
     "\"a recent bank statement\"). Do not invent items that aren't in "
-    "the supplied list of missing materials. Sign off as the loan officer."
+    "the supplied list of missing materials.\n\n"
+    "Use the borrower's name, loan reference, sign-off name, title, "
+    "institution, and contact email exactly as supplied in the user "
+    "message's 'Real identifiers' block. NEVER emit placeholders like "
+    "[Loan Officer Name] or [Email].\n\n"
+    "This is a plain-text email. Do NOT use Markdown — no asterisks for "
+    "bold, no leading '#' headers, no `1.` numbered list syntax. Plain "
+    "prose paragraphs only."
 )
 _INTAKE_DRAFT_DOC_BUSINESS = (
     "You are a professional loan underwriter writing to a borrower. Be "
@@ -98,7 +121,14 @@ _INTAKE_DRAFT_DOC_BUSINESS = (
     "from any guarantors.\n\n"
     "Compose a single email asking the borrower to upload the specific "
     "missing items by name. Do not invent items that aren't in the "
-    "supplied list of missing materials. Sign off as the loan officer."
+    "supplied list of missing materials.\n\n"
+    "Use the borrower's name, loan reference, sign-off name, title, "
+    "institution, and contact email exactly as supplied in the user "
+    "message's 'Real identifiers' block. NEVER emit placeholders like "
+    "[Loan Officer Name] or [Email].\n\n"
+    "This is a plain-text email. Do NOT use Markdown — no asterisks for "
+    "bold, no leading '#' headers, no `1.` numbered list syntax. Plain "
+    "prose paragraphs only."
 )
 
 # Underwriting summary. Two variants — commercial real estate vs
@@ -171,15 +201,37 @@ _DECISION_APPROVE_CONDITIONAL = (
 _DECISION_DECLINE = (
     "You draft an ADVERSE ACTION LETTER under ECOA Regulation B.\n\n"
     "Hard rules:\n"
-    "1. `principal_reasons` MUST contain at least one rule_id from the "
-    "BLOCKING failures the rules engine produced. You may not invent a "
-    "reason that isn't in the supplied outcomes list.\n"
-    "2. Letter copy must reference each principal reason in plain "
-    "language the borrower can understand.\n"
+    "1. `principal_reasons` (a structured field in your output) MUST "
+    "contain at least one rule_id from the BLOCKING failures the "
+    "rules engine produced. The rule_id is for the structured field "
+    "only — it is the engine's stable identifier so the letter is "
+    "auditable. You may not invent a reason that isn't in the "
+    "supplied outcomes list.\n"
+    "2. The LETTER BODY itself must reference each principal reason "
+    "in plain English the borrower can understand. NEVER include "
+    "the raw rule_id token in the body — not in parentheses, not "
+    "as a code, not as a tag. The borrower should not see strings "
+    "like 'doc_completeness' or 'ltv_under_cap' anywhere in the "
+    "letter they receive. Use the friendly label (e.g. write "
+    "'documentation completeness' or 'loan-to-value ratio') in "
+    "prose. The rule_id only lives in the principal_reasons array.\n"
     "3. Include the ECOA notice (right to a copy of any appraisal, "
-    "right to know the specific reasons, contact for credit-reporting "
-    "agency).\n"
-    "4. Do not soften or hedge. The letter is a legal notice."
+    "right to know the specific reasons).\n"
+    "4. Do not soften or hedge. The letter is a legal notice.\n"
+    "5. Use the borrower name, loan reference, property type, loan "
+    "amount, today's date, lender name + address + phone + email, "
+    "authorized officer name + title, and credit reporting agency "
+    "triple EXACTLY as supplied in the user message's 'Real "
+    "identifiers' block. NEVER emit bracketed placeholders like "
+    "[LENDER NAME], [DATE], [APPLICANT NAME], or [CREDIT REPORTING "
+    "AGENCY NAME, ADDRESS, PHONE]. If a field is marked '(not "
+    "configured)' in the Real identifiers block, follow the "
+    "instruction next to it (omit the line, omit the clause, or "
+    "sign generically as 'Credit Committee').\n"
+    "6. If the Real identifiers block says no credit reporting "
+    "agency was consulted, OMIT THE ENTIRE credit-reporting "
+    "paragraph from the letter body — do not write it out and do "
+    "not leave placeholders for it."
 )
 
 # Borrower-side chat assistant. Bounded scope: read-only by default,
@@ -201,7 +253,17 @@ _BORROWER_CHAT = (
     "- For anything you can't answer with a tool, point the borrower to "
     "their loan officer.\n"
     "- Keep responses short. The borrower is on a phone screen as often "
-    "as not."
+    "as not.\n\n"
+    "Truth in document reporting (this matters — borrowers have been "
+    "confused when this rule wasn't enforced):\n"
+    "- When you call list_documents, REPORT THE EXACT COUNT AND "
+    "FILENAMES you got back. If the tool returns count=1 with "
+    'filename "loan_application.txt", say "You have 1 document on '
+    'this application: loan_application.txt" — do NOT say "no '
+    'documents" or "you haven\'t uploaded anything yet."\n'
+    "- If the borrower expected more documents, follow up with "
+    "list_missing_fields and reconcile against the required set. Tell "
+    "them which they still need to upload."
 )
 
 # Staff-side chat copilot. Wider tool catalog (rerun agents, transition "
@@ -372,6 +434,12 @@ def list_definitions() -> list[PromptDef]:
 # round-trip per LLM-issuing node, which adds up across a full intake
 # → underwriting → decision run.
 _CACHE: dict[str, str] = {}
+# Parallel cache of the *id* of the active prompt row per identifier.
+# Populated by :func:`refresh_cache` alongside ``_CACHE``. Empty for
+# identifiers that only have a code default (i.e. nothing in the
+# ``prompts`` table yet) — calls in that state stamp ``None``, same
+# as ad-hoc / out-of-registry calls.
+_ACTIVE_VERSION_IDS: dict[str, uuid.UUID] = {}
 
 
 def get(identifier: str) -> str:
@@ -396,6 +464,13 @@ def get(identifier: str) -> str:
     no-cache path falls through to the in-process default which is
     correct without any I/O.
     """
+    # Stamp the ContextVar regardless of which resolution branch we
+    # take — this is how the gateway later traces back to the prompt
+    # row that produced any LLM call. ``None`` is correct when we
+    # fall through to the code default (the registry doesn't have a
+    # DB row yet).
+    _current_prompt_version_id.set(_ACTIVE_VERSION_IDS.get(identifier))
+
     cached = _CACHE.get(identifier)
     if cached is not None:
         return cached
@@ -436,7 +511,7 @@ async def refresh_cache(session: AsyncSession) -> None:
     try:
         rows = (
             await session.execute(
-                select(Prompt.identifier, Prompt.body).where(
+                select(Prompt.id, Prompt.identifier, Prompt.body).where(
                     Prompt.is_active.is_(True)
                 )
             )
@@ -445,7 +520,8 @@ async def refresh_cache(session: AsyncSession) -> None:
         # Don't take down the app on a transient DB error during
         # refresh. The next mutation or restart will retry.
         return
-    new_cache = {ident: body for ident, body in rows}
+    new_cache = {ident: body for _pid, ident, body in rows}
+    new_ids = {ident: pid for pid, ident, _body in rows}
     if new_cache:
         # Replace wholesale rather than merging — if an identifier
         # has been deleted from the DB (manual cleanup) we want the
@@ -453,6 +529,8 @@ async def refresh_cache(session: AsyncSession) -> None:
         # the stale cached value.
         _CACHE.clear()
         _CACHE.update(new_cache)
+        _ACTIVE_VERSION_IDS.clear()
+        _ACTIVE_VERSION_IDS.update(new_ids)
 
 
 async def load(session: AsyncSession, identifier: str) -> str:

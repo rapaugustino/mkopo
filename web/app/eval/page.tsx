@@ -398,7 +398,7 @@ export default function EvalDashboardPage() {
           the toast system now — see Providers. The inline banners that
           used to live here duplicated that signal. */}
 
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <div className="rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)]">
           <StatTile
             label="Production accuracy"

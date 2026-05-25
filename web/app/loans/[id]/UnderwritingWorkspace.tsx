@@ -26,6 +26,8 @@ import { toast } from "sonner";
 import { humanizeField, humanizePropertyType } from "@/lib/humanize";
 import { useAgentRun } from "@/lib/useAgentRun";
 import { AgentProgress } from "@/app/components/AgentProgress";
+import { CitedSource } from "@/app/components/CitedSource";
+import { formatDateTime } from "@/lib/formatting";
 import { PrimaryButton } from "@/app/components/PrimaryButton";
 import { SectionLabel } from "@/app/components/SectionLabel";
 
@@ -120,7 +122,7 @@ function KpiStrip({ kpis }: { kpis: UnderwritingKPIs }) {
 
   if (isPersonal) {
     return (
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <KpiTile label="Loan amount" value={formatMoney(kpis.loan_amount)} />
         <KpiTile
           label="DTI"
@@ -277,10 +279,14 @@ function CitedSection({
   section,
   index,
   extractionByField,
+  loanId,
 }: {
   section: UnderwritingSection;
   index: number;
   extractionByField: Map<string, Extraction>;
+  /** Loan id is threaded through so each citation chip can resolve
+   *  itself via ``GET /loans/{id}/citations/{field}``. */
+  loanId: string;
 }) {
   return (
     <div>
@@ -293,23 +299,24 @@ function CitedSection({
             {section.citations.map((field, ci) => {
               const ex = extractionByField.get(field);
               const number = index * 10 + ci + 1;
-              const title = ex
+              // Hover preview gives a no-click peek at the value; the
+              // click action opens the full citation drawer with the
+              // source quote highlighted. Behaviour mirrors academic
+              // citations: glance to confirm, click to verify.
+              const preview = ex
                 ? `${humanizeField(field)}: ${ex.value} — ${Math.round(ex.confidence * 100)}% confident${
                     ex.source_span?.quote ? `\n\n"${ex.source_span.quote}"` : ""
                   }`
-                : `${humanizeField(field)} — no extraction found`;
+                : `${humanizeField(field)} — click for source`;
               return (
-                <sup
+                <CitedSource
                   key={`${section.title}-${field}`}
-                  title={title}
-                  className="ml-0.5 cursor-help rounded px-1 text-[10px] font-medium"
-                  style={{
-                    background: "var(--color-background-info)",
-                    color: "var(--color-text-info)",
-                  }}
-                >
-                  {number}
-                </sup>
+                  loanId={loanId}
+                  field={field}
+                  variant="superscript"
+                  number={number}
+                  preview={preview}
+                />
               );
             })}
           </>
@@ -338,11 +345,34 @@ export function UnderwritingWorkspace({ loanId }: Props) {
     staleTime: 30_000,
   });
 
+  // Rehydrate the last completed underwriting result from the DB.
+  // Pre-2026-05 this was ``queryFn: async () => null``, which meant
+  // the workspace went back to "no result yet" on every page reload
+  // — the SSE stream was the only path to the body of the result.
+  // Now the persist node stores the full Pydantic dump under
+  // ``agent_runs.payload.result_json`` and this query reads it back,
+  // so the underwriter sees the prior verdict without re-burning
+  // tokens. ``staleTime: Infinity`` still applies because the SSE
+  // onDone handler manually updates the cache; the queryFn is only
+  // for the first mount / hard refresh.
   const underwritingQuery = useQuery<UnderwritingResult | null, Error>({
     queryKey: ["loan", loanId, "underwriting"],
-    queryFn: async () => null,
+    queryFn: () => api.getLatestUnderwriting(loanId),
     staleTime: Infinity,
   });
+
+  // Stage lock — agents are refused server-side past the decision
+  // stage. Read the same snapshot the lock banner uses so we can
+  // disable the "Generate summary" button up front rather than
+  // letting the user click and eat a 409 toast. ``staleTime: 30s``
+  // matches the banner — they share the same query key so the
+  // browser cache serves both for free.
+  const lockQuery = useQuery({
+    queryKey: ["loan", loanId, "lock-status"],
+    queryFn: () => api.getLockStatus(loanId),
+    staleTime: 30_000,
+  });
+  const agentsLocked = lockQuery.data?.agents_locked ?? false;
 
   // Underwriting streams its three nodes (fetch_and_evaluate →
   // draft_summary → persist) over SSE. The final ``done`` event carries
@@ -418,27 +448,59 @@ export function UnderwritingWorkspace({ loanId }: Props) {
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Header strip */}
+      {/* Header strip. The button here is deliberately framed as
+          "Generate summary" rather than "Run underwriting agent" so
+          it doesn't read as a duplicate of the StageActions
+          "Start underwriting" control on the case-file header. Two
+          different concerns:
+            - StageActions advances loan.stage (state machine marker).
+            - This button produces the cited summary + risk band
+              artifact via the underwriting LangGraph agent.
+          The action verbs now make the split explicit. */}
       <div className="flex items-center justify-between rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-4 py-3">
         <div>
           <p className="text-[13px] font-medium">Underwriting workspace</p>
           <p className="mt-0.5 text-xs text-[var(--color-text-secondary)]">
-            Runs the rules engine over accepted extractions and drafts a cited
-            committee summary. Rerunning replaces the previous draft.
+            The button below runs the rules engine + AI summarizer. It
+            produces the committee summary and risk band — it does
+            <strong> not </strong>change the loan stage. (Stage moves
+            via the header control.) Re-running replaces the previous
+            draft.
           </p>
         </div>
         <PrimaryButton
           Icon={IconSparkles}
           onClick={runUnderwriting}
-          disabled={agentRun.isRunning}
+          disabled={agentRun.isRunning || agentsLocked}
+          title={
+            agentsLocked
+              ? "Loan is past the decision stage — agents are locked."
+              : undefined
+          }
         >
           {agentRun.isRunning
             ? "Running…"
-            : result
-              ? "Re-run agent"
-              : "Run underwriting agent"}
+            : agentsLocked
+              ? "Locked"
+              : result
+                ? "Re-generate summary"
+                : "Generate summary"}
         </PrimaryButton>
       </div>
+
+      {/* "You're about to overwrite a previous draft" banner. Only
+          renders during the re-run, not on the first generation, and
+          disappears once a new result lands. Without this the user has
+          no idea that clicking the button silently replaces what they
+          were looking at — visible signal that we ARE running again,
+          and what that means. */}
+      {agentRun.isRunning && result && (
+        <div className="rounded-md border-[0.5px] border-[var(--color-text-warning)] bg-[var(--color-background-warning)] px-3 py-2 text-[12px]">
+          <strong>Re-generating.</strong> The previous summary will be
+          replaced as soon as this run completes. The original is
+          preserved in the loan&apos;s trace history.
+        </div>
+      )}
 
       {agentRun.nodes.length > 0 && (
         <AgentProgress
@@ -548,13 +610,17 @@ export function UnderwritingWorkspace({ loanId }: Props) {
                   section={s}
                   index={i}
                   extractionByField={extractionByField}
+                  loanId={loanId}
                 />
               ))}
             </div>
           </div>
 
           <p className="text-[10px] text-[var(--color-text-tertiary)]">
-            agent_run {result.agent_run_id.slice(0, 8)} · cached on this view
+            {/* Raw agent_run_id moved to the Trace tab where the
+                audit story belongs. Underwriters here just want
+                "is this fresh or cached?" — keep the human signal. */}
+            Cached on this view · {formatDateTime(result.generated_at)}
           </p>
         </>
       )}

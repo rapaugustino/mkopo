@@ -28,8 +28,12 @@ clears, no warnings.
 
 ## Borrower
 
-`elena@riverbendholdings.example` — sign up with this address to test
-the borrower-side flows on this loan.
+`elena@riverbendholdings.example` — **not yet seeded**. Sign up with
+this email at `/signup` (pick any 8+ char password), then create
+the loan via the `/apply` wizard. Documents go on the status page
+**after** submit, not in the wizard. The wizard is 5 steps: class →
+business → loan → guarantor → review. See TESTING_GUIDE Flow B1
+for the exact step-by-step.
 
 ## Files in this folder
 

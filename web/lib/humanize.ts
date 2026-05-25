@@ -244,3 +244,48 @@ const STATUS_LABEL: Record<string, string> = {
 
 export const humanizeStatus = (s: string | null | undefined): string =>
   s ? (STATUS_LABEL[s] ?? titleCase(s)) : "—";
+
+/** Rule-engine identifier → friendly label.
+ *
+ *  Rule ids are deliberately code-shaped (``ltv_under_cap``,
+ *  ``dscr_above_floor``, ``doc_completeness``) so they're stable
+ *  across versions and easy to reference in audit logs. They are
+ *  NOT a user-facing string. Surfaces that show rule outcomes —
+ *  the underwriting risk-flag chips, the decision verdict
+ *  cascade, the materials-drift banner — should run rule ids
+ *  through this. Eval / Observability / Prompts are exempt; those
+ *  audiences want the raw key.
+ *
+ *  Adding a new rule? Land its friendly label here at the same
+ *  time you register the rule. The fallback below is correct for
+ *  one-off rules but reads as "Some Snake Cased Thing" which is
+ *  obviously a temporary stand-in.
+ */
+const RULE_LABELS: Record<string, string> = {
+  ltv_under_cap: "Loan-to-value within cap",
+  dscr_above_floor: "Debt-service coverage",
+  debt_yield_above_floor: "Debt yield",
+  appraisal_age: "Appraisal age",
+  doc_completeness: "Document completeness",
+  guarantor_concentration: "Guarantor concentration",
+  credit_score_floor: "Credit score floor",
+  dti_under_cap: "Debt-to-income within cap",
+  lti_under_cap: "Loan-to-income within cap",
+  employment_tenure_minimum: "Employment tenure",
+  income_minimum: "Minimum income",
+};
+
+export const humanizeRuleId = (id: string | null | undefined): string =>
+  id ? (RULE_LABELS[id] ?? titleCase(id)) : "—";
+
+/** Loan class — ``business`` vs ``personal``. Borrower-facing
+ *  surfaces (apply form review step, /account dashboard) and
+ *  staff loan headers both render this. The values would look
+ *  awkward lowercased ("business · bridge"). */
+export const humanizeLoanClass = (c: string | null | undefined): string => {
+  if (!c) return "—";
+  const lower = c.toLowerCase();
+  if (lower === "personal") return "Personal";
+  if (lower === "business") return "Business";
+  return titleCase(c);
+};

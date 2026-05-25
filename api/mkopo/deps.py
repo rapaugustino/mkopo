@@ -89,3 +89,40 @@ async def require_borrower(
 
 # A logged-in *borrower* (self-service applicant).
 CurrentBorrowerDep = Annotated[User, Depends(require_borrower)]
+
+
+async def optional_borrower(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    session_cookie: Annotated[str | None, Cookie(alias=SESSION_COOKIE)] = None,
+) -> User | None:
+    """Resolve the borrower from the session cookie, OR ``None`` if
+    the request is anonymous / the cookie is invalid.
+
+    Mirrors :func:`require_borrower` but degrades quietly to ``None``
+    instead of raising 401 / 403. Used by endpoints that work for
+    both signed-in and anonymous callers — most notably ``/apply``,
+    which lets a new borrower create an account in the same call
+    that submits their first loan, while also letting an existing
+    borrower attach a second loan to their account without going
+    through the "email already exists" 409 path.
+
+    Soft-deleted users and non-borrower roles still return ``None``
+    — same safety as ``require_borrower``, just no exception.
+    """
+    if not session_cookie:
+        return None
+    claims = decode_jwt(session_cookie)
+    if claims is None:
+        return None
+    if await is_jti_revoked(claims.jti):
+        return None
+    user = (
+        await db.execute(select(User).where(User.id == claims.user_id))
+    ).scalar_one_or_none()
+    if user is None or user.deleted_at is not None or user.role != "borrower":
+        return None
+    return user
+
+
+# Optional flavour for endpoints that work for both anonymous + authed.
+OptionalBorrowerDep = Annotated[User | None, Depends(optional_borrower)]

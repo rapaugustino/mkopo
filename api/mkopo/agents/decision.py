@@ -41,6 +41,7 @@ from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select, update
 
+from mkopo.agents._serde import make_serializer
 from mkopo.config import get_settings
 from mkopo.db import get_session
 from mkopo.llm_gateway import get_gateway
@@ -218,8 +219,11 @@ async def draft_decision(state: DecisionState) -> DecisionState:
         f"{guidance}\n\n"
         f"Rule outcomes:\n{rules_block}\n\n"
         f"Accepted extractions:\n{extractions_block or '(none)'}\n\n"
-        "Produce: path, confidence (your assessment, 0-1), a one-line verdict, "
-        "and a rationale paragraph."
+        "Produce: path, confidence (your assessment, 0-1), a one-line "
+        "verdict (≤120 characters), and a rationale paragraph (≤800 "
+        "characters — be specific but tight; the verdict carries the "
+        "headline and the rationale only needs to enumerate the "
+        "decisive rule outcomes and one or two risk-mitigant notes)."
     )
     drafted: _DraftedDecision = await gateway.call_structured(
         model=settings.llm_heavy_model,
@@ -274,16 +278,80 @@ async def draft_decision(state: DecisionState) -> DecisionState:
         failed_block_ids = [f.rule_id for f in flags if not f.passed and f.severity == "block"]
         failed_warn_ids = [f.rule_id for f in flags if not f.passed and f.severity == "warn"]
         candidate_reasons = failed_block_ids + failed_warn_ids
+        # Give the LLM both the engine rule_id (for the structured
+        # ``principal_reasons`` output) AND a friendly label (so the
+        # body prose has natural language to anchor to). Without
+        # this the LLM tends to fall back to writing the rule_id in
+        # the body as ``"... (doc_completeness)"`` because it's the
+        # only string we showed it.
+        from mkopo.services.rules_eval import friendly_rule_label
+
         reason_block = "\n".join(
-            f"- {f.rule_id}: {f.message}" for f in flags if f.rule_id in candidate_reasons
+            (
+                f"- rule_id={f.rule_id} (friendly label for prose: "
+                f"\"{friendly_rule_label(f.rule_id)}\"): {f.message}"
+            )
+            for f in flags
+            if f.rule_id in candidate_reasons
         )
 
+        # Load every real identifier the AAL needs: the borrower's
+        # name, the loan reference + amount + property type, the
+        # institution's lender block + authorized officer + credit
+        # reporting agency. Threading these into the user message
+        # via the "Real identifiers" block is what lets the prompt
+        # forbid bracketed placeholders — same pattern the intake
+        # email already uses.
+        from mkopo.models import LoanParty, Party, PartyRole
+        from mkopo.services.institution import (
+            get_institution,
+            materials_block,
+        )
+
+        loan_id = uuid.UUID(state["loan_id"])
+        async with get_session() as session:
+            loan = (
+                await session.execute(select(Loan).where(Loan.id == loan_id))
+            ).scalar_one()
+            borrower_row = (
+                await session.execute(
+                    select(Party)
+                    .join(LoanParty, LoanParty.party_id == Party.id)
+                    .where(
+                        LoanParty.loan_id == loan_id,
+                        LoanParty.role == PartyRole.BORROWER,
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            institution = await get_institution(session)
+
+        applicant_name = (
+            borrower_row.name if borrower_row else "(applicant name not on file)"
+        )
+        # Property type is in extractions if intake ran; default to
+        # the loan_type as a degraded fallback so the prompt still
+        # has something to interpolate.
+        ext = state.get("extractions", {}) or {}
+        property_type = ext.get("property_type") or loan.loan_type.value
+
+        identifier_block = materials_block(institution)
+        # Compose the full user message: rules + rationale + the
+        # "Real identifiers" block at the top so the LLM treats it
+        # as the source of truth for letter values.
         dec_system = get_prompt("decision.decline_letter")
         dec_user = (
+            f"{identifier_block}\n"
+            f"- Applicant name: {applicant_name}\n"
+            f"- Loan reference: {loan.reference}\n"
+            f"- Requested loan amount: ${float(loan.amount):,.0f}\n"
+            f"- Property type: {property_type}\n\n"
             f"Verdict rationale: {drafted.rationale}\n\n"
             f"Failed rules (cite at least one in principal_reasons; reference "
             f"each cited reason by name in the body):\n{reason_block}\n\n"
-            "Subject line should be specific to the applicant and product."
+            "Subject line should be specific to the applicant and product. "
+            "Body must read as a finished letter — no [BRACKETED] placeholders "
+            "anywhere."
         )
         dec: _DraftedDecline = await gateway.call_structured(
             model=settings.llm_heavy_model,
@@ -344,6 +412,14 @@ async def persist(state: DecisionState) -> DecisionState:
         # start of this run; we update it here with the final payload.
         # UPDATE-by-id instead of INSERT keeps the row's id stable for
         # any AgentStep rows that already point at it.
+        # Persist the FULL Pydantic dump under ``result_json`` so the
+        # decision panel can rehydrate it on page reload without
+        # forcing the underwriter to re-run the agent (which wastes
+        # tokens and confuses users — "I already saw this verdict,
+        # where did it go?"). The summary keys above are kept for
+        # the eval / observability code paths that read them
+        # directly without unmarshalling the full DecisionResult.
+        result_json = decision.model_dump(mode="json")
         await session.execute(
             update(AgentRun)
             .where(AgentRun.id == decision.agent_run_id)
@@ -358,6 +434,7 @@ async def persist(state: DecisionState) -> DecisionState:
                     "has_term_sheet": decision.term_sheet is not None,
                     "has_aal": decision.adverse_action_letter is not None,
                     "materials_hash": materials_hash,
+                    "result_json": result_json,
                 },
             )
         )
@@ -414,6 +491,8 @@ async def build_decision_graph() -> AsyncIterator[Any]:
     builder.add_edge("draft_decision", "persist")
     builder.add_edge("persist", END)
 
-    async with AsyncPostgresSaver.from_conn_string(settings.database_url_libpq) as checkpointer:
+    async with AsyncPostgresSaver.from_conn_string(
+        settings.database_url_libpq, serde=make_serializer()
+    ) as checkpointer:
         await checkpointer.setup()
         yield builder.compile(checkpointer=checkpointer)

@@ -313,7 +313,19 @@ class LLMGateway:
         table can filter for tool-using calls cleanly.
         """
         call_id = call_id or str(uuid.uuid4())
-        tool_names = ",".join(t["name"] for t in tools) if tools else ""
+        # ``schema_name`` is VARCHAR(128) on llm_calls. With 8+ tools
+        # in the staff/borrower chat catalogs the joined names blow
+        # past that and the call's persist INSERT fails with
+        # StringDataRightTruncationError — taking down the chat turn
+        # even though the tool call itself succeeded. Cap at a safe
+        # margin under 128 (we prepend "tool_use:" later, ~10 chars).
+        schema_name_max = 110
+        all_names = ",".join(t["name"] for t in tools) if tools else ""
+        tool_names = (
+            (all_names[: schema_name_max - 1] + "…")
+            if len(all_names) > schema_name_max
+            else all_names
+        )
         started_at = time.monotonic()
         try:
             response: AnthropicMessage = await self._client.messages.create(
@@ -501,6 +513,13 @@ class LLMGateway:
                         # is part of mkopo.agents, whose package __init__
                         # imports decision.py which imports this gateway.
                         thread_id=_current_thread_id(),
+                        # ContextVar set by ``mkopo.services.prompts.get``.
+                        # Stamps the registry row that produced the
+                        # system prompt body. ``None`` for ad-hoc calls
+                        # that didn't go through the registry. The
+                        # observability page joins on this to surface
+                        # "which prompt version produced this call".
+                        prompt_version_id=_current_prompt_version_id_safe(),
                         # ``parent_step_id`` is intentionally left
                         # null here. The streaming layer's
                         # ``_persist_step`` writes the step row
@@ -529,6 +548,19 @@ def _current_thread_id() -> str | None:
     from mkopo.agents.context import current_thread_id
 
     return current_thread_id()
+
+
+def _current_prompt_version_id_safe() -> uuid.UUID | None:
+    """Lazy accessor for the active prompt version id ContextVar.
+    Wrapped in a defensive try/except so a botched import or a bare
+    in-process call (no registry loaded yet) doesn't break the
+    persist path — observability is best-effort by design."""
+    try:
+        from mkopo.services.prompts import current_prompt_version_id
+
+        return current_prompt_version_id()
+    except Exception:
+        return None
 
 
 def _truncate(s: str | None, max_len: int) -> str | None:

@@ -305,7 +305,7 @@ export default function PartyInspectorPage({ params }: PageProps) {
             <Skeleton width="w-64" height="h-3" />
           </div>
         </div>
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           {[0, 1, 2, 3].map((i) => (
             <div
               key={i}
@@ -385,7 +385,7 @@ export default function PartyInspectorPage({ params }: PageProps) {
         }
       />
 
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <div className="rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)]">
           <StatTile
             label="Active exposure"

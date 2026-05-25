@@ -25,7 +25,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/app/borrower/AuthProvider";
 import { DocumentViewer } from "@/app/components/DocumentViewer";
 import { ReauthPromptModal } from "@/app/components/ReauthPromptModal";
-import { humanizeDocType } from "@/lib/humanize";
+import { humanizeDocType, humanizeLoanType } from "@/lib/humanize";
 import { borrowerAuthApi } from "@/lib/borrowerApi";
 import { BorrowerChat } from "./BorrowerChat";
 
@@ -41,6 +41,11 @@ interface BorrowerStatus {
    *  right checklist (pay stubs / tax returns / ID for personal,
    *  appraisal / rent roll / operating statements for business). */
   loan_class: string;
+  /** Plain English loan type. The header subline uses this to read
+   *  "$50,000 personal loan" instead of just the reference number. */
+  loan_type: string;
+  /** Decimal as string so JS doesn't lose precision on large amounts. */
+  amount: string;
   /** Doc-type strings (``"loan_application"``, ``"tax_return"``,
    *  etc.) the rules engine will refuse to advance the loan without.
    *  Sorted alphabetically; the UI humanises them via humanizeDocType. */
@@ -52,6 +57,19 @@ interface BorrowerStatus {
     size_bytes: number;
     content_type: string;
   }[];
+}
+
+/** Format a decimal string as a USD currency amount (no fractional
+ *  cents — loan amounts are always whole dollars in our origination
+ *  flow). Falls through unchanged on unparseable strings. */
+function formatLoanAmount(amount: string): string {
+  const n = Number.parseFloat(amount);
+  if (!Number.isFinite(n)) return amount;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(n);
 }
 
 const STAGES = [
@@ -166,14 +184,31 @@ export default function ApplyStatusPage({
 
       {status && (
         <>
+          {/* Header card.
+              Reads top-to-bottom: small "Application" label →
+              loan amount in large display type → reference + class
+              row → next-step copy → submission timestamp.
+              The amount-first layout matches how a borrower thinks
+              about the deal ("my $50k loan") instead of how the
+              underwriting system thinks ("LN-2026-1016"). */}
           <header className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-5 py-4">
             <p className="text-[11px] uppercase tracking-wider text-[var(--color-text-tertiary)]">
               Application
             </p>
-            <p className="mt-1 text-[18px] font-medium tracking-tight">
-              {status.reference}
+            <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <p className="font-editorial text-[26px] tracking-tight text-[var(--color-text-primary)]">
+                {formatLoanAmount(status.amount)}
+              </p>
+              <p className="text-[12.5px] text-[var(--color-text-secondary)]">
+                {status.loan_class === "personal" ? "Personal" : "Business"}
+                {" · "}
+                {humanizeLoanType(status.loan_type)} loan
+              </p>
+            </div>
+            <p className="mt-1 text-[11px] text-[var(--color-text-tertiary)]">
+              Reference {status.reference}
             </p>
-            <p className="mt-2 text-[12.5px] leading-relaxed text-[var(--color-text-secondary)]">
+            <p className="mt-3 text-[12.5px] leading-relaxed text-[var(--color-text-secondary)]">
               {status.next_step}
             </p>
             <p className="mt-3 text-[11px] text-[var(--color-text-tertiary)]">

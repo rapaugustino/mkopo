@@ -33,11 +33,10 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mkopo.deps import CurrentBorrowerDep, DbSessionDep
+from mkopo.deps import CurrentBorrowerDep, DbSessionDep, OptionalBorrowerDep
 from mkopo.models import (
     AutonomyLevel,
     Document,
-    DocumentType,
     Loan,
     LoanClass,
     LoanParty,
@@ -49,6 +48,7 @@ from mkopo.models import (
 )
 from mkopo.services.audit import Actor, record
 from mkopo.services.ingest import embed_document
+from mkopo.services.loan_locks import raise_if_locked_for_documents
 from mkopo.services.pdf import extract_text as extract_pdf_text
 from mkopo.services.storage import get_storage
 
@@ -135,6 +135,13 @@ class BorrowerStatusOut(BaseModel):
     next_step: str
     submitted_at: str
     loan_class: str
+    # Plain-English loan type ("bridge", "term", "personal") — drives
+    # the header subline so the borrower sees "$50,000 personal loan"
+    # rather than a bare reference number. The frontend humanises it.
+    loan_type: str
+    # Decimal as string for cross-language fidelity. Frontend formats
+    # for the borrower's locale.
+    amount: str
     required_docs: list[str]
     documents: list[dict[str, Any]]
 
@@ -148,7 +155,10 @@ class BorrowerStatusOut(BaseModel):
     status_code=status.HTTP_201_CREATED,
 )
 async def borrower_apply(
-    payload: BorrowerApplyIn, response: Response, db: DbSessionDep
+    payload: BorrowerApplyIn,
+    response: Response,
+    db: DbSessionDep,
+    current_borrower: OptionalBorrowerDep,
 ) -> BorrowerApplyOut:
     """Create a new loan from a borrower-facing application.
 
@@ -189,40 +199,76 @@ async def borrower_apply(
         )
     email = payload.borrower.email.lower().strip()
 
-    # Refuse if there's already an account for this email. The user
-    # should sign in first; we return 409 so the frontend can route
-    # them to /login. We do NOT auto-link to an existing user from
-    # an unauthenticated request — that would let anyone open new
-    # applications under someone else's identity.
-    existing_user = (
-        await db.execute(select(UserModel).where(UserModel.email == email))
-    ).scalar_one_or_none()
-    if existing_user is not None:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "An account with that email already exists — please sign in to "
-            "submit another application.",
+    # Three branches depending on who's submitting:
+    #
+    # 1. Authenticated borrower whose email matches the payload
+    #    → reuse their existing account, no password / collision check.
+    #    This is the "I signed up, then went to /apply" path that was
+    #    incorrectly hitting the 409 below before — the previous code
+    #    didn't look at the cookie at all.
+    #
+    # 2. Authenticated borrower whose email DOESN'T match the payload
+    #    → reject. Sponsoring an application under a different email
+    #    while signed in is ambiguous (whose loan is this?) and a
+    #    likely typo. The user should either sign out or correct
+    #    the email on the form.
+    #
+    # 3. Anonymous request
+    #    a. Email already has an account → 409, frontend routes to
+    #       /login. We do NOT auto-link to an existing user from an
+    #       anonymous request — that would let anyone open new
+    #       applications under someone else's identity.
+    #    b. Email is fresh → create a new borrower account using the
+    #       payload's password (or magic-link-only if absent).
+    if current_borrower is not None:
+        if current_borrower.email.lower().strip() != email:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "You're signed in as a different borrower. Sign out first or "
+                "use your account's email on the application.",
+            )
+        borrower_user = current_borrower
+    else:
+        existing_user = (
+            await db.execute(select(UserModel).where(UserModel.email == email))
+        ).scalar_one_or_none()
+        if existing_user is not None:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "An account with that email already exists — please sign in to "
+                "submit another application.",
+            )
+        # New borrower user. Password is optional in the apply payload
+        # for Phase 1b's "magic-link-first" UX; if absent, the account
+        # is magic-link-only until the borrower sets a password from
+        # their dashboard.
+        # Note the explicit truthy check on a local — mypy can't
+        # narrow ``Optional[str]`` through ``getattr`` so we pull
+        # the value out first.
+        raw_password = payload.borrower_password
+        borrower_user = UserModel(
+            email=email,
+            name=payload.borrower.name or email.split("@", 1)[0],
+            role="borrower",
+            password_hash=hash_password(raw_password) if raw_password else None,
         )
-
-    # New borrower user. Password is optional in the apply payload
-    # for Phase 1b's "magic-link-first" UX; if absent, the account
-    # is magic-link-only until the borrower sets a password from
-    # their dashboard.
-    borrower_user = UserModel(
-        email=email,
-        name=payload.borrower.name or email.split("@", 1)[0],
-        role="borrower",
-        password_hash=hash_password(payload.borrower_password)
-        if getattr(payload, "borrower_password", None)
-        else None,
-    )
-    db.add(borrower_user)
-    await db.flush()
+        db.add(borrower_user)
+        await db.flush()
 
     try:
         klass = LoanClass(payload.loan_class)
     except ValueError:
         klass = LoanClass.BUSINESS
+
+    # Auto-assign the first available staff user as the loan owner.
+    # Without this the case file lands with "Owner: — Unassigned" and
+    # downstream actions that key off the owner (autonomous-mode
+    # chaining, owner-scoped notifications) have no one to attribute
+    # to. The borrower can't choose their own underwriter, so we pick
+    # one deterministically — see services/loans.pick_default_owner.
+    from mkopo.services.loans import pick_default_owner
+
+    default_owner_id = await pick_default_owner(db)
 
     loan = Loan(
         loan_type=payload.loan_type,
@@ -230,6 +276,7 @@ async def borrower_apply(
         amount=payload.amount,
         stage=LoanStage.INTAKE,
         autonomy_level=AutonomyLevel.ASSISTED,
+        owner_user_id=default_owner_id,
         meta={
             "borrower_email": payload.borrower.email,
             "borrower_submitted_via_portal": True,
@@ -302,19 +349,22 @@ async def borrower_apply(
     # Sign the new borrower in immediately by setting the session
     # cookie. Their next request to /borrower-portal/loans/{id}/status
     # or /borrower-portal/loans/{id}/documents will then carry the
-    # cookie and pass the ownership gate.
-    from mkopo.config import get_settings as _get_settings
+    # cookie and pass the ownership gate. For already-signed-in
+    # borrowers we skip this — their existing cookie still works,
+    # and minting a new jti would orphan the old one in Redis.
+    if current_borrower is None:
+        from mkopo.config import get_settings as _get_settings
 
-    settings = _get_settings()
-    response.set_cookie(
-        key=SESSION_COOKIE,
-        value=issue_jwt(borrower_user),
-        max_age=settings.jwt_session_ttl_seconds,
-        httponly=True,
-        samesite="lax",
-        secure=settings.is_production,
-        path="/",
-    )
+        settings = _get_settings()
+        response.set_cookie(
+            key=SESSION_COOKIE,
+            value=issue_jwt(borrower_user),
+            max_age=settings.jwt_session_ttl_seconds,
+            httponly=True,
+            samesite="lax",
+            secure=settings.is_production,
+            path="/",
+        )
 
     return BorrowerApplyOut(
         loan_id=loan.id,
@@ -390,6 +440,12 @@ async def borrower_upload_document(
     if not file.filename:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Filename required")
 
+    # Stage lock — borrowers see the same gate staff do. Uploads
+    # stay open through ``conditions`` so a borrower satisfying
+    # outstanding requirements can upload a fresh paystub; anything
+    # past that is frozen.
+    raise_if_locked_for_documents(loan.stage)
+
     body = await file.read()
     content_type = file.content_type or "application/octet-stream"
 
@@ -413,10 +469,17 @@ async def borrower_upload_document(
 
     import hashlib
 
+    # Classify by filename at upload time so the status-page checklist
+    # (filename heuristic) and the stage-transition prereq check
+    # (doc_type query) agree on what's present. The intake agent's
+    # content extractor can override this later if the file body
+    # disagrees with the name.
+    from mkopo.services.doc_classify import classify_from_filename
+
     document = Document(
         loan_id=loan_id,
         filename=file.filename,
-        doc_type=DocumentType.UNKNOWN,
+        doc_type=classify_from_filename(file.filename),
         storage_uri=uri,
         content_type=content_type,
         size_bytes=len(body),
@@ -497,6 +560,10 @@ async def borrower_status(
         next_step=_next_step_for_borrower(loan.stage),
         submitted_at=loan.created_at.isoformat(),
         loan_class=loan_class_str,
+        loan_type=loan.loan_type.value
+        if hasattr(loan.loan_type, "value")
+        else str(loan.loan_type),
+        amount=str(loan.amount),
         required_docs=sorted(required),
         documents=[
             {
