@@ -36,12 +36,18 @@ from decimal import Decimal
 from typing import Any, TypedDict
 
 import structlog
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select, update
 
-from mkopo.agents._serde import make_serializer
+from mkopo.agents._base import build_compiled_graph
+from mkopo.agents.guardrails import (
+    ADVERSE_ACTION_LETTER_CONSTITUTION,
+    DECISION_VERDICT_CONSTITUTION,
+    JudgmentSpec,
+    make_validator_node,
+    make_validator_router,
+)
 from mkopo.config import get_settings
 from mkopo.db import get_session
 from mkopo.llm_gateway import get_gateway
@@ -69,6 +75,18 @@ class DecisionState(TypedDict, total=False):
     rule_outcomes: list[RiskFlag]
     decision: DecisionResult | None
     agent_run_id: str
+    # Self-correction loop bookkeeping. See :mod:`agents.guardrails`
+    # for the pattern (Constitutional AI + LLM-as-Judge + Self-Refine).
+    # ``validation_attempts`` is incremented on each draft_decision
+    # invocation so the conditional edge knows when to give up.
+    # ``last_critique`` is the previous judgment's critique text; the
+    # drafter includes it in the next attempt's prompt so the LLM has
+    # concrete guidance on what to change. ``last_judgment`` is the
+    # most recent verdict — persisted onto agent_runs.payload so the
+    # observability page can render it.
+    validation_attempts: int
+    last_critique: str | None
+    last_judgment: dict | None
 
 
 # --- LLM output schemas (separate from the persisted DecisionResult so the
@@ -225,6 +243,21 @@ async def draft_decision(state: DecisionState) -> DecisionState:
         "headline and the rationale only needs to enumerate the "
         "decisive rule outcomes and one or two risk-mitigant notes)."
     )
+    # Self-Refine pattern (Madaan et al. 2023): if the previous
+    # attempt was rejected by the guardrail judge, fold its critique
+    # into the prompt so the new draft can target the failure.
+    # ``last_critique`` is set by the validate_decision node when
+    # it loops back here; on the first attempt it's None and this
+    # block is a no-op.
+    last_critique = state.get("last_critique")
+    if last_critique:
+        user_path += (
+            "\n\nIMPORTANT — previous draft was rejected by the "
+            "guardrail judge:\n"
+            f"\"{last_critique}\"\n\n"
+            "Revise to address the specific failure above. Do not "
+            "repeat the same mistake."
+        )
     drafted: _DraftedDecision = await gateway.call_structured(
         model=settings.llm_heavy_model,
         system=system_path,
@@ -372,7 +405,88 @@ async def draft_decision(state: DecisionState) -> DecisionState:
         generated_at=datetime.now(UTC),
         agent_run_id=uuid.UUID(state.get("agent_run_id", str(uuid.uuid4()))),
     )
-    return {**state, "decision": decision}
+    # Bump the attempt counter. The validator reads this to decide
+    # when to stop retrying (max set by MAX_VALIDATION_ATTEMPTS).
+    attempts = state.get("validation_attempts", 0) + 1
+    return {**state, "decision": decision, "validation_attempts": attempts}
+
+
+# --- Self-correction loop (LLM-as-judge + Self-Refine) -----------------------
+#
+# The validator node + the conditional-edge router are both built
+# from factories in :mod:`agents.guardrails` so the intake and
+# underwriting agents can reuse the same loop pattern. See the
+# module docstring there for the rationale.
+
+
+def _decision_judge_context(state: DecisionState) -> str:
+    """Shared context block for both the verdict and AAL judges.
+
+    Mirrors the drafter's ``Real identifiers`` block so the judge
+    has the same source of truth for principles like "addressed by
+    name". The block lists rule outcomes (so the judge can verify
+    the rationale references them) plus the path + confidence the
+    drafter chose.
+    """
+    decision = state.get("decision")
+    flags = state.get("rule_outcomes", []) or []
+    rules_summary = "\n".join(
+        f"- {f.rule_id} (severity={f.severity}, passed={f.passed}): {f.message}"
+        for f in flags
+    )
+    path = decision.path if decision else "(no decision)"
+    confidence = decision.confidence if decision else "(no decision)"
+    return (
+        f"Loan rule outcomes:\n{rules_summary}\n\n"
+        f"Decision path chosen: {path}\n"
+        f"Confidence: {confidence}\n"
+    )
+
+
+def _extract_verdict_text(state: DecisionState) -> str | None:
+    """Verdict text is judged on every path."""
+    decision = state.get("decision")
+    if decision is None:
+        return None
+    return (
+        f"Verdict: {decision.verdict_text}\n\nRationale: {decision.rationale}"
+    )
+
+
+def _extract_aal_text(state: DecisionState) -> str | None:
+    """AAL text is only judged when present (decline path only)."""
+    decision = state.get("decision")
+    if decision is None or decision.adverse_action_letter is None:
+        return None
+    aal = decision.adverse_action_letter
+    return f"Subject: {aal.subject}\n\n{aal.body_text}"
+
+
+# Validator node: runs both judgments, picks the worst severity,
+# writes ``last_judgment`` + ``last_critique`` back into state.
+# Built once at import time and used as a regular LangGraph node.
+validate_decision = make_validator_node(
+    (
+        JudgmentSpec(
+            constitution=DECISION_VERDICT_CONSTITUTION,
+            extract_text=_extract_verdict_text,
+            extract_context=_decision_judge_context,
+        ),
+        JudgmentSpec(
+            constitution=ADVERSE_ACTION_LETTER_CONSTITUTION,
+            extract_text=_extract_aal_text,
+            extract_context=_decision_judge_context,
+        ),
+    )
+)
+
+
+# Router: block → loop back to draft_decision (bounded by
+# MAX_VALIDATION_ATTEMPTS); ok/warn → persist.
+route_after_validate = make_validator_router(
+    retry_node="draft_decision",
+    persist_node="persist",
+)
 
 
 async def persist(state: DecisionState) -> DecisionState:
@@ -435,6 +549,14 @@ async def persist(state: DecisionState) -> DecisionState:
                     "has_aal": decision.adverse_action_letter is not None,
                     "materials_hash": materials_hash,
                     "result_json": result_json,
+                    # Guardrail judgment — captured by validate_decision.
+                    # Lands on the observability page so the reviewer can
+                    # see whether the constitutional judge passed/warned/
+                    # gave up on this draft + the critique it produced.
+                    "guardrail_judgment": state.get("last_judgment"),
+                    "validation_attempts": state.get(
+                        "validation_attempts", 0
+                    ),
                 },
             )
         )
@@ -466,11 +588,14 @@ async def persist(state: DecisionState) -> DecisionState:
 @asynccontextmanager
 async def build_decision_graph() -> AsyncIterator[Any]:
     """Yield a compiled decision agent graph. Same context-manager pattern as the others."""
-    settings = get_settings()
-
     builder: StateGraph = StateGraph(DecisionState)
     builder.add_node("fetch_and_evaluate", fetch_and_evaluate)
     builder.add_node("draft_decision", draft_decision)
+    # Validator node — runs the LLM-as-judge with the constitution.
+    # Sits between draft and persist; on block-severity failure the
+    # conditional edge routes back to draft_decision (Self-Refine),
+    # bounded by MAX_VALIDATION_ATTEMPTS.
+    builder.add_node("validate_decision", validate_decision)
     builder.add_node("persist", persist)
 
     builder.add_edge(START, "fetch_and_evaluate")
@@ -488,11 +613,16 @@ async def build_decision_graph() -> AsyncIterator[Any]:
         route_after_eval,
         {END: END, "draft_decision": "draft_decision"},
     )
-    builder.add_edge("draft_decision", "persist")
+    # draft → validate → (persist | back to draft). The conditional
+    # edge is the entire self-correction mechanism — no special-case
+    # loop construct needed; LangGraph supports cycles natively.
+    builder.add_edge("draft_decision", "validate_decision")
+    builder.add_conditional_edges(
+        "validate_decision",
+        route_after_validate,
+        {"draft_decision": "draft_decision", "persist": "persist"},
+    )
     builder.add_edge("persist", END)
 
-    async with AsyncPostgresSaver.from_conn_string(
-        settings.database_url_libpq, serde=make_serializer()
-    ) as checkpointer:
-        await checkpointer.setup()
-        yield builder.compile(checkpointer=checkpointer)
+    async with build_compiled_graph(builder) as graph:
+        yield graph

@@ -20,7 +20,10 @@
  * three (routers + two readers).
  */
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-const DEV_TOKEN = process.env.NEXT_PUBLIC_DEV_TOKEN || "dev-token-replace-me";
+// Both surfaces are cookie-based now. Borrower side: mkopo_session
+// (set by /borrower-auth/login). Staff side: mkopo_staff_session
+// (set by /staff/auth/login). Always include credentials so the
+// browser carries whichever cookie applies.
 
 // ---- event shapes --------------------------------------------------------
 
@@ -137,20 +140,36 @@ export async function* streamAgentChat(
     "Content-Type": "application/json",
     Accept: "text/event-stream",
   };
-  if (args.auth === "bearer") {
-    headers.Authorization = `Bearer ${DEV_TOKEN}`;
-  }
 
   const init: RequestInit = {
     method: "POST",
+    credentials: "include",
     headers,
     body: JSON.stringify(body),
   };
-  if (args.auth === "cookie") {
-    init.credentials = "include";
-  }
+  // ``auth`` is kept on the type signature for back-compat with
+  // existing call sites (borrower vs staff), but both surfaces are
+  // cookie-based now so the only thing it determines is which
+  // cookie name the browser ends up sending — the request shape
+  // is identical.
 
   const res = await fetch(`${API_URL}/api/v1${args.path}`, init);
+  if (res.status === 401 && typeof window !== "undefined") {
+    // Session expired — bounce. Borrower-portal pages stay on
+    // /login (the borrower login flow lives there); staff pages
+    // go to /staff/login.
+    const onBorrowerSurface =
+      window.location.pathname.startsWith("/account") ||
+      window.location.pathname.startsWith("/apply") ||
+      window.location.pathname === "/login" ||
+      window.location.pathname.startsWith("/signup");
+    const target = onBorrowerSurface ? "/login" : "/staff/login";
+    const next = encodeURIComponent(
+      window.location.pathname + window.location.search,
+    );
+    window.location.href = `${target}?next=${next}`;
+    throw new Error("Not authenticated");
+  }
   if (!res.ok || !res.body) {
     throw new Error(`Chat stream ${res.status}: ${await res.text()}`);
   }

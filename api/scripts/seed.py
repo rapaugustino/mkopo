@@ -1283,8 +1283,44 @@ async def seed(reset: bool = False) -> None:
         existing = await session.execute(select(User).where(User.email == "j.davis@mkopo.dev"))
         davis = existing.scalar_one_or_none()
         if davis is None:
-            davis = User(name="Jordan Davis", email="j.davis@mkopo.dev", role="underwriter")
+            # Seed staff users with a known password so the staff login
+            # page works out of the box. ``davis`` is the underwriter
+            # owning every seeded loan; ``admin@mkopo.dev`` exists so
+            # admin-only paths are also walkthrough-able.
+            #
+            # The credentials are documented in the README; rotate via
+            # ``UPDATE users SET password_hash = ...`` or, in production,
+            # don't seed at all and create staff users via the admin
+            # console (TODO when that ships).
+            from mkopo.services.auth_service import hash_password
+
+            seed_password_hash = hash_password("password123")
+            davis = User(
+                name="Jordan Davis",
+                email="j.davis@mkopo.dev",
+                role="underwriter",
+                password_hash=seed_password_hash,
+            )
             session.add(davis)
+            await session.flush()
+
+        # Admin seed — only created if absent, never mutated. The role
+        # check on /staff/auth/login admits both 'underwriter' and
+        # 'admin', so having both makes role-gated demos easier.
+        admin_existing = await session.execute(
+            select(User).where(User.email == "admin@mkopo.dev")
+        )
+        if admin_existing.scalar_one_or_none() is None:
+            from mkopo.services.auth_service import hash_password
+
+            session.add(
+                User(
+                    name="Mkopo Admin",
+                    email="admin@mkopo.dev",
+                    role="admin",
+                    password_hash=hash_password("password123"),
+                )
+            )
             await session.flush()
 
         created: list[Loan] = []

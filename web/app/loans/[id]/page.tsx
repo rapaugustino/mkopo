@@ -26,6 +26,7 @@ import { MaterialsFlow } from "./MaterialsFlow";
 import { StaffChat } from "./StaffChat";
 import { BrandHeader } from "@/app/components/BrandHeader";
 import { PrimaryButton } from "@/app/components/PrimaryButton";
+import { SafetyChip } from "@/app/components/SafetyChip";
 import { SecondaryButton } from "@/app/components/SecondaryButton";
 import { Skeleton } from "@/app/components/Skeleton";
 import { StagePill } from "@/app/components/StagePill";
@@ -435,6 +436,11 @@ export default function LoanPage({ params }: PageProps) {
           <span className="flex items-center gap-1.5">
             <StagePill stage={loan.stage} />
             <AutonomyToggle loan={loan} />
+            {/* SafetyChip renders only when there's something to
+                surface (1+ flagged or blocked detection on this
+                loan). Silent on the happy path so the header
+                stays clean. */}
+            <SafetyChip loanId={loan.id} />
           </span>
         }
         actions={

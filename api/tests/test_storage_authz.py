@@ -141,7 +141,7 @@ class TestLocalStorageEnforcement:
         with pytest.raises(StorageAuthzError):
             _run(self.storage.presigned_url(uri, expected_loan_id=other_loan))
 
-    def test_presigned_url_matches_returns_uri(self):
+    def test_presigned_url_matches_returns_http_proxy_url(self):
         uri = _run(
             self.storage.put_object(
                 loan_id=self.loan,
@@ -151,9 +151,20 @@ class TestLocalStorageEnforcement:
             )
         )
         url = _run(self.storage.presigned_url(uri, expected_loan_id=self.loan))
-        # LocalStorage just returns the file:// URI; what matters is
-        # that the check passes without raising.
-        assert url == uri
+        # What matters for this test is that:
+        #   (a) the authz check passed (no StorageAuthzError raised); and
+        #   (b) we got back an HTTP proxy URL the in-app DocumentViewer
+        #       can iframe — browsers refuse to load ``file://`` from
+        #       ``http://`` pages, so LocalStorage mints a short-lived
+        #       JWT for ``/api/v1/storage/local/<token>``.
+        # If this URL shape changes, also update the matching proxy
+        # route handler in routers/storage.py.
+        assert url.startswith("http"), (
+            f"presigned_url should return an HTTP proxy URL; got {url!r}"
+        )
+        assert "/api/v1/storage/local/" in url, (
+            "expected the local-proxy path segment in the URL"
+        )
 
 
 def _ensure_db_env():

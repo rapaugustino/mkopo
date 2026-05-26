@@ -24,6 +24,12 @@ from mkopo.models.document import (
 from mkopo.models.embedding import DocumentChunk
 from mkopo.models.errors import InfrastructureError
 from mkopo.models.eval import LLMCall, TaskRun, ToolUse
+from mkopo.models.injection import (
+    InjectionDecision,
+    InjectionDetection,
+    InjectionSeverity,
+    InjectionSourceKind,
+)
 from mkopo.models.institution import SINGLETON_ID as INSTITUTION_SINGLETON_ID
 from mkopo.models.institution import InstitutionSettings
 from mkopo.models.loan import (
@@ -60,6 +66,10 @@ __all__ = [
     "ExtractionStatus",
     "INSTITUTION_SINGLETON_ID",
     "InfrastructureError",
+    "InjectionDecision",
+    "InjectionDetection",
+    "InjectionSeverity",
+    "InjectionSourceKind",
     "InstitutionSettings",
     "LLMCall",
     "Loan",

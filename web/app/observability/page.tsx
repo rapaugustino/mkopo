@@ -29,6 +29,7 @@ import { Pill, type PillVariant } from "@/app/components/Pill";
 import { SectionLabel } from "@/app/components/SectionLabel";
 import { Skeleton } from "@/app/components/Skeleton";
 import { StatTile } from "@/app/components/StatTile";
+import { SafetyPanel } from "@/app/safety/SafetyPanel";
 import { AgentRunDrawer } from "./AgentRunDrawer";
 import { LLMCallDrawer } from "./LLMCallDrawer";
 
@@ -296,6 +297,29 @@ export default function ObservabilityPage() {
         ) : (
           <RowSkeletons />
         )}
+      </div>
+
+      {/* Safety section — compact view of the same data the dedicated
+          /safety dashboard renders. Five-tile KPI strip + most-recent
+          rows. Deep-dive goes to /safety. The full panel + drawer
+          live there so we don't duplicate the row-click behaviour
+          here. */}
+      <div className="rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] p-3">
+        <SectionLabel
+          trailing={
+            <a
+              href="/safety"
+              className="text-[11px] text-[var(--color-brand)] hover:underline"
+            >
+              Open Safety dashboard →
+            </a>
+          }
+        >
+          Safety
+        </SectionLabel>
+        <div className="mt-3">
+          <SafetyPanel windowHours={windowHours} compact />
+        </div>
       </div>
 
       {/* Drill-in drawers. All three mount at the page root so the

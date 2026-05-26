@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { BorrowerShell } from "./BorrowerShell";
 import { CommandPalette } from "./CommandPalette";
 import { GlobalNav } from "./GlobalNav";
+import { UserMenu } from "./UserMenu";
 
 interface Props {
   children: React.ReactNode;
@@ -97,6 +98,9 @@ export function AppShell({ children }: Props) {
     "/forgot-password",
     "/reset-password",
     "/auth",
+    // Staff console login — distinct from the borrower /login above.
+    // Centred-card layout that doesn't want the shell chrome.
+    "/staff/login",
   ];
   if (
     STANDALONE_PATHS.some(
@@ -171,6 +175,11 @@ export function AppShell({ children }: Props) {
               </kbd>
             </span>
           </button>
+          {/* Signed-in user pill — shows name + role, with a logout
+              option in the dropdown. Renders null when there's no
+              authed user (the API helper handles the redirect to
+              /staff/login). */}
+          <UserMenu />
         </div>
       </nav>
       {/* Main content — 1440px max instead of 1280px. Wider monitors

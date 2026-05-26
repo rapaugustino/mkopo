@@ -1,5 +1,37 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-const DEV_TOKEN = process.env.NEXT_PUBLIC_DEV_TOKEN || "dev-token-replace-me";
+
+/**
+ * Staff auth is cookie-based (httpOnly ``mkopo_staff_session``) issued
+ * by POST /staff/auth/login. ``credentials: 'include'`` on every fetch
+ * is what tells the browser to send it cross-origin (dev: localhost:3000
+ * → localhost:8000).
+ *
+ * On a 401 the request helper redirects to /login (preserving the
+ * intended destination). This is the cleanest way to wire "session
+ * expired" without an auth context spilling across every component —
+ * the redirect happens at the API boundary, not at every render site.
+ */
+function redirectToLogin(): void {
+  if (typeof window === "undefined") return;
+  const here = window.location.pathname + window.location.search;
+  // Don't bounce in a redirect loop if we're already on /staff/login.
+  if (window.location.pathname.startsWith("/staff/login")) return;
+  // Don't intercept borrower-portal pages — those use their own
+  // /login (borrower login) and /apply flows. The borrower paths
+  // never call into the staff ``api.*`` client, so this is mostly
+  // defensive.
+  if (
+    window.location.pathname.startsWith("/account") ||
+    window.location.pathname.startsWith("/apply") ||
+    window.location.pathname === "/login" ||
+    window.location.pathname.startsWith("/signup") ||
+    window.location.pathname.startsWith("/forgot-password")
+  ) {
+    return;
+  }
+  const next = encodeURIComponent(here);
+  window.location.href = `/staff/login?next=${next}`;
+}
 
 export type LoanStage =
   | "intake"
@@ -188,12 +220,19 @@ export interface RulesPreview {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}/api/v1${path}`, {
     ...init,
+    credentials: "include",
     headers: {
-      Authorization: `Bearer ${DEV_TOKEN}`,
       "Content-Type": "application/json",
       ...init?.headers,
     },
   });
+  if (res.status === 401) {
+    // Session expired or never authenticated — bounce to login.
+    // Throws after redirect so callers' .then/.catch don't fire on
+    // a stale response shape.
+    redirectToLogin();
+    throw new Error("Not authenticated");
+  }
   if (!res.ok) {
     throw new Error(`API ${res.status}: ${await res.text()}`);
   }
@@ -744,6 +783,101 @@ export interface AgentSummary {
   recent: AgentRunRow[];
 }
 
+// ---- Staff auth --------------------------------------------------------
+
+export interface StaffMe {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+}
+
+export interface StaffLoginResponse {
+  token: string;
+  expires_in_seconds: number;
+  user: StaffMe;
+}
+
+// ---- Safety dashboard --------------------------------------------------
+//
+// Input-side injection detections (hybrid pattern + Haiku) + output-
+// side constitutional judge rollups. Backed by /api/v1/safety/*.
+
+export interface InjectionDetectionRow {
+  id: string;
+  created_at: string;
+  loan_id: string | null;
+  source_kind:
+    | "document"
+    | "chat_message"
+    | "inbound_email"
+    | "borrower_application";
+  source_id: string | null;
+  severity: "low" | "medium" | "high";
+  decision: "allowed" | "flagged" | "blocked";
+  llm_judge_called: boolean;
+  llm_judge_severity: "low" | "medium" | "high" | null;
+  actor_kind: string;
+  actor_id: string | null;
+  n_patterns: number;
+}
+
+export interface InjectionDetectionDetail extends InjectionDetectionRow {
+  matched_patterns: Array<{
+    pattern_id: string;
+    description: string;
+    severity_floor: string;
+    span_start: number;
+    span_end: number;
+    matched_text: string;
+  }>;
+  llm_judge_critique: string | null;
+  raw_text_excerpt: string;
+}
+
+export interface PatternHitCount {
+  pattern_id: string;
+  description: string;
+  hits: number;
+  severity_floor: string;
+}
+
+export interface SafetySummary {
+  window_hours: number;
+  total_scanned: number;
+  total_allowed: number;
+  total_flagged: number;
+  total_blocked: number;
+  by_severity: Record<string, number>;
+  by_source_kind: Record<string, number>;
+  pattern_top: PatternHitCount[];
+  llm_judge_calls: number;
+  cost_estimate_usd: number;
+  recent: InjectionDetectionRow[];
+}
+
+export interface JudgmentRow {
+  agent_run_id: string;
+  agent_name: string;
+  loan_id: string;
+  started_at: string;
+  severity: "ok" | "warn" | "block";
+  attempts: number;
+  failed_principles: string[];
+  failed_red_lines: string[];
+  critique: string | null;
+  constitution_hint: string;
+}
+
+export interface JudgmentSummary {
+  window_hours: number;
+  total_judgments: number;
+  by_severity: Record<string, number>;
+  by_agent: Record<string, number>;
+  retry_distribution: Record<string, number>;
+  rows: JudgmentRow[];
+}
+
 export const api = {
   listLoans: () => request<Loan[]>("/loans"),
   getLoan: (id: string) => request<Loan>(`/loans/${id}`),
@@ -858,14 +992,19 @@ export const api = {
   uploadDocument: async (loanId: string, file: File): Promise<UploadResult> => {
     // FormData with file payload — different from JSON requests, so we
     // hit fetch directly rather than the `request<T>()` helper (which
-    // forces Content-Type: application/json).
+    // forces Content-Type: application/json). ``credentials: 'include'``
+    // carries the staff session cookie so the backend can authenticate.
     const form = new FormData();
     form.append("file", file);
     const res = await fetch(`${API_URL}/api/v1/loans/${loanId}/documents`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${DEV_TOKEN}` },
+      credentials: "include",
       body: form,
     });
+    if (res.status === 401) {
+      redirectToLogin();
+      throw new Error("Not authenticated");
+    }
     if (!res.ok) throw new Error(`Upload ${res.status}: ${await res.text()}`);
     return (await res.json()) as UploadResult;
   },
@@ -926,6 +1065,63 @@ export const api = {
     request<InfrastructureErrorSummary>(`/observability/errors?hours=${hours}`),
   getErrorDetail: (errorId: string) =>
     request<InfrastructureErrorDetail>(`/observability/errors/${errorId}`),
+  // ---- Staff auth -----------------------------------------------------
+  /** Resolve the current staff user from the session cookie. 401 if
+   *  not signed in — the ``request<T>`` helper handles the redirect
+   *  to /login. Used by the AuthGate and the header user menu. */
+  getStaffMe: () => request<StaffMe>(`/staff/auth/me`),
+  /** Exchange email + password for a session cookie. Returns the
+   *  user payload on success; throws on 401 with a generic message. */
+  staffLogin: (email: string, password: string) =>
+    request<StaffLoginResponse>(`/staff/auth/login`, {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    }),
+  /** Clear the cookie + revoke the JTI server-side. */
+  staffLogout: () =>
+    request<void>(`/staff/auth/logout`, { method: "POST" }),
+  // ---- Safety dashboard -----------------------------------------------
+  /** Top-of-page rollup for /safety. Drives the StatTiles, the
+   *  severity histogram, the source-kind pie, and the pattern
+   *  top-N. */
+  getSafetySummary: (hours = 24, recentLimit = 25) =>
+    request<SafetySummary>(
+      `/safety/summary?hours=${hours}&recent_limit=${recentLimit}`,
+    ),
+  /** Filterable list of recent detections — the bottom-of-page
+   *  table. ``severity`` / ``decision`` / ``source_kind`` are
+   *  server-side filters. */
+  listInjectionDetections: (params: {
+    hours?: number;
+    severity?: string;
+    decision?: string;
+    source_kind?: string;
+    limit?: number;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params.hours) qs.set("hours", String(params.hours));
+    if (params.severity) qs.set("severity", params.severity);
+    if (params.decision) qs.set("decision", params.decision);
+    if (params.source_kind) qs.set("source_kind", params.source_kind);
+    if (params.limit) qs.set("limit", String(params.limit));
+    return request<InjectionDetectionRow[]>(
+      `/safety/detections?${qs.toString()}`,
+    );
+  },
+  /** Drawer payload — full matched-patterns + Haiku critique +
+   *  raw excerpt. */
+  getInjectionDetectionDetail: (id: string) =>
+    request<InjectionDetectionDetail>(`/safety/detections/${id}`),
+  /** All-time detections for one loan — powers the loan-detail
+   *  SafetyChip + the per-loan inspector. */
+  getLoanInjectionDetections: (loanId: string) =>
+    request<InjectionDetectionRow[]>(`/safety/loans/${loanId}/detections`),
+  /** Output-side guardrail rollup — every agent run whose payload
+   *  carried a guardrail_judgment from the constitutional judge. */
+  getJudgmentSummary: (hours = 24, limit = 100) =>
+    request<JudgmentSummary>(
+      `/safety/judgments?hours=${hours}&limit=${limit}`,
+    ),
   // ---- Prompts ----
   /** List every registered prompt with its current active version. */
   listPrompts: () => request<PromptSummary[]>(`/prompts`),

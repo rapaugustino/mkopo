@@ -16,13 +16,18 @@ from contextlib import asynccontextmanager
 from typing import Any, Literal, TypedDict
 
 import structlog
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from mkopo.agents._serde import make_serializer
+from mkopo.agents._base import build_compiled_graph
+from mkopo.agents.guardrails import (
+    INTAKE_DOC_REQUEST_CONSTITUTION,
+    JudgmentSpec,
+    make_validator_node,
+    make_validator_router,
+)
 from mkopo.config import get_settings
 from mkopo.db import get_session
 from mkopo.llm_gateway import get_gateway
@@ -115,6 +120,15 @@ class IntakeState(TypedDict, total=False):
     draft_email: dict[str, str] | None  # subject + body
     final_email: dict[str, str] | None  # after HITL approval
     status: Literal["running", "awaiting_approval", "complete", "failed"]
+    # Self-Refine loop bookkeeping (see :mod:`agents.guardrails`).
+    # ``validation_attempts`` is incremented inside ``draft_doc_request``
+    # so the router can bound retries. ``last_critique`` is the prior
+    # judge's critique text — the drafter folds it into the next prompt
+    # so the new email targets the specific failure. ``last_judgment``
+    # is persisted into the agent_runs payload for observability.
+    validation_attempts: int
+    last_critique: str | None
+    last_judgment: dict | None
 
 
 # --- Structured outputs for the email drafting step ---
@@ -408,17 +422,82 @@ async def draft_doc_request(state: IntakeState) -> IntakeState:
         f"Tone: professional, friendly. Length: ≤120 words. "
         f"Subject line should be specific and include the loan reference."
     )
+    # Self-Refine: if the previous draft was rejected by the judge,
+    # append its critique so the new draft can target the failure.
+    last_critique = state.get("last_critique")
+    if last_critique:
+        user += (
+            "\n\nIMPORTANT — the previous draft was rejected by the "
+            "guardrail judge:\n"
+            f'"{last_critique}"\n\n'
+            "Revise to address the specific failure above. Do not "
+            "repeat the same mistake."
+        )
     drafted = await gateway.call_structured(
         model=settings.llm_default_model,
         system=system,
         user=user,
         schema=DraftedEmail,
     )
+    # Bump the attempt counter so the validator router knows when to
+    # stop retrying. Mirrors decision.draft_decision's pattern.
+    attempts = state.get("validation_attempts", 0) + 1
     return {
         **state,
         "draft_email": {"subject": drafted.subject, "body_text": drafted.body_text},
         "status": "awaiting_approval",
+        "validation_attempts": attempts,
     }
+
+
+# --- Self-correction loop (LLM-as-judge + Self-Refine) -----------------------
+#
+# The validator runs only when ``draft_email`` is non-empty (which
+# in turn requires the loan to have missing fields). When there's
+# nothing to draft the router downstream short-circuits to END
+# before reaching the validator at all.
+
+
+def _intake_judge_context(state: IntakeState) -> str:
+    """Context block the judge needs to evaluate "addresses the
+    borrower by name" and "matches the loan class" principles.
+
+    Mirrors the drafter's ``context_block`` so the judge sees the
+    same source-of-truth identifiers. ``missing_fields`` is included
+    so the judge can verify the email asks only for missing items.
+    """
+    missing = state.get("missing_fields", []) or []
+    loan_class = state.get("loan_class") or "business"
+    return (
+        f"Loan class: {loan_class}\n"
+        f"Missing fields (the email should ask only for these): "
+        f"{', '.join(missing) or '(none)'}\n"
+    )
+
+
+def _extract_email_text(state: IntakeState) -> str | None:
+    draft = state.get("draft_email")
+    if not draft:
+        return None
+    return f"Subject: {draft['subject']}\n\n{draft['body_text']}"
+
+
+validate_email = make_validator_node(
+    (
+        JudgmentSpec(
+            constitution=INTAKE_DOC_REQUEST_CONSTITUTION,
+            extract_text=_extract_email_text,
+            extract_context=_intake_judge_context,
+        ),
+    )
+)
+
+# After validation, route to the HITL approval pause on pass.
+# On block-with-retries-remaining, loop back to ``draft_request``.
+route_after_validate_email = make_validator_router(
+    retry_node="draft_request",
+    persist_node="approve",
+)
 
 
 def request_human_approval(state: IntakeState) -> IntakeState:
@@ -488,6 +567,14 @@ async def send_email(state: IntakeState) -> IntakeState:
                 "to": borrower_email,
                 "resend_message_id": send_result.message_id,
                 "drafted_by_agent": True,
+                # Carry the constitutional judge's verdict + retry
+                # count forward into the audit so the observability
+                # page + the per-loan trace can render whether the
+                # draft was clean on first try or required Self-Refine.
+                "guardrail_judgment": state.get("last_judgment"),
+                "validation_attempts": state.get(
+                    "validation_attempts", 0
+                ),
             },
         )
 
@@ -508,12 +595,16 @@ async def build_intake_graph() -> AsyncIterator[Any]:
         async with build_intake_graph() as graph:
             result = await graph.ainvoke(state, config=config)
     """
-    settings = get_settings()
-
     builder = StateGraph(IntakeState)
     builder.add_node("extract", extract_all_documents)
     builder.add_node("identify_missing", identify_missing)
     builder.add_node("draft_request", draft_doc_request)
+    # LLM-as-judge node — runs after draft to enforce the
+    # INTAKE_DOC_REQUEST_CONSTITUTION (no bracketed placeholders,
+    # right loan-class vocabulary, ≤120 words, etc.). Conditional
+    # edge below routes back to draft_request on block, bounded by
+    # MAX_VALIDATION_ATTEMPTS.
+    builder.add_node("validate_email", validate_email)
     builder.add_node("approve", request_human_approval)
     builder.add_node("send", send_email)
 
@@ -537,23 +628,30 @@ async def build_intake_graph() -> AsyncIterator[Any]:
     builder.add_edge("identify_missing", "draft_request")
 
     def route_after_draft(state: IntakeState) -> str:
+        # If there are no missing fields, draft_doc_request short-
+        # circuits with status="complete" + no draft_email. Skip the
+        # validator entirely in that case (nothing to judge).
         if state.get("status") == "complete":
             return END
-        return "approve"
+        return "validate_email"
 
     builder.add_conditional_edges(
-        "draft_request", route_after_draft, {END: END, "approve": "approve"}
+        "draft_request",
+        route_after_draft,
+        {END: END, "validate_email": "validate_email"},
+    )
+    # validate → (back to draft on block | forward to approve on pass).
+    builder.add_conditional_edges(
+        "validate_email",
+        route_after_validate_email,
+        {"draft_request": "draft_request", "approve": "approve"},
     )
     builder.add_edge("approve", "send")
     builder.add_edge("send", END)
 
-    # Postgres checkpointer — durable across restarts. Uses the libpq-format
-    # DSN, not the SQLAlchemy one (psycopg rejects the `+psycopg` suffix).
-    # The custom serializer allowlists ``mkopo.schemas`` symbols so
-    # LangGraph stops warning about unregistered deserializations and
-    # keeps working when the default flips to strict — see _serde.py.
-    async with AsyncPostgresSaver.from_conn_string(
-        settings.database_url_libpq, serde=make_serializer()
-    ) as checkpointer:
-        await checkpointer.setup()  # idempotent
-        yield builder.compile(checkpointer=checkpointer)
+    # Postgres checkpointer + compile — shared with the other two
+    # agents via ``agents/_base.py``. Lives there so a future change
+    # (different checkpointer backend, trace propagation, etc.) is
+    # one edit instead of three.
+    async with build_compiled_graph(builder) as graph:
+        yield graph

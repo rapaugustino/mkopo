@@ -557,6 +557,34 @@ PERSONAL_RULES: list[Callable[[RuleContext], RuleOutcome]] = [
 ]
 
 
+# Rule pack registry — pluggable by loan class.
+#
+# The if/else this replaced was the only place new loan classes
+# would have touched this module. With the registry, adding a new
+# pack ("ag_lending", "auto") is a one-line ``register_rule_pack``
+# call from the pack-defining module — no edits here required.
+# ``DEFAULT_RULES`` (commercial real estate) doubles as the fallback
+# pack for unknown loan classes since it carries blocking thresholds
+# the other packs typically don't (LTV cap, DSCR floor).
+RULE_PACKS: dict[str, list[Callable[[RuleContext], RuleOutcome]]] = {
+    "business": DEFAULT_RULES,
+    "personal": PERSONAL_RULES,
+}
+
+
+def register_rule_pack(
+    name: str, rules: list[Callable[[RuleContext], RuleOutcome]]
+) -> None:
+    """Add a new rule pack to the registry.
+
+    Tests + future loan classes should use this rather than mutating
+    ``RULE_PACKS`` directly — the indirection lets us validate the
+    pack later (e.g. require at least one ``block``-severity rule)
+    without changing every call site.
+    """
+    RULE_PACKS[name] = rules
+
+
 def run_rules(ctx: RuleContext) -> list[RuleOutcome]:
     """Run the default (commercial) rule pack against a context.
 
@@ -571,11 +599,22 @@ def run_rules_for(loan_class: str, ctx: RuleContext) -> list[RuleOutcome]:
 
     ``loan_class`` is the wire value of :class:`mkopo.models.loan.LoanClass`
     — accept the string so this module stays independent of the ORM
-    layer. Unknown classes fall back to the commercial pack, which is
-    the conservative choice (it carries blocking thresholds the personal
-    pack does not).
+    layer. Unknown classes fall back to the commercial pack with a
+    logged warning (which is the conservative choice — it carries
+    blocking thresholds the personal pack does not).
     """
-    rules = PERSONAL_RULES if loan_class == "personal" else DEFAULT_RULES
+    rules = RULE_PACKS.get(loan_class)
+    if rules is None:
+        # Unknown loan class — log loud rather than silently swap.
+        # This catches typos at the call site early without crashing.
+        import structlog
+
+        structlog.get_logger().warning(
+            "unknown_rule_pack_fallback_to_default",
+            requested=loan_class,
+            available=sorted(RULE_PACKS.keys()),
+        )
+        rules = DEFAULT_RULES
     return [r(ctx) for r in rules]
 
 

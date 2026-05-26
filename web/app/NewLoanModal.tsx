@@ -38,7 +38,6 @@ const EMPTY: FormState = {
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-const DEV_TOKEN = process.env.NEXT_PUBLIC_DEV_TOKEN || "dev-token-replace-me";
 
 /**
  * New loan creation modal.
@@ -90,12 +89,17 @@ export function NewLoanModal({ open, onClose }: Props) {
       };
       const res = await fetch(`${API_URL}/api/v1/loans`, {
         method: "POST",
+        credentials: "include",
         headers: {
-          Authorization: `Bearer ${DEV_TOKEN}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(body),
       });
+      if (res.status === 401 && typeof window !== "undefined") {
+        const next = encodeURIComponent(window.location.pathname);
+        window.location.href = `/staff/login?next=${next}`;
+        throw new Error("Not authenticated");
+      }
       if (!res.ok) throw new Error(`Create ${res.status}: ${await res.text()}`);
       return (await res.json()) as { id: string; reference: string };
     },

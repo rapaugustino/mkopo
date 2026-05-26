@@ -121,6 +121,52 @@ async def upload_document(
 
     text_content, extract_stats = _extract_text(body=body, content_type=content_type)
 
+    # Input-layer prompt-injection scan. Runs against extracted text
+    # (not raw bytes — binary PDFs would always come back clean) and
+    # writes a row to injection_detections regardless of outcome so
+    # the Safety dashboard can trend it. ``decision == BLOCKED`` is
+    # fail-closed: refuse the upload entirely. The Document is NOT
+    # persisted in that case — there's no row for an attacker to
+    # re-reference. The matched-patterns list comes back in the 422
+    # body so the staff user sees why their (or their tester's)
+    # upload was rejected.
+    from mkopo.agents.injection import (
+        BlockedByInjectionError,
+        detect_injection,
+    )
+    from mkopo.models import InjectionSourceKind
+
+    injection_result = await detect_injection(
+        text=text_content,
+        source_kind=InjectionSourceKind.DOCUMENT,
+        loan_id=loan_id,
+        actor_kind="user",
+        actor_id=str(user.user_id),
+        session=db,
+    )
+    if injection_result.decision.value == "blocked":
+        # Mirror the standard 422 shape — the frontend toast
+        # surfaces ``detail`` to the user.
+        await db.rollback()
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "reason": "injection_detected",
+                "detection_id": str(injection_result.detection_id),
+                "matched_patterns": [
+                    {
+                        "pattern_id": m["pattern_id"],
+                        "description": m["description"],
+                    }
+                    for m in injection_result.matched_patterns
+                ],
+                "message": (
+                    "This document contains content that looks like "
+                    "a prompt-injection attempt. Upload refused."
+                ),
+            },
+        )
+
     # sha256 of the exact bytes that were uploaded. Feeds the materials
     # hash so a post-decision swap of the underlying file is detectable
     # without re-reading the bytes from S3. Cheap (in-memory) so this

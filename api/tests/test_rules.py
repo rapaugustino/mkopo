@@ -205,3 +205,75 @@ def test_run_rules_returns_all_outcomes():
     assert all(o.passed for o in outcomes), [
         (o.rule_id, o.passed, o.message) for o in outcomes if not o.passed
     ]
+
+
+class TestRulePackRegistry:
+    """Verifies the new pluggable-pack registry. Existing packs
+    (``business``, ``personal``) are exercised everywhere else;
+    these tests cover the registration mechanism itself."""
+
+    def test_business_and_personal_packs_are_pre_registered(self):
+        from mkopo.rules.policy import (
+            DEFAULT_RULES,
+            PERSONAL_RULES,
+            RULE_PACKS,
+        )
+
+        assert RULE_PACKS["business"] is DEFAULT_RULES
+        assert RULE_PACKS["personal"] is PERSONAL_RULES
+
+    def test_register_rule_pack_then_run(self):
+        """A newly-registered pack must be reachable from
+        ``run_rules_for`` without any code change to ``policy.py``."""
+        from mkopo.rules.policy import (
+            register_rule_pack,
+            run_rules_for,
+        )
+
+        sentinel: list = []
+
+        def fake_rule(ctx):
+            from mkopo.rules.policy import RuleOutcome
+
+            sentinel.append("called")
+            return RuleOutcome(
+                rule_id="fake",
+                severity="warn",
+                passed=True,
+                message="ok",
+            )
+
+        register_rule_pack("custom_class", [fake_rule])
+        ctx = RuleContext(
+            loan_amount=Decimal("1000"),
+            appraised_value=None,
+            appraisal_date=None,
+            annual_noi=None,
+            annual_debt_service=None,
+            guarantor_total_exposure=None,
+            documents_present=set(),
+            property_type=MF,
+        )
+        outcomes = run_rules_for("custom_class", ctx)
+        assert len(outcomes) == 1
+        assert outcomes[0].rule_id == "fake"
+        assert sentinel == ["called"]
+
+    def test_unknown_pack_falls_back_to_default(self):
+        """Unknown classes must NOT crash — they fall back to the
+        commercial pack (the conservative choice). This catches
+        typos at the call site without taking the agent down."""
+        from mkopo.rules.policy import DEFAULT_RULES, run_rules_for
+
+        ctx = RuleContext(
+            loan_amount=Decimal("2400000"),
+            appraised_value=Decimal("3529400"),
+            appraisal_date=datetime.now(UTC).date() - timedelta(days=30),
+            annual_noi=Decimal("284200"),
+            annual_debt_service=Decimal("144000"),
+            guarantor_total_exposure=Decimal("4700000"),
+            documents_present=set(REQUIRED_DOCS),
+            property_type=MF,
+        )
+        outcomes = run_rules_for("does-not-exist", ctx)
+        assert len(outcomes) == len(DEFAULT_RULES)

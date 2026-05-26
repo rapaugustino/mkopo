@@ -42,6 +42,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, or_, select
 
 from mkopo.agents.tools import Tool, ToolContext, ToolError, register
+from mkopo.agents.tools._helpers import audit_tool_call, resolve_loan
 from mkopo.models import (
     AuditEvent,
     Document,
@@ -63,26 +64,25 @@ _STAFF_WRITE = frozenset({"underwriter", "admin"})
 
 
 # ---- shared helpers --------------------------------------------------------
+#
+# Thin wrappers over ``agents/tools/_helpers.py`` so the call sites
+# below stay staff-flavoured. Staff does NOT enforce the email-
+# ownership check — any staff user with the role can act on any loan.
 
 
 async def _load_loan(ctx: ToolContext, loan_id: uuid.UUID | None) -> Loan:
-    """Resolve the target loan. Falls back to ``ctx.loan_id`` (set
-    when the chat was opened on a specific loan); errors if neither
-    the args nor the context have one."""
-    target = loan_id or ctx.loan_id
-    if target is None:
-        raise ToolError(
+    """Staff loan resolver — no email-ownership check, staff-flavoured
+    error message."""
+    return await resolve_loan(
+        ctx,
+        loan_id,
+        require_owner_email_match=False,
+        not_found_msg="Loan not found.",
+        no_scope_msg=(
             "No loan in scope. Either open the chat on a specific loan or "
             "pass a loan_id explicitly."
-        )
-    loan = (
-        await ctx.session.execute(
-            select(Loan).where(Loan.id == target, Loan.deleted_at.is_(None))
-        )
-    ).scalar_one_or_none()
-    if loan is None:
-        raise ToolError("Loan not found.")
-    return loan
+        ),
+    )
 
 
 async def _audit_tool_call(
@@ -93,23 +93,15 @@ async def _audit_tool_call(
     result_summary: str,
     loan_id: uuid.UUID | None = None,
 ) -> None:
-    """Same idea as the borrower-side audit helper. ``actor`` is a
-    staff user, so we use ``Actor.user(user_id)`` rather than
-    ``Actor.borrower(email)``."""
-    target = loan_id or ctx.loan_id
-    if target is None:
-        return
-    await record(
-        ctx.session,
-        loan_id=target,
+    """Staff audit wrapper — actor=user(user_id), via=staff_chat."""
+    await audit_tool_call(
+        ctx,
+        tool_name=tool_name,
+        args=args,
+        result_summary=result_summary,
         actor=Actor.user(str(ctx.user_id)),
-        action="tool_invoked",
-        payload={
-            "tool_name": tool_name,
-            "args": args,
-            "result_summary": result_summary[:200],
-            "via": "staff_chat",
-        },
+        via="staff_chat",
+        loan_id=loan_id,
     )
 
 

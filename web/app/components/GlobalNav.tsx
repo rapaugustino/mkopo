@@ -10,6 +10,7 @@ import {
   IconListSearch,
   IconPencil,
   IconSettings,
+  IconShieldHalf,
 } from "@tabler/icons-react";
 import { api, type ReviewTask } from "@/lib/api";
 
@@ -25,6 +26,10 @@ const NAV: NavItem[] = [
   { href: "/", label: "Pipeline", Icon: IconLayoutGrid, exact: true },
   { href: "/review-queue", label: "Review queue", Icon: IconListSearch },
   { href: "/eval", label: "Eval", Icon: IconChartLine },
+  // Safety is the dedicated guardrails surface — input-side injection
+  // detections + output-side constitutional judge rollups. The
+  // observability page has a Safety tab too; this is the deep-dive.
+  { href: "/safety", label: "Safety", Icon: IconShieldHalf },
   { href: "/observability", label: "Observability", Icon: IconActivity },
   // Prompts is the management surface for the system prompts every
   // agent uses. Staff-only by route gate (the underlying endpoint

@@ -359,3 +359,83 @@ def decode_jwt(token: str) -> SessionClaims | None:
 # router and the dependency stay in sync without a string literal
 # scattered around.
 SESSION_COOKIE = "mkopo_session"
+
+
+# ---- Staff session JWTs (separate audience from borrower) -----------------
+#
+# Staff tokens are minted on POST /staff/auth/login and carried in
+# either an httpOnly cookie (the SPA flow) or an ``Authorization:
+# Bearer <jwt>`` header (CLI / scripts). The audience is distinct
+# from the borrower audience so a borrower token can't accidentally
+# authenticate a staff endpoint and vice versa — even if both
+# cookies are present on the same domain.
+_STAFF_JWT_ISSUER = "mkopo-staff-api"
+_STAFF_JWT_AUDIENCE = "mkopo-staff"
+
+STAFF_SESSION_COOKIE = "mkopo_staff_session"
+
+
+def issue_staff_jwt(user: User) -> str:
+    """Mint a short-lived session JWT for a staff user.
+
+    Same shape as :func:`issue_jwt` for borrowers but with a distinct
+    audience + issuer so the two surfaces stay isolated. The same
+    ``jwt_secret`` signs both; rotating the secret invalidates
+    everyone's sessions.
+
+    Staff sessions use the same ``jwt_session_ttl_seconds`` (12h
+    default). If staff sessions ever need a different TTL it's a
+    one-line change here — they're a separate token kind.
+    """
+    settings = get_settings()
+    now = datetime.now(UTC)
+    expires_at = now + timedelta(seconds=settings.jwt_session_ttl_seconds)
+    jti = str(uuid.uuid4())
+    payload = {
+        "sub": str(user.id),
+        "email": user.email,
+        "role": user.role,
+        "iat": int(now.timestamp()),
+        "exp": int(expires_at.timestamp()),
+        "iss": _STAFF_JWT_ISSUER,
+        "aud": _STAFF_JWT_AUDIENCE,
+        "jti": jti,
+    }
+    return jwt.encode(payload, settings.jwt_secret, algorithm=_JWT_ALG)
+
+
+def decode_staff_jwt(token: str) -> SessionClaims | None:
+    """Verify + unpack a staff session JWT.
+
+    Returns None on any failure (bad signature, expired, malformed
+    payload, wrong issuer/audience) — caller treats None uniformly
+    as 'not authenticated'. We deliberately don't differentiate
+    failure reasons to avoid information leak.
+
+    A *borrower* JWT will fail decoding here because the audience
+    won't match — that's the whole point of separating the audiences.
+    """
+    settings = get_settings()
+    try:
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret,
+            algorithms=[_JWT_ALG],
+            issuer=_STAFF_JWT_ISSUER,
+            audience=_STAFF_JWT_AUDIENCE,
+            leeway=_JWT_LEEWAY_SECONDS,
+        )
+    except jwt.PyJWTError as e:
+        logger.debug("staff_jwt_decode_failed", reason=type(e).__name__)
+        return None
+    try:
+        return SessionClaims(
+            user_id=uuid.UUID(payload["sub"]),
+            email=payload["email"],
+            role=payload["role"],
+            issued_at=datetime.fromtimestamp(payload["iat"], tz=UTC),
+            expires_at=datetime.fromtimestamp(payload["exp"], tz=UTC),
+            jti=payload["jti"],
+        )
+    except (KeyError, ValueError):
+        return None

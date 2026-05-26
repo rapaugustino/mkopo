@@ -467,6 +467,39 @@ async def borrower_upload_document(
         text_content, extract_stats = extract_pdf_text(body)
         extract_stats = {**extract_stats, "method": "pypdf"}
 
+    # Input-layer prompt-injection scan. Same hybrid detector as the
+    # staff upload — borrower-supplied documents are the higher-risk
+    # vector (Greshake et al. 2023 indirect injection), so the
+    # detector firing on a borrower upload is the security event
+    # this whole system was built to catch.
+    from mkopo.agents.injection import detect_injection
+    from mkopo.models import InjectionSourceKind
+
+    borrower_email_for_audit = (
+        (loan.meta or {}).get("borrower_email") or "unknown"
+    )
+    injection_result = await detect_injection(
+        text=text_content,
+        source_kind=InjectionSourceKind.DOCUMENT,
+        loan_id=loan_id,
+        actor_kind="borrower",
+        actor_id=borrower_email_for_audit,
+        session=db,
+    )
+    if injection_result.decision.value == "blocked":
+        await db.rollback()
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "reason": "injection_detected",
+                "detection_id": str(injection_result.detection_id),
+                "message": (
+                    "This document couldn't be accepted. Please reach "
+                    "out to your loan officer if you need help."
+                ),
+            },
+        )
+
     import hashlib
 
     # Classify by filename at upload time so the status-page checklist

@@ -31,12 +31,17 @@ from decimal import Decimal
 from typing import Any, Literal, TypedDict
 
 import structlog
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 
-from mkopo.agents._serde import make_serializer
+from mkopo.agents._base import build_compiled_graph
+from mkopo.agents.guardrails import (
+    UNDERWRITING_SUMMARY_CONSTITUTION,
+    JudgmentSpec,
+    make_validator_node,
+    make_validator_router,
+)
 from mkopo.config import get_settings
 from mkopo.db import get_session
 from mkopo.llm_gateway import get_gateway
@@ -75,6 +80,14 @@ class UnderwritingState(TypedDict, total=False):
     kpis: UnderwritingKPIs | None
     summary: UnderwritingResult | None
     agent_run_id: str
+    # Self-Refine loop bookkeeping (see :mod:`agents.guardrails`).
+    # The summary drafter increments ``validation_attempts``; the
+    # validator writes the worst severity into ``last_judgment`` and
+    # the critique into ``last_critique``; the conditional edge
+    # router below reads both to decide whether to retry or persist.
+    validation_attempts: int
+    last_critique: str | None
+    last_judgment: dict | None
 
 
 # --- LLM output schema (separate from the persisted UnderwritingResult so
@@ -353,6 +366,19 @@ async def draft_summary(state: UnderwritingState) -> UnderwritingState:
         f"Recommendation guidance: {recommendation_hint}\n\n"
         f"{policy_footer}"
     )
+    # Self-Refine: if the previous draft was rejected, fold in the
+    # critique so the new draft targets the specific failure (no
+    # bracketed KPIs, no mixed vocabulary, etc.). Mirrors the
+    # decision-agent pattern.
+    last_critique = state.get("last_critique")
+    if last_critique:
+        user += (
+            "\n\nIMPORTANT — the previous draft was rejected by the "
+            "guardrail judge:\n"
+            f'"{last_critique}"\n\n'
+            "Revise to address the specific failure above. Do not "
+            "repeat the same mistake."
+        )
 
     drafted: _DraftedUnderwriting = await gateway.call_structured(
         model=settings.llm_heavy_model,
@@ -361,6 +387,8 @@ async def draft_summary(state: UnderwritingState) -> UnderwritingState:
         schema=_DraftedUnderwriting,
     )
 
+    # Bump the attempt counter so the validator router can bound retries.
+    attempts = state.get("validation_attempts", 0) + 1
     return {
         **state,
         "summary": UnderwritingResult(
@@ -372,7 +400,64 @@ async def draft_summary(state: UnderwritingState) -> UnderwritingState:
             generated_at=datetime.now(UTC),
             agent_run_id=uuid.UUID(state.get("agent_run_id", str(uuid.uuid4()))),
         ),
+        "validation_attempts": attempts,
     }
+
+
+# --- Self-correction loop (LLM-as-judge + Self-Refine) -----------------------
+#
+# Same pattern as decision.py — validate the drafted summary
+# against UNDERWRITING_SUMMARY_CONSTITUTION, route back to the
+# drafter on block (bounded by MAX_VALIDATION_ATTEMPTS) or forward
+# to persist on pass.
+
+
+def _underwriting_judge_context(state: UnderwritingState) -> str:
+    """Context the judge needs to evaluate "no fabricated KPIs" and
+    "recommendation consistent with rules"."""
+    kpis = state.get("kpis")
+    flags = state.get("rule_outcomes", []) or []
+    rules_summary = "\n".join(
+        f"- {f.rule_id} (severity={f.severity}, passed={f.passed}): {f.message}"
+        for f in flags
+    )
+    return (
+        f"Loan class: {state.get('loan_class', 'business')}\n"
+        f"KPI block (these are the only numeric values the summary may "
+        f"cite):\n{kpis.model_dump_json(indent=2) if kpis else '(none)'}\n\n"
+        f"Rule outcomes:\n{rules_summary}\n"
+    )
+
+
+def _extract_summary_text(state: UnderwritingState) -> str | None:
+    summary = state.get("summary")
+    if summary is None:
+        return None
+    sections_block = "\n\n".join(
+        f"## {s.title}\n{s.body}" for s in summary.sections
+    )
+    return (
+        f"Recommendation: {summary.recommendation}\n"
+        f"Rationale: {summary.rationale}\n\n"
+        f"{sections_block}"
+    )
+
+
+validate_summary = make_validator_node(
+    (
+        JudgmentSpec(
+            constitution=UNDERWRITING_SUMMARY_CONSTITUTION,
+            extract_text=_extract_summary_text,
+            extract_context=_underwriting_judge_context,
+        ),
+    )
+)
+
+
+route_after_validate_summary = make_validator_router(
+    retry_node="draft_summary",
+    persist_node="persist",
+)
 
 
 def _derive_risk_band(summary: UnderwritingResult) -> str:
@@ -508,6 +593,14 @@ async def persist(state: UnderwritingState) -> UnderwritingState:
                         [_outcome_from_flag(f) for f in summary.risk_flags]
                     ),
                     "result_json": result_json,
+                    # Constitutional judge verdict — captured by
+                    # validate_summary so the observability page can
+                    # render whether the draft passed cleanly or
+                    # required Self-Refine retries.
+                    "guardrail_judgment": state.get("last_judgment"),
+                    "validation_attempts": state.get(
+                        "validation_attempts", 0
+                    ),
                 },
             )
         )
@@ -543,11 +636,14 @@ def _outcome_from_flag(f: RiskFlag) -> Any:
 @asynccontextmanager
 async def build_underwriting_graph() -> AsyncIterator[Any]:
     """Yield a compiled underwriting graph. Same context-manager pattern as intake."""
-    settings = get_settings()
-
     builder: StateGraph = StateGraph(UnderwritingState)
     builder.add_node("fetch_and_evaluate", fetch_and_evaluate)
     builder.add_node("draft_summary", draft_summary)
+    # Constitutional judge — enforces the no-fabricated-KPIs +
+    # recommendation-consistent-with-rules invariants. Conditional
+    # edge below routes back on block, bounded by
+    # MAX_VALIDATION_ATTEMPTS.
+    builder.add_node("validate_summary", validate_summary)
     builder.add_node("persist", persist)
 
     builder.add_edge(START, "fetch_and_evaluate")
@@ -568,11 +664,13 @@ async def build_underwriting_graph() -> AsyncIterator[Any]:
         route_after_eval,
         {END: END, "draft_summary": "draft_summary"},
     )
-    builder.add_edge("draft_summary", "persist")
+    builder.add_edge("draft_summary", "validate_summary")
+    builder.add_conditional_edges(
+        "validate_summary",
+        route_after_validate_summary,
+        {"draft_summary": "draft_summary", "persist": "persist"},
+    )
     builder.add_edge("persist", END)
 
-    async with AsyncPostgresSaver.from_conn_string(
-        settings.database_url_libpq, serde=make_serializer()
-    ) as checkpointer:
-        await checkpointer.setup()
-        yield builder.compile(checkpointer=checkpointer)
+    async with build_compiled_graph(builder) as graph:
+        yield graph

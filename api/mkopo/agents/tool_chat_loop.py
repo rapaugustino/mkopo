@@ -92,6 +92,45 @@ async def run_chat_turn(
     messages = list(messages)  # don't mutate caller's list
 
     if user_message:
+        # Input-layer injection scan BEFORE the message reaches the
+        # LLM. Borrower chat is the highest-risk surface — every
+        # message originates from an authenticated but untrusted
+        # actor. ``decision == BLOCKED`` short-circuits the turn:
+        # we persist the detection row, emit an SSE ``error`` event
+        # the UI surfaces as a toast, and return — no message goes
+        # into the prompt, no LLM call is made, no tokens are paid.
+        from mkopo.agents.injection import detect_injection
+        from mkopo.models import InjectionSourceKind
+
+        async with get_session() as session:
+            scan = await detect_injection(
+                text=user_message,
+                source_kind=InjectionSourceKind.CHAT_MESSAGE,
+                loan_id=loan_id,
+                actor_kind="borrower" if user_role == "borrower" else "user",
+                actor_id=user_email,
+                session=session,
+            )
+            await session.commit()
+        if scan.decision.value == "blocked":
+            yield _sse(
+                "error",
+                {
+                    "reason": "message_blocked_injection",
+                    "detection_id": (
+                        str(scan.detection_id)
+                        if scan.detection_id
+                        else None
+                    ),
+                    "message": (
+                        "That message was blocked by the safety "
+                        "filter. Try rephrasing without instruction-"
+                        "override language."
+                    ),
+                },
+            )
+            return
+
         messages.append({"role": "user", "content": user_message})
         if audit_chat_message:
             # Borrower side: audit literal text (compliance value).

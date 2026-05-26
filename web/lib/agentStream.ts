@@ -13,7 +13,8 @@
  * page-level hooks) — they don't poke at the wire format.
  */
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-const DEV_TOKEN = process.env.NEXT_PUBLIC_DEV_TOKEN || "dev-token-replace-me";
+// Auth is cookie-based now (mkopo_staff_session). Every fetch sets
+// ``credentials: 'include'`` so the browser carries the cookie.
 
 // ---- event shapes --------------------------------------------------------
 
@@ -161,13 +162,22 @@ export async function* streamAgent(
 ): AsyncGenerator<AgentEvent, void, unknown> {
   const res = await fetch(`${API_URL}/api/v1${path}`, {
     method: "POST",
+    credentials: "include",
     headers: {
-      Authorization: `Bearer ${DEV_TOKEN}`,
       "Content-Type": "application/json",
       Accept: "text/event-stream",
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
+  if (res.status === 401 && typeof window !== "undefined") {
+    // Session expired mid-stream — punt to staff login (agent runs
+    // only fire from the staff surface).
+    const next = encodeURIComponent(
+      window.location.pathname + window.location.search,
+    );
+    window.location.href = `/staff/login?next=${next}`;
+    throw new Error("Not authenticated");
+  }
   if (!res.ok || !res.body) {
     throw new Error(`Agent stream ${res.status}: ${await res.text()}`);
   }

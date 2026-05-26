@@ -21,6 +21,7 @@ from mkopo.routers import (
     agents,
     borrower_auth,
     borrower_chat,
+    borrower_loans,
     borrower_portal,
     documents,
     evals,
@@ -28,7 +29,9 @@ from mkopo.routers import (
     observability,
     parties,
     review,
+    safety,
     search,
+    staff_auth,
     staff_chat,
     storage_proxy,
 )
@@ -190,10 +193,13 @@ app.include_router(parties.router, prefix="/api/v1")
 app.include_router(review.router, prefix="/api/v1")
 app.include_router(evals.router, prefix="/api/v1")
 app.include_router(observability.router, prefix="/api/v1")
+app.include_router(safety.router, prefix="/api/v1")
 app.include_router(prompts_router.router, prefix="/api/v1")
 app.include_router(borrower_auth.router, prefix="/api/v1")
+app.include_router(borrower_loans.router, prefix="/api/v1")
 app.include_router(borrower_chat.router, prefix="/api/v1")
 app.include_router(borrower_portal.router, prefix="/api/v1")
+app.include_router(staff_auth.router, prefix="/api/v1")
 app.include_router(staff_chat.router, prefix="/api/v1")
 app.include_router(search.router, prefix="/api/v1")
 app.include_router(settings_router.router, prefix="/api/v1")

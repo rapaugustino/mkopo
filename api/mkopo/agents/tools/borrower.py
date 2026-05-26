@@ -35,6 +35,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from mkopo.agents.tools import Tool, ToolContext, ToolError, register
+from mkopo.agents.tools._helpers import audit_tool_call, resolve_loan
 from mkopo.models import (
     AuditEvent,
     Document,
@@ -48,62 +49,46 @@ from mkopo.models import (
 from mkopo.services.audit import Actor, record
 
 # ---- shared helpers ---------------------------------------------------------
+#
+# Thin wrappers over the shared module so the call sites below stay
+# borrower-flavoured. The de-duplicated implementations live in
+# ``agents/tools/_helpers.py``; this file just specialises the error
+# strings + the actor for the borrower surface. Adding a new error
+# message requires changing the wrapper, not duplicating logic.
 
 
-async def _resolve_loan(ctx: ToolContext, loan_id: uuid.UUID | None = None) -> Loan:
-    """Resolve the loan the tool operates on + check ownership.
-
-    Most borrower tools target ``ctx.loan_id`` (set when the chat
-    was opened on a specific application). Some tools accept an
-    explicit ``loan_id`` arg to be flexible. Either way we verify
-    the caller owns the loan — same email-keyed boundary every
-    Phase 2 endpoint uses.
-    """
-    target = loan_id or ctx.loan_id
-    if target is None:
-        raise ToolError(
+async def _resolve_loan(
+    ctx: ToolContext, loan_id: uuid.UUID | None = None
+) -> Loan:
+    """Borrower-specific loan resolver — verifies ownership against
+    ``ctx.user_email`` and surfaces borrower-flavoured error messages."""
+    return await resolve_loan(
+        ctx,
+        loan_id,
+        require_owner_email_match=True,
+        not_found_msg="Application not found.",
+        no_scope_msg=(
             "No loan in scope. Open the chat on a specific application page."
-        )
-    loan = (
-        await ctx.session.execute(select(Loan).where(Loan.id == target))
-    ).scalar_one_or_none()
-    if loan is None or loan.deleted_at is not None:
-        raise ToolError("Application not found.")
-    # Ownership check by borrower email.
-    row = (
-        await ctx.session.execute(
-            select(Party.email)
-            .join(LoanParty, LoanParty.party_id == Party.id)
-            .where(
-                LoanParty.loan_id == loan.id,
-                LoanParty.role == PartyRole.BORROWER,
-            )
-        )
-    ).scalar_one_or_none()
-    if (row or "").lower().strip() != ctx.user_email.lower().strip():
-        raise ToolError("That application isn't on your account.")
-    return loan
+        ),
+        not_owned_msg="That application isn't on your account.",
+    )
 
 
 async def _audit_tool_call(
-    ctx: ToolContext, *, tool_name: str, args: dict[str, Any], result_summary: str
+    ctx: ToolContext,
+    *,
+    tool_name: str,
+    args: dict[str, Any],
+    result_summary: str,
 ) -> None:
-    """Write the ``tool_invoked`` audit event. Captures intent +
-    arguments + a short result summary so the case-file timeline
-    reflects "the agent did X on behalf of Y" without the full
-    JSON noise."""
-    if ctx.loan_id is None:
-        return  # account-scoped tools (data export, erasure) audit elsewhere
-    await record(
-        ctx.session,
-        loan_id=ctx.loan_id,
+    """Borrower-specific audit wrapper — actor=borrower, via=borrower_chat."""
+    await audit_tool_call(
+        ctx,
+        tool_name=tool_name,
+        args=args,
+        result_summary=result_summary,
         actor=Actor.borrower(ctx.user_email),
-        action="tool_invoked",
-        payload={
-            "tool_name": tool_name,
-            "args": args,
-            "result_summary": result_summary[:200],
-        },
+        via="borrower_chat",
     )
 
 
