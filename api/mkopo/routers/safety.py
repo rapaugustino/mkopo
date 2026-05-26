@@ -33,6 +33,7 @@ from sqlalchemy import desc, select
 
 from mkopo.deps import CurrentUserDep, DbSessionDep
 from mkopo.models import AgentRun, InjectionDetection
+from mkopo.safety import SCENARIOS
 
 logger = structlog.get_logger()
 
@@ -402,6 +403,50 @@ async def judgment_summary(
         by_agent=dict(agent_counter),
         retry_distribution=dict(retry_counter),
         rows=rows,
+    )
+
+
+class ScenarioRow(BaseModel):
+    """Wire shape of a Scenario. Mirrors the dataclass exactly so the
+    frontend can render the catalog without a separate translation
+    step."""
+
+    id: str
+    category: str
+    title: str
+    threat: str
+    defense: str
+    defense_layer: str
+    test_id: str | None
+    severity: str
+    status: str
+
+
+class ScenariosResponse(BaseModel):
+    """Two top-level slices the UI groups by — protected + known-gap.
+
+    Splitting in the response lets the frontend render them in
+    separate sections without a client-side filter pass.
+    """
+
+    protected: list[ScenarioRow]
+    known_gaps: list[ScenarioRow]
+
+
+@router.get("/scenarios", response_model=ScenariosResponse)
+async def list_scenarios(user: CurrentUserDep) -> ScenariosResponse:
+    """Return the safety scenarios catalog.
+
+    Static manifest from ``mkopo.safety.scenarios.SCENARIOS`` — each
+    entry is a (threat, defense, test_id, severity) tuple describing
+    one robustness property the system pins. Backed by the tests in
+    ``tests/test_safety_scenarios.py`` (CI failure on a test → the
+    scenario card on the UI flips to a regression banner).
+    """
+    rows = [ScenarioRow(**s.to_dict()) for s in SCENARIOS]
+    return ScenariosResponse(
+        protected=[r for r in rows if r.status == "protected"],
+        known_gaps=[r for r in rows if r.status == "known-gap"],
     )
 
 

@@ -1,7 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -307,28 +313,44 @@ export default function PipelinePage() {
   );
   const [newLoanOpen, setNewLoanOpen] = useState(false);
 
-  // View toggle (list / kanban). Initial render uses ``list`` so the
-  // SSR markup matches the client first-paint; we lift the persisted
-  // preference inside an effect so localStorage access doesn't break
-  // the server bundle and so we never render a flash of the wrong
-  // layout. The effect runs once on mount.
-  const [view, setView] = useState<PipelineView>("list");
-  useEffect(() => {
+  // View toggle (list / kanban). LocalStorage is the source of truth;
+  // the component subscribes via ``useSyncExternalStore`` so the value
+  // reads correctly under SSR (returns the default) AND on the client
+  // (reads localStorage) without needing a ``setState`` inside an
+  // effect. ``setView`` writes through localStorage + dispatches a
+  // synthetic storage event so the snapshot re-fires for this tab
+  // (the native event only fires for OTHER tabs).
+  const view = useSyncExternalStore<PipelineView>(
+    (cb) => {
+      window.addEventListener("storage", cb);
+      return () => window.removeEventListener("storage", cb);
+    },
+    () => {
+      try {
+        const saved = window.localStorage.getItem(VIEW_STORAGE_KEY);
+        return saved === "kanban" ? "kanban" : "list";
+      } catch {
+        return "list";
+      }
+    },
+    () => "list",
+  );
+  const setView = (next: PipelineView) => {
     try {
-      const saved = window.localStorage.getItem(VIEW_STORAGE_KEY);
-      if (saved === "list" || saved === "kanban") setView(saved);
+      window.localStorage.setItem(VIEW_STORAGE_KEY, next);
+      // Storage events don't fire for the tab that performed the
+      // write, so we synthesize one to re-snapshot here too.
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: VIEW_STORAGE_KEY }),
+      );
     } catch {
-      // localStorage can throw in restricted browser modes — ignore;
-      // the default "list" is a fine fallback.
+      // localStorage can throw in restricted browser modes — ignore.
     }
-  }, []);
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(VIEW_STORAGE_KEY, view);
-    } catch {
-      // ignore; same reason as above
-    }
-  }, [view]);
+  };
+  // (No persistence effect — ``setView`` writes through localStorage
+  // synchronously above, and ``useSyncExternalStore`` reads back on
+  // the next render. This avoids the dual-write race the old effect
+  // had between the user toggling and the localStorage sync.)
 
   /** Apply filters to the raw loan list.
    *

@@ -23,7 +23,6 @@ caught here.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -37,7 +36,6 @@ from mkopo.services.auth_service import (
     issue_jwt,
     issue_staff_jwt,
 )
-
 
 # ----- JWT issuance + decoding ---------------------------------------------
 

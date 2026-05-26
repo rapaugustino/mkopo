@@ -11,7 +11,7 @@ through to **approve** as a bonus.
 
 ## Borrower email
 
-`rapaugustino@gmail.com` ← use this in the staff "+ New loan" modal.
+`you@example.com` ← use this in the staff "+ New loan" modal.
 
 ## Headline numbers
 
@@ -56,16 +56,16 @@ inbox step.
    - Loan type: **Permanent**
    - Amount: `2400000`
    - Borrower name: `Aspen Grove Industrial Partners, LLC`
-   - Borrower email: `rapaugustino@gmail.com`
-   - Guarantor name: `Richard Pallangyo`
-   - Guarantor email: `rapaugustino@gmail.com`
+   - Borrower email: `you@example.com`
+   - Guarantor name: `(your name)`
+   - Guarantor email: `you@example.com`
 
 3. **Submit.**
 
    **Expected.**
-   - Toast: "Loan created. Invite emailed to rapaugustino@gmail.com."
+   - Toast: "Loan created. Invite emailed to you@example.com."
    - API log shows a `loan_created` audit event with
-     `invite_sent_to=rapaugustino@gmail.com`.
+     `invite_sent_to=you@example.com`.
    - If Resend is configured: an email lands in your inbox within
      a few seconds, "Your loan officer has started a loan
      application for you…" with a click-through button.

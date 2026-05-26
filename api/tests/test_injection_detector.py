@@ -32,7 +32,6 @@ from mkopo.agents.injection import (
 )
 from mkopo.models import InjectionDecision, InjectionSeverity, InjectionSourceKind
 
-
 # ----- Pattern catalog --------------------------------------------------
 
 

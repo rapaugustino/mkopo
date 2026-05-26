@@ -341,7 +341,7 @@ and the audit log.
 
 > **Variant for testing real email delivery.** Use
 > [`samples/07-aspen-real-email-test/`](./samples/07-aspen-real-email-test/)
-> with `rapaugustino@gmail.com` as the borrower email. If Resend is
+> with `you@example.com` as the borrower email. If Resend is
 > configured (`RESEND_API_KEY`, `RESEND_FROM_ADDRESS`,
 > `RESEND_FROM_NAME`), a real email lands in that inbox. See the
 > scenario's README for the full step-by-step. Falls back to a

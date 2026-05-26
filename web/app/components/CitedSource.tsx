@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -132,10 +132,17 @@ export function CitedSource({
  *  open after a user click), so the portal-availability check is
  *  belt-and-braces. */
 function DrawerPortal({ children }: { children: React.ReactNode }) {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  // React 19's recommended SSR-safe mount detector. ``useSyncExternalStore``
+  // with a no-op subscribe gives us a stable boolean that returns
+  // ``false`` on the server (so we render nothing during SSR and
+  // hydrate empty) and ``true`` on the client (so the portal mounts
+  // after hydration). Replaces the older ``useEffect(() => setMounted)``
+  // idiom that the React lint rule now flags as a cascading-render.
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
   if (!mounted) return null;
   return createPortal(children, document.body);
 }

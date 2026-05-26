@@ -381,6 +381,12 @@ Two integrations between eval + production:
   staff member overrides an LLM extraction, that's a signal the
   prompt is drifting and the eval surfaces it.
 
+**Running it**: ``cd api && uv run python -m evals.runner``. The
+[README's "Eval suite" section](../README.md#eval-suite) lists the
+current tasks + thresholds + the workflow for adding a new task —
+kept there (not duplicated here) so the command + task list stay
+in one place.
+
 ---
 
 ## Stack

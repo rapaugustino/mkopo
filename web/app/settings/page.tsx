@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   IconBuildingBank,
@@ -40,32 +40,51 @@ import {
  * field) — same trim-then-null logic the backend applies.
  */
 export default function SettingsPage() {
-  const qc = useQueryClient();
   const { data, isPending, error } = useQuery<InstitutionSettings, Error>({
     queryKey: ["institution-settings"],
     queryFn: () => api.getInstitutionSettings(),
   });
 
-  // Local form state mirrors the server snapshot. We initialise once
-  // from ``data`` and then track edits — saving sends the diff +
-  // refreshes the cache. ``useEffect`` re-syncs the form when the
-  // server cache changes from outside (e.g. another tab edited).
-  const [form, setForm] = useState<InstitutionSettingsPatch>({});
-  useEffect(() => {
-    if (!data) return;
-    setForm({
-      lender_name: data.lender_name ?? "",
-      lender_address: data.lender_address ?? "",
-      lender_phone: data.lender_phone ?? "",
-      lender_email: data.lender_email ?? "",
-      authorized_officer_name: data.authorized_officer_name ?? "",
-      authorized_officer_title: data.authorized_officer_title ?? "",
-      credit_reporting_agency_name: data.credit_reporting_agency_name ?? "",
-      credit_reporting_agency_address:
-        data.credit_reporting_agency_address ?? "",
-      credit_reporting_agency_phone: data.credit_reporting_agency_phone ?? "",
-    });
-  }, [data]);
+  if (isPending) return <SettingsSkeleton />;
+  if (error) {
+    return (
+      <p className="text-sm text-[var(--color-text-danger)]">
+        Error: {error.message}
+      </p>
+    );
+  }
+  if (!data) return null;
+
+  // The form body initialises ONCE from the first ``data`` snapshot.
+  // Subsequent cache refreshes don't stomp the form mid-edit (which
+  // is the right UX — a refetch firing while you're typing
+  // shouldn't blow your work away). After Save the mutation pushes
+  // the new value into the cache; the form keeps showing the saved
+  // values without re-mounting because they're identical to what the
+  // user just submitted. Replaces the older
+  // ``useEffect(() => setForm(...), [data])`` pattern that the
+  // React 19 lint rule (rightly) flags as a cascading-render.
+  return <SettingsBody data={data} />;
+}
+
+function SettingsBody({ data }: { data: InstitutionSettings }) {
+  const qc = useQueryClient();
+  // Lazy initial state — runs ONCE on mount with the data prop's
+  // current snapshot. Re-mounting (driven by the parent's ``key``)
+  // is the only way the form resets; intentional, so user edits
+  // aren't blown away when the cache refreshes mid-edit.
+  const [form, setForm] = useState<InstitutionSettingsPatch>(() => ({
+    lender_name: data.lender_name ?? "",
+    lender_address: data.lender_address ?? "",
+    lender_phone: data.lender_phone ?? "",
+    lender_email: data.lender_email ?? "",
+    authorized_officer_name: data.authorized_officer_name ?? "",
+    authorized_officer_title: data.authorized_officer_title ?? "",
+    credit_reporting_agency_name: data.credit_reporting_agency_name ?? "",
+    credit_reporting_agency_address:
+      data.credit_reporting_agency_address ?? "",
+    credit_reporting_agency_phone: data.credit_reporting_agency_phone ?? "",
+  }));
 
   const save = useMutation({
     mutationFn: (body: InstitutionSettingsPatch) =>
@@ -82,16 +101,6 @@ export default function SettingsPage() {
       toast.error("Couldn't save settings", { description: String(err) });
     },
   });
-
-  if (isPending) return <SettingsSkeleton />;
-  if (error) {
-    return (
-      <p className="text-sm text-[var(--color-text-danger)]">
-        Error: {error.message}
-      </p>
-    );
-  }
-  if (!data) return null;
 
   const onChange =
     (k: keyof InstitutionSettingsPatch) =>

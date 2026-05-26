@@ -6,10 +6,10 @@ Legal Name: Aspen Grove Industrial Partners, LLC
 State of Formation: Colorado
 EIN: 84-1192860
 Business Address: 14820 East 33rd Place, Aurora, CO 80011
-Authorized Signatory: Richard Pallangyo, Managing Member
+Authorized Signatory: Sample Guarantor, Managing Member
 
 2. GUARANTORS
-- Richard Pallangyo, Managing Member (recourse guaranty)
+- Sample Guarantor, Managing Member (recourse guaranty)
 
 3. LOAN REQUEST
 Amount: $2,400,000
@@ -33,5 +33,5 @@ Rent: $322,600/yr, 2% annual escalators
 6. EXIT STRATEGY
 Hold to maturity; refinance at year 7 or take a permanent extension.
 
-Signed: Richard Pallangyo
+Signed: Sample Guarantor
 Date: May 18, 2026

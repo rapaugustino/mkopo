@@ -631,15 +631,19 @@ export function CreditDecisionPanel({ loanId }: Props) {
     if (animatedRunId.current === result.agent_run_id) return;
     animatedRunId.current = result.agent_run_id;
     // Only animate if we just got the result fresh from the agent —
-    // detected by ``agentRun.isRunning`` having just flipped from
-    // true to false. On a page refresh we skip the animation: the
-    // user has already seen this verdict, replaying would be
-    // theatrical noise.
+    // detected by ``agentRun.nodes.length > 0`` (a live run wrote
+    // nodes during streaming). On a page refresh nodes is empty so
+    // the existing "done" initial state holds and we skip the
+    // animation entirely; replaying it would be theatrical noise
+    // for a verdict the user has already seen.
     const isFresh = agentRun.nodes.length > 0;
-    if (!isFresh) {
-      setCinematicPhase("done");
-      return;
-    }
+    if (!isFresh) return;
+    // Kick off the timed reveal. The setState here IS the cascade
+    // trigger by design — the cinematic animation is a sequence
+    // (rules → verdict → done) driven by setTimeouts, which is the
+    // textbook case for "synchronise with an external timer". The
+    // lint rule's preferred alternatives don't apply.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCinematicPhase("rules");
     const t1 = setTimeout(() => setCinematicPhase("verdict"), 720);
     const t2 = setTimeout(() => setCinematicPhase("done"), 1100);

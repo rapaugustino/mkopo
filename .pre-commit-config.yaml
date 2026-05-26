@@ -34,3 +34,15 @@ repos:
       - id: prettier
         files: ^web/.*\.(ts|tsx|js|jsx|json|css|md)$
         exclude: ^web/(\.next|node_modules)/
+
+  # Secret scanner — blocks the key shapes we use (Anthropic
+  # ``sk-ant-``, OpenAI ``sk-`` + ``sk-proj-``, Resend ``re_``,
+  # AWS ``AKIA``, plus dozens more from the bundled ruleset).
+  # ``.env`` is already gitignored so this is belt-and-braces:
+  # catches the case where someone pastes a live key into a code
+  # file, sample doc, or test fixture by accident.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+        name: gitleaks (block committed secrets)

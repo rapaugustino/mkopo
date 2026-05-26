@@ -40,7 +40,6 @@ import mkopo.agents.tools.borrower  # noqa: F401 — registration side-effect
 import mkopo.agents.tools.staff  # noqa: F401 — registration side-effect
 from mkopo.agents.tools import tools_for_role
 
-
 # ----- catalog shape --------------------------------------------------------
 
 

@@ -354,6 +354,58 @@ Add new injection patterns here when threat-modelling produces
 new categories. The fixtures are documentation as much as tests —
 each one names the defense layer that catches it.
 
+### Safety scenarios catalog (the audit-ready surface)
+
+``api/mkopo/safety/scenarios.py`` is the structured manifest of
+every robustness property the system pins. Each entry describes
+one specific way an attacker (or a buggy LLM) might try to bend
+the system, the defense that catches it, and the test that
+verifies the defense still works. The frontend renders this as
+the **Scenarios catalog** tab on ``/safety`` — one card per
+scenario, grouped by category and severity.
+
+The catalog is the single source of truth for "how does the app
+stay safe?" — a reviewer, auditor, or prospective adopter can
+browse it without reading any code. CI failure on any of the
+referenced tests flips the corresponding card to a regression
+banner on the dashboard.
+
+Current coverage (24 protected scenarios + 2 known gaps across
+ten categories):
+
+- **Pre-flight gates** — decision can't run before underwriting,
+  underwriting can't run before extractions, intake can't run
+  with no documents.
+- **Rule engine override** — LLM-picked verdict is rewritten by
+  the server when it conflicts with a BLOCKING rule failure.
+- **Constitutional judge** — drafted artifacts must satisfy the
+  written constitutions; placeholder leakage fast-fails without
+  paying for the judge LLM.
+- **Scope & role boundary** — borrower-side tool catalog has no
+  staff-only actions and vice versa; destructive tools carry a
+  confirmation gate.
+- **Input-layer injection** — hybrid pattern + Haiku detector
+  blocks documents and chat messages with override / role-swap /
+  rule-waiver / data-exfil signatures.
+- **Storage authz** — loan_id cross-check refuses to return bytes
+  when the URI's loan path doesn't match the caller's claim.
+- **Stage machine** — adjacency table blocks jumps like
+  intake→approved; terminal stages have no outgoing edges.
+- **Stage locks** — past the decision gate, agents are server-
+  side-locked from re-running.
+- **Orchestrator** — autonomous chain doesn't auto-commit any
+  borrower-visible action.
+- **Loop bounds** — Self-Refine cycle bounded at
+  ``MAX_VALIDATION_ATTEMPTS``; chat loop bounded at
+  ``_MAX_ITERATIONS``.
+
+Adding a new scenario:
+1. Write the test in ``tests/test_safety_scenarios.py``.
+2. Add an entry to ``SCENARIOS`` in ``safety/scenarios.py``
+   referencing the test id.
+3. CI catches any drift; the new card appears on the dashboard
+   automatically.
+
 ---
 
 ## What is NOT in the codebase (and matters)

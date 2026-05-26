@@ -131,7 +131,6 @@ async def upload_document(
     # body so the staff user sees why their (or their tester's)
     # upload was rejected.
     from mkopo.agents.injection import (
-        BlockedByInjectionError,
         detect_injection,
     )
     from mkopo.models import InjectionSourceKind

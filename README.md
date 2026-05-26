@@ -290,13 +290,50 @@ the hook itself.
 
 ## Eval suite
 
+Runs labeled golden-set tasks against the live LLM gateway, prints
+per-task accuracy, and exits non-zero on any task below its
+threshold (so it's CI-gateable).
+
 ```bash
 cd api
 uv run python -m evals.runner
 ```
 
-Per-task accuracy against the golden set; CI gate fails if any task
-falls below threshold.
+Needs ``ANTHROPIC_API_KEY`` set in ``api/.env``. Results land in
+``api/evals/results/results.json`` for CI artifacts.
+
+### What runs today
+
+| Task | Threshold | Golden-set size | What it pins |
+|---|---|---|---|
+| ``extract_borrower_entity`` | 95% | 2 | Extractor returns the canonical borrower entity name from a loan-application doc |
+| ``extract_noi`` | 90% | 1 | Extractor returns the right annual NOI from an operating statement |
+| ``summarize_underwriting`` | 80% | 1 | Summary cites the right rule outcomes + uses the correct vocabulary for the loan class |
+
+### Adversarial-injection fixtures (documentation-only today)
+
+``evals/golden_sets/adversarial_injection/`` carries
+``inj-001-ignore-instructions`` (direct injection in document body)
+and ``inj-002-rule-bypass`` (indirect injection in appraisal). They
+document the threat model but aren't currently scored by the runner —
+the runtime defense is verified by ``tests/test_safety_scenarios.py``
+(the ``TestInputLayerInjection`` class) and by the live
+``/safety`` dashboard. See [docs/SAFETY.md](docs/SAFETY.md).
+
+### Eval dashboard
+
+The runner's results also feed the staff-facing ``/eval`` page
+(drift over time, calibration, agent reliability, recent failures).
+``scripts/seed_eval_baseline.py`` populates it with synthetic
+baseline data so the dashboard isn't empty on a fresh clone.
+
+### Adding a new task
+
+1. Drop a YAML example in ``evals/golden_sets/<task_name>/``.
+2. Add a task class in ``evals/tasks/<task_name>.py`` with
+   ``name``, ``threshold``, ``predict(example)``, ``score(pred, expected)``.
+3. Register it in ``_main`` inside ``evals/runner.py``.
+4. CI gate picks it up automatically.
 
 ---
 

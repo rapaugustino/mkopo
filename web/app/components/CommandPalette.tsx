@@ -99,6 +99,19 @@ interface CommandPaletteProps {
 }
 
 export function CommandPalette({ open, onClose }: CommandPaletteProps) {
+  // Body lives in a separate component keyed on ``open`` so opening
+  // the palette mounts a fresh instance with reset state — no
+  // ``setState`` in an effect required, the lint rule (and the React
+  // team's "you might not need an effect" guidance) are both happy.
+  if (!open) return null;
+  return <CommandPaletteBody key="open" onClose={onClose} />;
+}
+
+interface BodyProps {
+  onClose: () => void;
+}
+
+function CommandPaletteBody({ onClose }: BodyProps) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -107,39 +120,33 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  // Reset on open. Without this, re-opening the palette would
-  // show the previous query and stale results — a small detail
-  // but very noticeable when you're using it frequently.
+  // Initial focus on mount. RAF defers until the modal is in the DOM.
   useEffect(() => {
-    if (open) {
-      setQuery("");
-      setDebouncedQuery("");
-      setHits(null);
-      setSelectedIndex(0);
-      // Defer focus to next tick so the modal is in the DOM.
-      requestAnimationFrame(() => inputRef.current?.focus());
-    }
-  }, [open]);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, []);
 
   // Debounce the query so we don't fire a request per keystroke.
   // 120ms is short enough to feel instant; 250ms+ feels laggy.
   useEffect(() => {
-    if (!open) return;
     const t = setTimeout(() => setDebouncedQuery(query), 120);
     return () => clearTimeout(t);
-  }, [query, open]);
+  }, [query]);
 
-  // Fetch on debounced query change. Cancellation flag handles the
-  // case where the user keeps typing and a stale request resolves
-  // after a newer one — we drop the stale results.
+  // Fetch on debounced query change. The "too short" case is a
+  // derived view (see ``effectiveHits`` below) instead of being
+  // cleared via setState here — that keeps this effect pure
+  // ("kick off a fetch") instead of mixing in synchronisation work.
+  // Cancellation flag handles the case where the user keeps typing
+  // and a stale request resolves after a newer one.
   useEffect(() => {
-    if (!open) return;
-    if (debouncedQuery.trim().length < 2) {
-      setHits(null);
-      setLoading(false);
-      return;
-    }
+    if (debouncedQuery.trim().length < 2) return;
     let cancelled = false;
+    // ``setLoading(true)`` is the canonical "kick off async work"
+    // shape — the lint rule's preferred alternatives (transitions,
+    // suspense) don't apply to fire-and-forget palette search. This
+    // is exactly one of the cases the React docs call out as a
+    // valid effect responsibility.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     api
       .search(debouncedQuery)
@@ -158,7 +165,14 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
     return () => {
       cancelled = true;
     };
-  }, [debouncedQuery, open]);
+  }, [debouncedQuery]);
+
+  // Derived: hits only count when the debounced query is long
+  // enough. We compute on render instead of clearing via setState
+  // so deleting characters doesn't flash old hits + so the lint
+  // rule stays clean.
+  const effectiveHits =
+    debouncedQuery.trim().length < 2 ? null : hits;
 
   // Flat list of selectable rows, in the same order the UI
   // renders them. Actions section is dropped when the user has
@@ -169,10 +183,10 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
     if (trimmed.length < 2) {
       // No query → show actions only.
       out.push(...ACTIONS);
-    } else if (hits) {
+    } else if (effectiveHits) {
       // Query → show hits. Actions hide so Enter from the search
       // box always goes to the first matching loan / party.
-      for (const h of hits.loans) {
+      for (const h of effectiveHits.loans) {
         out.push({
           kind: "loan",
           id: h.id,
@@ -181,7 +195,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
           href: h.href,
         });
       }
-      for (const h of hits.parties) {
+      for (const h of effectiveHits.parties) {
         out.push({
           kind: "party",
           id: h.id,
@@ -192,12 +206,13 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
       }
     }
     return out;
-  }, [hits, debouncedQuery]);
+  }, [effectiveHits, debouncedQuery]);
 
-  // Clamp selected index when rows shrink (e.g. delete chars).
-  useEffect(() => {
-    if (selectedIndex >= rows.length) setSelectedIndex(Math.max(0, rows.length - 1));
-  }, [rows, selectedIndex]);
+  // Clamp the selected index in derived form rather than via
+  // ``setState`` in an effect. The ARROW UP/DOWN handlers below
+  // still mutate ``selectedIndex``, but every consumer reads
+  // ``safeIndex`` — which always lies in [0, rows.length - 1].
+  const safeIndex = Math.min(selectedIndex, Math.max(0, rows.length - 1));
 
   const handleNavigate = useCallback(
     (row: SelectableRow) => {
@@ -230,29 +245,28 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
       }
       if (e.key === "Enter") {
         e.preventDefault();
-        const row = rows[selectedIndex];
+        const row = rows[safeIndex];
         if (row) handleNavigate(row);
         return;
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, rows, selectedIndex, handleNavigate, onClose]);
-
-  if (!open) return null;
+  }, [rows, safeIndex, handleNavigate, onClose]);
 
   const showingResults = debouncedQuery.trim().length >= 2;
   const hasAnyHits =
-    !!hits && (hits.loans.length > 0 || hits.parties.length > 0);
+    !!effectiveHits &&
+    (effectiveHits.loans.length > 0 || effectiveHits.parties.length > 0);
 
-  // Compute the running flat index per row so we can highlight the
-  // right one. We render in two passes (actions OR loans + parties);
-  // the running counter keeps the selection model honest.
-  let flatIdx = -1;
-  const nextIdx = () => {
-    flatIdx += 1;
-    return flatIdx;
-  };
+  // Index of the first hit in each section, computed once. The UI
+  // renders in two passes — actions XOR loans+parties — but ``rows``
+  // is already that single flat array, so the section offsets map
+  // cleanly onto its indices. Replaces the older mutable ``flatIdx``
+  // closure (which the React 19 lint rule flagged as a stale
+  // post-render reassign).
+  const loansStartIdx = 0;
+  const partiesStartIdx = effectiveHits ? effectiveHits.loans.length : 0;
 
   return (
     <AnimatePresence>
@@ -298,34 +312,31 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
             {!showingResults && (
               <>
                 <SectionHeader>Jump to</SectionHeader>
-                {ACTIONS.map((a) => {
-                  const idx = nextIdx();
-                  return (
-                    <Row
-                      key={a.id}
-                      selected={idx === selectedIndex}
-                      onHover={() => setSelectedIndex(idx)}
-                      onClick={() => handleNavigate(a)}
-                      Icon={a.Icon}
-                      label={a.label}
-                      sublabel={a.sublabel}
-                    />
-                  );
-                })}
+                {ACTIONS.map((a, i) => (
+                  <Row
+                    key={a.id}
+                    selected={i === safeIndex}
+                    onHover={() => setSelectedIndex(i)}
+                    onClick={() => handleNavigate(a)}
+                    Icon={a.Icon}
+                    label={a.label}
+                    sublabel={a.sublabel}
+                  />
+                ))}
               </>
             )}
 
-            {showingResults && hits && (
+            {showingResults && effectiveHits && (
               <>
-                {hits.loans.length > 0 && (
+                {effectiveHits.loans.length > 0 && (
                   <>
                     <SectionHeader>Loans</SectionHeader>
-                    {hits.loans.map((h) => {
-                      const idx = nextIdx();
+                    {effectiveHits.loans.map((h, i) => {
+                      const idx = loansStartIdx + i;
                       return (
                         <Row
                           key={`loan-${h.id}`}
-                          selected={idx === selectedIndex}
+                          selected={idx === safeIndex}
                           onHover={() => setSelectedIndex(idx)}
                           onClick={() =>
                             handleNavigate({
@@ -344,11 +355,11 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                     })}
                   </>
                 )}
-                {hits.parties.length > 0 && (
+                {effectiveHits.parties.length > 0 && (
                   <>
                     <SectionHeader>Borrowers &amp; guarantors</SectionHeader>
-                    {hits.parties.map((h) => {
-                      const idx = nextIdx();
+                    {effectiveHits.parties.map((h, i) => {
+                      const idx = partiesStartIdx + i;
                       const Icon =
                         (h.sublabel ?? "").toLowerCase() === "entity"
                           ? IconUsers
@@ -356,7 +367,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                       return (
                         <Row
                           key={`party-${h.id}`}
-                          selected={idx === selectedIndex}
+                          selected={idx === safeIndex}
                           onHover={() => setSelectedIndex(idx)}
                           onClick={() =>
                             handleNavigate({

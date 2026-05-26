@@ -49,7 +49,6 @@ from mkopo.models import (
 )
 from mkopo.routers.borrower_portal import _next_step_for_borrower
 from mkopo.services.audit import Actor, record
-from mkopo.services.auth_service import verify_password
 from mkopo.services.loans import IllegalStageTransitionError, transition_stage
 from mkopo.services.redis_client import consume_challenge
 from mkopo.services.storage import StorageAuthzError, mint_download_url

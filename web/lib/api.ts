@@ -878,6 +878,45 @@ export interface JudgmentSummary {
   rows: JudgmentRow[];
 }
 
+// ---- Safety scenarios catalog -------------------------------------------
+//
+// Each scenario is a structured robustness property the system pins.
+// Backed by a test in tests/test_safety_scenarios.py — CI failure on
+// the test means the corresponding scenario card on the UI flips to
+// a regression banner.
+
+export type ScenarioCategory =
+  | "preflight-gate"
+  | "rule-engine-override"
+  | "constitutional-judge"
+  | "scope-and-role"
+  | "input-injection"
+  | "storage-authz"
+  | "stage-machine"
+  | "stage-lock"
+  | "orchestrator"
+  | "loop-bound";
+
+export type ScenarioSeverity = "critical" | "high" | "medium" | "low";
+export type ScenarioStatus = "protected" | "known-gap";
+
+export interface ScenarioRow {
+  id: string;
+  category: ScenarioCategory;
+  title: string;
+  threat: string;
+  defense: string;
+  defense_layer: string;
+  test_id: string | null;
+  severity: ScenarioSeverity;
+  status: ScenarioStatus;
+}
+
+export interface ScenariosResponse {
+  protected: ScenarioRow[];
+  known_gaps: ScenarioRow[];
+}
+
 export const api = {
   listLoans: () => request<Loan[]>("/loans"),
   getLoan: (id: string) => request<Loan>(`/loans/${id}`),
@@ -1122,6 +1161,11 @@ export const api = {
     request<JudgmentSummary>(
       `/safety/judgments?hours=${hours}&limit=${limit}`,
     ),
+  /** Static scenarios catalog — every robustness property the
+   *  system pins, with the test that backs it. Doubles as
+   *  audit documentation. */
+  getSafetyScenarios: () =>
+    request<ScenariosResponse>(`/safety/scenarios`),
   // ---- Prompts ----
   /** List every registered prompt with its current active version. */
   listPrompts: () => request<PromptSummary[]>(`/prompts`),

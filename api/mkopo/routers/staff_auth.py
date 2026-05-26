@@ -107,7 +107,7 @@ class LoginResponse(BaseModel):
 
     token: str
     expires_in_seconds: int
-    user: "StaffMe"
+    user: StaffMe
 
 
 class StaffMe(BaseModel):

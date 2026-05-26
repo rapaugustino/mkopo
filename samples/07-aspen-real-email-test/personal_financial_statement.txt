@@ -1,6 +1,6 @@
 PERSONAL FINANCIAL STATEMENT
 For loan application: Aspen Grove Industrial Partners, LLC ($2,400,000 permanent)
-Guarantor: Richard Pallangyo
+Guarantor: Sample Guarantor
 As of: May 1, 2026
 
 ASSETS
@@ -44,5 +44,5 @@ Total existing guaranty exposure:          $0
 
 Certified true and correct as of the date shown above.
 
-Signed: Richard Pallangyo
+Signed: Sample Guarantor
 Date: May 1, 2026

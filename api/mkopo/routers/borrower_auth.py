@@ -30,8 +30,7 @@ email is acknowledged, and only because the UX otherwise breaks.
 
 from __future__ import annotations
 
-import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import structlog
 from fastapi import (
@@ -49,7 +48,6 @@ from sqlalchemy import select
 from mkopo.config import get_settings
 from mkopo.deps import CurrentBorrowerDep, DbSessionDep
 from mkopo.models import User
-from mkopo.services.audit import Actor, record
 from mkopo.services.auth_service import (
     SESSION_COOKIE,
     consume_magic_link,
