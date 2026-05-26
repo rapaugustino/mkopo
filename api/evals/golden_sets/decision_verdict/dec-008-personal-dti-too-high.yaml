@@ -1,0 +1,27 @@
+id: dec-008-personal-dti-too-high
+description: |
+  Personal loan with DTI 0.51 — over the 0.43 cap. Decline path.
+inputs:
+  loan_class: personal
+  rule_outcomes:
+    - rule_id: personal_doc_completeness
+      severity: block
+      passed: true
+      message: All required documents present.
+    - rule_id: credit_score_floor
+      severity: block
+      passed: true
+      message: FICO 690 above floor.
+    - rule_id: dti_under_cap
+      severity: block
+      passed: false
+      message: DTI 51% over 43% cap.
+  extractions:
+    borrower_name: Tanya Reeves
+    annual_income: "62,000"
+    credit_score: "690"
+    loan_amount: "20,000"
+expected:
+  path: decline
+metadata:
+  scenario: personal-dti-blocking

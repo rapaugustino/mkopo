@@ -1,0 +1,28 @@
+id: dec-007-personal-fico-too-low
+description: |
+  Personal loan, FICO 580 — under the 660 floor. Blocking failure;
+  decline is the only legal path.
+inputs:
+  loan_class: personal
+  rule_outcomes:
+    - rule_id: personal_doc_completeness
+      severity: block
+      passed: true
+      message: All required documents present.
+    - rule_id: credit_score_floor
+      severity: block
+      passed: false
+      message: FICO 580 below 660 floor.
+    - rule_id: dti_under_cap
+      severity: block
+      passed: true
+      message: DTI 32% under cap.
+  extractions:
+    borrower_name: James Park
+    annual_income: "55,000"
+    credit_score: "580"
+    loan_amount: "12,000"
+expected:
+  path: decline
+metadata:
+  scenario: personal-fico-blocking

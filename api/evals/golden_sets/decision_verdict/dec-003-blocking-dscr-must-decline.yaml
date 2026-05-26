@@ -1,0 +1,28 @@
+id: dec-003-blocking-dscr-must-decline
+description: |
+  DSCR 0.92 — way below the 1.20 multifamily floor. NOI doesn't
+  even cover debt service. Mandatory decline path.
+inputs:
+  loan_class: business
+  rule_outcomes:
+    - rule_id: doc_completeness
+      severity: block
+      passed: true
+      message: All required documents present.
+    - rule_id: ltv_under_cap
+      severity: block
+      passed: true
+      message: LTV 0.62 within cap.
+    - rule_id: dscr_above_floor
+      severity: block
+      passed: false
+      message: DSCR 0.92 below 1.20 multifamily floor.
+  extractions:
+    borrower_entity: Sunset Plaza LP
+    property_type: 6-unit multifamily
+    annual_noi: "60,000"
+    loan_amount: "1,500,000"
+expected:
+  path: decline
+metadata:
+  scenario: dscr-blocking-failure

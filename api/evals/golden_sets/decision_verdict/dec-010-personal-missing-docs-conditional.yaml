@@ -1,0 +1,28 @@
+id: dec-010-personal-missing-docs-conditional
+description: |
+  Personal loan, missing W-2. Doc completeness is the only failing
+  rule. ``conditional`` with a "send us your W-2" condition.
+inputs:
+  loan_class: personal
+  rule_outcomes:
+    - rule_id: personal_doc_completeness
+      severity: block
+      passed: false
+      message: "Missing required documents: w2"
+    - rule_id: credit_score_floor
+      severity: block
+      passed: true
+      message: FICO 715 above floor.
+    - rule_id: dti_under_cap
+      severity: block
+      passed: true
+      message: DTI 35% under cap.
+  extractions:
+    borrower_name: Dion Mitchell
+    annual_income: "78,000"
+    credit_score: "715"
+    loan_amount: "16,000"
+expected:
+  path: conditional
+metadata:
+  scenario: personal-missing-docs

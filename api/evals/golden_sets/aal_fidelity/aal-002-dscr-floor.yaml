@@ -1,0 +1,20 @@
+id: aal-002-dscr-floor
+description: |
+  Decline due to insufficient debt service coverage. Friendly
+  label = "debt service coverage", not "dscr_above_floor".
+inputs:
+  loan_class: business
+  applicant_name: Sunset Plaza LP
+  rule_outcomes:
+    - rule_id: dscr_above_floor
+      severity: block
+      passed: false
+      message: DSCR 0.92 below 1.20 multifamily floor.
+      friendly_label: Debt service coverage below policy floor
+expected:
+  blocking_rule_ids:
+    - dscr_above_floor
+  friendly_labels_in_body:
+    - debt service coverage
+metadata:
+  scenario: single-blocking-dscr

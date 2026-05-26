@@ -39,7 +39,25 @@ import { Pill, type PillVariant } from "@/app/components/Pill";
 import { SectionLabel } from "@/app/components/SectionLabel";
 import { Skeleton } from "@/app/components/Skeleton";
 import { StatTile } from "@/app/components/StatTile";
+import { Tooltip } from "@/app/components/Tooltip";
 import { InjectionDrawer } from "./InjectionDrawer";
+
+/** Tooltip definitions for the Safety dashboard's KPI tiles. The
+ *  strings live here (not inline in JSX) so they're easy to spot,
+ *  edit, and keep terminology consistent across the page. Each one
+ *  names what's counted + which code path produces the value. */
+const TILE_DEFINITIONS: Record<string, string> = {
+  Scanned:
+    "Every input that flowed through the injection detector in this window — documents, chat messages, application form text. Empty inputs are skipped and don't count here.",
+  Allowed:
+    "The detector returned ``decision=allowed`` — either the pattern catalog found nothing (silent allow, no row persisted), or a medium-band pattern hit was downgraded to ``low`` by the Haiku second-pass.",
+  Flagged:
+    "Medium-severity pattern hit was confirmed as ``medium`` by Haiku — input was allowed through but the row is persisted so a reviewer can audit it. Surfaced on per-loan safety chips.",
+  Blocked:
+    "Fail-closed events. Either a HIGH-severity pattern matched (immediate block, no LLM cost), or Haiku confirmed a MEDIUM hit as ``high``. The input never reached the LLM context.",
+  "Haiku judge":
+    "Number of Haiku second-pass calls triggered in the window (only the medium-severity escalation path uses Haiku). The dollar value is the cost estimate at Haiku list pricing (~$0.001 per call).",
+};
 
 interface Props {
   windowHours: number;
@@ -204,7 +222,11 @@ export function SafetyPanel({ windowHours, compact = false }: Props) {
         <div className="rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)]">
           {summary ? (
             <StatTile
-              label="Scanned"
+              label={
+                <Tooltip content={TILE_DEFINITIONS.Scanned} underline>
+                  Scanned
+                </Tooltip>
+              }
               value={NUM(summary.total_scanned)}
               trend={`window ${summary.window_hours}h`}
               Icon={IconShieldHalf}
@@ -216,7 +238,11 @@ export function SafetyPanel({ windowHours, compact = false }: Props) {
         <div className="rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)]">
           {summary ? (
             <StatTile
-              label="Allowed"
+              label={
+                <Tooltip content={TILE_DEFINITIONS.Allowed} underline>
+                  Allowed
+                </Tooltip>
+              }
               value={NUM(summary.total_allowed)}
               Icon={IconShieldCheck}
             />
@@ -227,7 +253,11 @@ export function SafetyPanel({ windowHours, compact = false }: Props) {
         <div className="rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)]">
           {summary ? (
             <StatTile
-              label="Flagged"
+              label={
+                <Tooltip content={TILE_DEFINITIONS.Flagged} underline>
+                  Flagged
+                </Tooltip>
+              }
               value={NUM(summary.total_flagged)}
               trend={summary.total_flagged > 0 ? "needs review" : undefined}
               trendColor={
@@ -244,7 +274,11 @@ export function SafetyPanel({ windowHours, compact = false }: Props) {
         <div className="rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)]">
           {summary ? (
             <StatTile
-              label="Blocked"
+              label={
+                <Tooltip content={TILE_DEFINITIONS.Blocked} underline>
+                  Blocked
+                </Tooltip>
+              }
               value={NUM(summary.total_blocked)}
               trend={summary.total_blocked > 0 ? "fail-closed fired" : undefined}
               trendColor={
@@ -261,7 +295,11 @@ export function SafetyPanel({ windowHours, compact = false }: Props) {
         <div className="rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)]">
           {summary ? (
             <StatTile
-              label="Haiku judge"
+              label={
+                <Tooltip content={TILE_DEFINITIONS["Haiku judge"]} underline>
+                  Haiku judge
+                </Tooltip>
+              }
               value={NUM(summary.llm_judge_calls)}
               trend={USD(summary.cost_estimate_usd)}
               Icon={IconCoin}

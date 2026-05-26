@@ -1,0 +1,31 @@
+id: dec-002-blocking-ltv-must-decline
+description: |
+  LTV blows past the cap (108% on a multifamily; cap is 70%).
+  This is a hard decline path — the rules engine flags
+  ``ltv_under_cap`` as severity=block, passed=false. The decision
+  agent MUST recommend decline; if the LLM picks anything else,
+  the server-side override rewrites it.
+inputs:
+  loan_class: business
+  rule_outcomes:
+    - rule_id: doc_completeness
+      severity: block
+      passed: true
+      message: All required documents present.
+    - rule_id: ltv_under_cap
+      severity: block
+      passed: false
+      message: LTV 1.08 above 0.70 multifamily cap.
+    - rule_id: dscr_above_floor
+      severity: block
+      passed: true
+      message: DSCR 1.40 above 1.20 multifamily floor.
+  extractions:
+    borrower_entity: Northshore Partners LLC
+    property_type: 8-unit multifamily
+    appraised_value: "1,850,000"
+    loan_amount: "2,000,000"
+expected:
+  path: decline
+metadata:
+  scenario: ltv-blocking-failure

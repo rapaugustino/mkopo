@@ -299,8 +299,27 @@ cd api
 uv run python -m evals.runner
 ```
 
-Needs ``ANTHROPIC_API_KEY`` set in ``api/.env``. Results land in
-``api/evals/results/results.json`` for CI artifacts.
+Needs ``ANTHROPIC_API_KEY`` set in ``api/.env``. Each run:
+
+1. Writes per-task accuracy to ``api/evals/results/results.json``
+   (CI artifact, exit-code-gated).
+2. **Inserts one ``task_runs`` row per task with ``source='golden'``**
+   so the ``/eval`` dashboard shows the run alongside the production
+   drift numbers. Interactive runs and the scheduled sweep both
+   update the dashboard.
+
+### Scheduled golden sweep
+
+The arq worker runs the same golden suite nightly at 4 AM UTC
+(``mkopo/workers/tasks.py::golden_eval_sweep``). Combined with the
+3 AM UTC drift monitor, the dashboard's ``Production accuracy`` vs
+``Golden baseline`` tiles always have near-aligned data points.
+Start the worker with:
+
+```bash
+cd api
+uv run arq mkopo.workers.tasks.WorkerSettings
+```
 
 ### What runs today
 
@@ -309,16 +328,15 @@ Needs ``ANTHROPIC_API_KEY`` set in ``api/.env``. Results land in
 | ``extract_borrower_entity`` | 95% | 2 | Extractor returns the canonical borrower entity name from a loan-application doc |
 | ``extract_noi`` | 90% | 1 | Extractor returns the right annual NOI from an operating statement |
 | ``summarize_underwriting`` | 80% | 1 | Summary cites the right rule outcomes + uses the correct vocabulary for the loan class |
+| ``adversarial_injection`` | 100% | 2 | Input-layer detector blocks every documented attack pattern at HIGH severity. CI fails on any miss |
+| ``decision_verdict`` | 85% | 10 | Decision LLM picks the right path (approve / conditional / decline). Aggregate emits per-class precision/recall/F1 + macro-F1 + a confusion matrix (SR 11-7 outcome analysis) |
+| ``aal_fidelity`` | 75% | 6 | AAL drafter cites every blocking rule, uses friendly labels not rule_id tokens, includes the ECOA right-to-know disclosure (CFPB Circular 2022-03). Per-criterion pass rates surface on the dashboard |
 
-### Adversarial-injection fixtures (documentation-only today)
-
-``evals/golden_sets/adversarial_injection/`` carries
-``inj-001-ignore-instructions`` (direct injection in document body)
-and ``inj-002-rule-bypass`` (indirect injection in appraisal). They
-document the threat model but aren't currently scored by the runner —
-the runtime defense is verified by ``tests/test_safety_scenarios.py``
-(the ``TestInputLayerInjection`` class) and by the live
-``/safety`` dashboard. See [docs/SAFETY.md](docs/SAFETY.md).
+Plus a non-CLI **calibration monitor** (``services/calibration.py``) that
+computes Expected Calibration Error + Brier score on the last 30 days
+of resolved extractions. Runs on the arq scheduler at 3:30 AM UTC
+alongside the drift + golden sweeps; results land in ``task_runs`` so
+the dashboard's trend chart picks them up.
 
 ### Eval dashboard
 

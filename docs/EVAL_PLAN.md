@@ -109,40 +109,51 @@ dashboard. Fix that first.
 dashboard that doesn't reflect reality. After Phase 1, "ran the
 eval" → "saw new numbers" is reliable.
 
-### Phase 2 — Industry-standard metric coverage (~3–5 days)
+### Phase 2 — Industry-standard metric coverage
 
-For each new metric, the work is: write the computation, store it
-in `task_runs.payload` (already a JSONB column), render in the UI.
+The four highest-value items in this phase **shipped** — the
+``AggregatingEvalTask`` protocol lets each task emit a richer
+JSON-serialisable details payload that lands in ``task_runs.details``;
+new ``GET /eval/task-detail/{task_name}`` endpoint serves them.
 
-- [ ] **Decision verdict task** — golden set of 15–20 loan contexts
-  per path (approve / conditional / decline) with expected verdicts.
-  Score: per-class precision/recall/F1 + macro-F1 + confusion matrix.
-  Render: confusion-matrix heatmap card.
-- [ ] **AAL fidelity task** — 15 decline scenarios with expected
-  principal_reasons. Score: did every blocking failure get cited?
-  did the body use the friendly label, never the rule_id token? did
-  the ECOA "right to know" sentence appear? Score = AND of all
-  checks. Render: per-check pass-rate cards (CFPB Circular 2022-03
-  + 2023-09 backing).
-- [ ] **Intake email task per loan class** — 10 personal + 10 commercial.
-  Score: addressed by name, no markdown, doc asks match loan class,
-  ≤120 words. Render: per-criterion pass-rates.
-- [ ] **Calibration metrics on extractor confidence** — Expected
-  Calibration Error (ECE, K=10 bins) + Brier score. Compute from
-  the existing review-queue ground truth. Render: reliability
-  diagram (binned bar chart, confidence vs empirical accuracy).
+- [x] **Decision verdict task** — 10 loan contexts across all three
+  paths. Per-class precision/recall/F1 + macro-F1 + a confusion
+  matrix in ``details``. SR 11-7 §VI outcome analysis. See
+  ``evals/tasks/decision_verdict.py``.
+- [x] **AAL fidelity task** — 6 decline scenarios. Four AND-ed
+  criteria: principal_reasons_complete, friendly_label_in_body,
+  no_rule_id_in_body, right_to_know_disclosure. Per-criterion pass
+  rates in ``details``. CFPB Circular 2022-03 + 2023-09. See
+  ``evals/tasks/aal_fidelity.py``.
+- [x] **Calibration metrics on extractor confidence** — ECE (K=10)
+  + Brier score on the last 30 days of resolved extractions.
+  Reliability-diagram bins in ``details`` for the binned-bar UI.
+  Scheduled at 3:30 AM UTC via
+  ``workers/tasks.py::calibration_monitor``. Guo et al. 2017 +
+  Spiess et al. 2024 backing. See ``services/calibration.py``.
+- [x] **Score the adversarial-injection fixtures** — wired as
+  ``adversarial_injection`` runner task, threshold 100%. Per-pattern
+  pass rate in ``details``. See
+  ``evals/tasks/adversarial_injection.py``.
+
+Remaining for **Phase 2.5** (deferred — each substantial enough for
+a focused turn):
+
+- [ ] **Intake email task per loan class** — 10 personal + 10
+  commercial. Score: addressed by name, no markdown, doc asks
+  match loan class, ≤120 words.
 - [ ] **Faithfulness / groundedness on underwriting summaries** —
-  RAGAS-style: extract atomic claims from summary, verify each
-  against the extractions block. Run on every persisted summary +
-  the golden set. Render: groundedness time series.
-- [ ] **Bigger extraction goldens** — bump each task to 25–30
-  examples. Add tasks for the other ~10 fields the extractor handles
-  (property_address, appraised_value, credit_score, etc.).
-- [ ] **Score the adversarial-injection fixtures.** Wire
-  `evals/golden_sets/adversarial_injection/*.yaml` into the runner
-  as a scored task — pass if the detector blocks at HIGH severity.
-  Sneaks into Phase 2 because the fixtures + detector both exist;
-  it's just a 30-line task class.
+  RAGAS-style atomic-claim verification. Run on every persisted
+  summary + the golden set. Render: groundedness time series.
+- [ ] **Bigger extraction goldens** — bump each existing task to
+  25–30 examples. Add tasks for the other ~10 fields the extractor
+  handles (property_address, appraised_value, credit_score, etc.).
+- [ ] **Frontend rendering** — dashboard cards for the Phase 2
+  payloads. Today the data is in ``task_runs.details`` + reachable
+  via ``GET /eval/task-detail/{name}``, but the existing eval page
+  doesn't yet render the confusion matrix / per-criterion bars /
+  reliability diagram. Mock data + endpoint shape are ready; the
+  UI is a focused frontend pass.
 
 ### Phase 3 — Operational + compliance metrics (~3–5 days)
 

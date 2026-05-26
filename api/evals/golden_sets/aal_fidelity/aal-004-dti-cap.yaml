@@ -1,0 +1,20 @@
+id: aal-004-dti-cap
+description: |
+  Personal decline — DTI over cap. Letter must NOT use the raw
+  rule_id ("dti_under_cap") in the body; friendly label only.
+inputs:
+  loan_class: personal
+  applicant_name: Tanya Reeves
+  rule_outcomes:
+    - rule_id: dti_under_cap
+      severity: block
+      passed: false
+      message: DTI 51% over 43% cap.
+      friendly_label: Debt-to-income ratio above policy cap
+expected:
+  blocking_rule_ids:
+    - dti_under_cap
+  friendly_labels_in_body:
+    - debt-to-income
+metadata:
+  scenario: personal-dti-blocking

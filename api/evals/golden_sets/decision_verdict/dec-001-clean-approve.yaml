@@ -1,0 +1,38 @@
+id: dec-001-clean-approve
+description: |
+  Commercial real-estate loan with every rule passing cleanly: LTV
+  well under cap, DSCR comfortably above floor, recent appraisal,
+  no missing docs. Should land on ``approve`` with high confidence.
+inputs:
+  loan_class: business
+  rule_outcomes:
+    - rule_id: doc_completeness
+      severity: block
+      passed: true
+      message: All required documents present.
+    - rule_id: ltv_under_cap
+      severity: block
+      passed: true
+      message: LTV 0.54 within 0.70 multifamily cap.
+    - rule_id: dscr_above_floor
+      severity: block
+      passed: true
+      message: DSCR 1.65 above 1.20 multifamily floor.
+    - rule_id: debt_yield_above_floor
+      severity: warn
+      passed: true
+      message: Debt yield 10.2% above 8.0% floor.
+    - rule_id: appraisal_age
+      severity: warn
+      passed: true
+      message: Appraisal is 30 days old (under 180-day cap).
+  extractions:
+    borrower_entity: Atlas Holdings LLC
+    property_type: 12-unit multifamily
+    appraised_value: "4,400,000"
+    annual_noi: "240,000"
+    loan_amount: "2,400,000"
+expected:
+  path: approve
+metadata:
+  scenario: clean-pass-all-rules

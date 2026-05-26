@@ -1,0 +1,20 @@
+id: aal-003-fico-floor
+description: |
+  Personal decline — credit score below floor. Friendly label
+  the borrower can act on, never the raw rule_id.
+inputs:
+  loan_class: personal
+  applicant_name: James Park
+  rule_outcomes:
+    - rule_id: credit_score_floor
+      severity: block
+      passed: false
+      message: FICO 580 below 660 floor.
+      friendly_label: Credit score below underwriting floor
+expected:
+  blocking_rule_ids:
+    - credit_score_floor
+  friendly_labels_in_body:
+    - credit score
+metadata:
+  scenario: personal-fico-blocking

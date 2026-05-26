@@ -1,0 +1,29 @@
+id: dec-004-missing-docs-conditional
+description: |
+  Rent roll missing. Doc completeness blocks; everything else
+  passes. The right answer is ``conditional`` with a condition for
+  the missing doc — declining outright would be punitive when the
+  borrower can fix it.
+inputs:
+  loan_class: business
+  rule_outcomes:
+    - rule_id: doc_completeness
+      severity: block
+      passed: false
+      message: "Missing required documents: rent_roll"
+    - rule_id: ltv_under_cap
+      severity: block
+      passed: true
+      message: LTV 0.58 within cap.
+    - rule_id: dscr_above_floor
+      severity: block
+      passed: true
+      message: DSCR 1.45 above floor.
+  extractions:
+    borrower_entity: Cedar Court Apartments LLC
+    property_type: 14-unit multifamily
+    loan_amount: "2,200,000"
+expected:
+  path: conditional
+metadata:
+  scenario: missing-required-document

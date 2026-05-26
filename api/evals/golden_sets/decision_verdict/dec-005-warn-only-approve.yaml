@@ -1,0 +1,33 @@
+id: dec-005-warn-only-approve
+description: |
+  Appraisal is 165 days old (under the 180-day cap, but the rule
+  is severity=warn passed=false at that age). No blocking failures.
+  Approve with the warning called out in the rationale; don't
+  escalate to conditional just for a soft warning.
+inputs:
+  loan_class: business
+  rule_outcomes:
+    - rule_id: doc_completeness
+      severity: block
+      passed: true
+      message: All required documents present.
+    - rule_id: ltv_under_cap
+      severity: block
+      passed: true
+      message: LTV 0.55 within cap.
+    - rule_id: dscr_above_floor
+      severity: block
+      passed: true
+      message: DSCR 1.55 above floor.
+    - rule_id: appraisal_age
+      severity: warn
+      passed: false
+      message: Appraisal is 165 days old (approaching 180-day cap).
+  extractions:
+    borrower_entity: Maplewood Centre LLC
+    property_type: retail strip center
+    loan_amount: "1,800,000"
+expected:
+  path: approve
+metadata:
+  scenario: warn-only-no-blocks

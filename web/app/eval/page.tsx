@@ -31,6 +31,28 @@ import { BrandHeader } from "@/app/components/BrandHeader";
 import { Pill } from "@/app/components/Pill";
 import { PrimaryButton } from "@/app/components/PrimaryButton";
 import { StatTile } from "@/app/components/StatTile";
+import { Tooltip } from "@/app/components/Tooltip";
+
+/** Tooltip definitions for the eval dashboard. Centralised so the
+ *  wording stays consistent across cards + so a regulator-friendly
+ *  language pass touches one file. Each definition names what's
+ *  measured + how it's computed + where the number comes from. */
+const EVAL_TOOLTIP: Record<string, string> = {
+  "Production accuracy":
+    "Unweighted mean accuracy across tracked extraction fields, computed from staff overrides in the review queue. A 'production' task_run is written by services/drift.py:run_drift_monitor each time the drift sweep runs (manually via Refresh, or on the scheduled sweep). Compare to Golden baseline to spot drift.",
+  "Golden baseline":
+    "Unweighted mean accuracy on the labelled YAML golden sets in api/evals/golden_sets/. A 'golden' task_run is written by the CLI eval runner (cd api && uv run python -m evals.runner) and by the periodic golden sweep. This is the reference the model is supposed to hit.",
+  "LLM p95 latency":
+    "95th percentile of LLM call duration in the last 24h. p95 (not p50) because tail latency is what users feel — a fast median with a slow p95 is still a bad experience.",
+  "LLM error rate":
+    "Fraction of llm_calls rows with status != 'ok' in the last 24h (schema validation failures, provider errors, timeouts). >5% trips the trend pill to red.",
+  Open:
+    "Review-queue items in 'open' status. Created when an extraction's confidence falls below its per-field threshold (see services/extractor.threshold_for).",
+  "Resolved 7d":
+    "Review-queue items closed (accepted or overridden) in the last 7 days. Healthy systems show steady throughput; a stalled count means human review is the bottleneck.",
+  "Median age":
+    "Median time-to-resolve for items closed in the last 7 days. The SLO band on the trend pill is set by team policy.",
+};
 
 const PCT = (v: number | null | undefined, digits = 1) =>
   v == null ? "—" : `${(v * 100).toFixed(digits)}%`;
@@ -275,19 +297,29 @@ export default function EvalDashboardPage() {
   const [openCallId, setOpenCallId] = useState<string | null>(null);
   const [openRunId, setOpenRunId] = useState<string | null>(null);
 
+  // Top-level metrics refetch every 60s so the dashboard reflects
+  // both manual Refresh-button clicks AND the scheduled jobs
+  // (drift_monitor at 3am UTC + golden_eval_sweep at 4am UTC, see
+  // workers/tasks.py). Previously these only refreshed on mount /
+  // window focus — a staff user keeping the tab open wouldn't see
+  // numbers move. 60s is the sweet spot: fresh enough to feel live,
+  // slow enough that paginated bots don't notice us.
   const summaryQuery = useQuery<EvalSummary, Error>({
     queryKey: ["eval-summary"],
     queryFn: () => api.getEvalSummary(),
+    refetchInterval: 60_000,
   });
 
   const fieldsQuery = useQuery<EvalFieldRow[], Error>({
     queryKey: ["eval-fields"],
     queryFn: () => api.getEvalFields(),
+    refetchInterval: 60_000,
   });
 
   const trendQuery = useQuery<EvalTrend, Error>({
     queryKey: ["eval-trend", 30],
     queryFn: () => api.getEvalTrend(30),
+    refetchInterval: 60_000,
   });
 
   const diagnosticsQuery = useQuery<EvalDiagnostics, Error>({
@@ -401,7 +433,11 @@ export default function EvalDashboardPage() {
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <div className="rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)]">
           <StatTile
-            label="Production accuracy"
+            label={
+              <Tooltip content={EVAL_TOOLTIP["Production accuracy"]} underline>
+                Production accuracy
+              </Tooltip>
+            }
             value={PCT(summary.overall_production_accuracy)}
             trend={
               summary.overall_delta != null
@@ -417,14 +453,22 @@ export default function EvalDashboardPage() {
         </div>
         <div className="rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)]">
           <StatTile
-            label="Golden baseline"
+            label={
+              <Tooltip content={EVAL_TOOLTIP["Golden baseline"]} underline>
+                Golden baseline
+              </Tooltip>
+            }
             value={PCT(summary.overall_golden_accuracy)}
             trend={`${summary.fields_tracked} field${summary.fields_tracked === 1 ? "" : "s"} tracked`}
           />
         </div>
         <div className="rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)]">
           <StatTile
-            label="LLM p95 latency"
+            label={
+              <Tooltip content={EVAL_TOOLTIP["LLM p95 latency"]} underline>
+                LLM p95 latency
+              </Tooltip>
+            }
             value={
               summary.llm_p95_latency_seconds == null
                 ? "—"
@@ -435,7 +479,11 @@ export default function EvalDashboardPage() {
         </div>
         <div className="rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)]">
           <StatTile
-            label="LLM error rate"
+            label={
+              <Tooltip content={EVAL_TOOLTIP["LLM error rate"]} underline>
+                LLM error rate
+              </Tooltip>
+            }
             value={PCT(summary.llm_error_rate_24h)}
             trend={windowReadable}
             trendColor={

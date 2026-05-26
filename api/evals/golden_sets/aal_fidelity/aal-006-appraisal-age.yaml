@@ -1,0 +1,21 @@
+id: aal-006-appraisal-age
+description: |
+  Decline because the appraisal is over 180 days old (block-severity
+  on commercial). Borrower can re-apply with a fresh appraisal — the
+  AAL should hint at that path without promising approval.
+inputs:
+  loan_class: business
+  applicant_name: Eastside Office Holdings LP
+  rule_outcomes:
+    - rule_id: appraisal_age
+      severity: block
+      passed: false
+      message: Appraisal 240 days old; over 180-day commercial cap.
+      friendly_label: Appraisal report is stale
+expected:
+  blocking_rule_ids:
+    - appraisal_age
+  friendly_labels_in_body:
+    - appraisal
+metadata:
+  scenario: stale-appraisal-block

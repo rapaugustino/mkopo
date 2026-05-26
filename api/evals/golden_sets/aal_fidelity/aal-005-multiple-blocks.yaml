@@ -1,0 +1,28 @@
+id: aal-005-multiple-blocks
+description: |
+  Two blocking failures — LTV cap AND DSCR floor. The letter must
+  cite BOTH (CFPB Circular 2022-03: complexity isn't a defense for
+  omitting reasons). Friendly labels for both must appear.
+inputs:
+  loan_class: business
+  applicant_name: Riverside Industrial LLC
+  rule_outcomes:
+    - rule_id: ltv_under_cap
+      severity: block
+      passed: false
+      message: LTV 0.91 above 0.65 industrial cap.
+      friendly_label: Loan-to-value ratio above policy cap
+    - rule_id: dscr_above_floor
+      severity: block
+      passed: false
+      message: DSCR 1.05 below 1.25 industrial floor.
+      friendly_label: Debt service coverage below policy floor
+expected:
+  blocking_rule_ids:
+    - ltv_under_cap
+    - dscr_above_floor
+  friendly_labels_in_body:
+    - loan-to-value
+    - debt service coverage
+metadata:
+  scenario: multiple-blocking-failures

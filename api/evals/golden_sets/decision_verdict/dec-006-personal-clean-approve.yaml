@@ -1,0 +1,33 @@
+id: dec-006-personal-clean-approve
+description: |
+  Personal loan, clean borrower profile: FICO 740, DTI 0.28, two
+  years employed, all docs present. Standard approval.
+inputs:
+  loan_class: personal
+  rule_outcomes:
+    - rule_id: personal_doc_completeness
+      severity: block
+      passed: true
+      message: All required documents present.
+    - rule_id: credit_score_floor
+      severity: block
+      passed: true
+      message: FICO 740 above 660 floor.
+    - rule_id: dti_under_cap
+      severity: block
+      passed: true
+      message: DTI 28% under 43% cap.
+    - rule_id: employment_tenure
+      severity: warn
+      passed: true
+      message: 2.4 years employment tenure.
+  extractions:
+    borrower_name: Maria Chen
+    annual_income: "82,000"
+    credit_score: "740"
+    loan_amount: "18,000"
+    loan_purpose: home improvement
+expected:
+  path: approve
+metadata:
+  scenario: clean-personal-loan

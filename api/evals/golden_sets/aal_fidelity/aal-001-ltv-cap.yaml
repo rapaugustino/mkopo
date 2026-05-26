@@ -1,0 +1,25 @@
+id: aal-001-ltv-cap
+description: |
+  Decline due to LTV over cap. Letter must cite the LTV failure
+  by its friendly label (not the rule_id token) and include the
+  ECOA "right to know" disclosure.
+inputs:
+  loan_class: business
+  applicant_name: Northshore Partners LLC
+  rule_outcomes:
+    - rule_id: ltv_under_cap
+      severity: block
+      passed: false
+      message: LTV 1.08 above 0.70 multifamily cap.
+      friendly_label: Loan-to-value ratio above policy cap
+    - rule_id: doc_completeness
+      severity: block
+      passed: true
+      message: All required documents present.
+expected:
+  blocking_rule_ids:
+    - ltv_under_cap
+  friendly_labels_in_body:
+    - loan-to-value
+metadata:
+  scenario: single-blocking-ltv
