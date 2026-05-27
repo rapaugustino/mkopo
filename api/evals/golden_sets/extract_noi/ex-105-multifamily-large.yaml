@@ -1,0 +1,24 @@
+id: ex-105-multifamily-large
+inputs:
+  document_text: |
+    SUBJECT: 48-unit multifamily, Renton WA
+    REPORT DATE: 2026-02-14
+
+    Rent roll summary:
+    - 24 × 1BR @ $1,650/mo
+    - 24 × 2BR @ $2,100/mo
+    Gross potential rent (annual):     $1,080,000
+    Vacancy + collection (5%):           ($54,000)
+    Other income (laundry, parking):     $36,400
+    Effective gross income:            $1,062,400
+
+    Operating expenses (47.2% margin):  ($501,453)
+
+    NOI:                                 $560,947
+expected:
+  noi: 560947
+  currency: USD
+metadata:
+  source: synthetic
+  doc_type: rent_roll_plus_operating
+  property_type: multifamily

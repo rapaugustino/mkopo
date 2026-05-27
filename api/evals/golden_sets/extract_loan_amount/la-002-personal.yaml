@@ -1,0 +1,16 @@
+id: la-002-personal
+inputs:
+  document_text: |
+    PERSONAL LOAN APPLICATION
+
+    Applicant: Jane Mwangi
+    Annual income: $84,000
+
+    Loan amount requested:    $25,000
+    Purpose:                  Debt consolidation
+    Requested term:           48 months
+expected:
+  loan_amount: 25000
+metadata:
+  source: synthetic
+  doc_type: personal_loan_application

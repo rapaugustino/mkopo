@@ -1,0 +1,17 @@
+id: la-005-existing-debt-distractor
+inputs:
+  document_text: |
+    REFINANCE APPLICATION
+
+    Existing senior loan balance (to be paid off):   $1,275,000
+    Existing junior loan balance:                       $215,000
+    New requested loan amount:                       $1,650,000
+
+    Cash-out to borrower:                              $135,000
+    Property: 8-unit multifamily, Tacoma WA
+expected:
+  loan_amount: 1650000
+metadata:
+  source: synthetic
+  doc_type: refinance_application
+  edge_case: "existing balances vs new request"

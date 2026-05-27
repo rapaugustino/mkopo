@@ -1,0 +1,21 @@
+id: ex-104-office-millions
+inputs:
+  document_text: |
+    PROPERTY: 4-story Class A office, 84,000 rsf, Bellevue WA
+
+    SUMMARY OF FINANCIALS (in $millions):
+      Effective gross income:    $4.92
+      Operating expenses:        $1.78
+      Net operating income:      $3.14
+      Cap rate:                  6.5%
+      Indicated value:           $48.31M
+
+    Source: 2025 audited statements + 2026 rent roll.
+expected:
+  noi: 3140000
+  currency: USD
+metadata:
+  source: synthetic
+  doc_type: appraisal_report
+  property_type: office
+  edge_case: "expressed in millions"

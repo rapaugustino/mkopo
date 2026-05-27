@@ -1,0 +1,27 @@
+id: ex-106-tabular
+inputs:
+  document_text: |
+    PROPERTY OPERATING SUMMARY                  FY 2025
+
+    Revenue
+      Rental income                          $885,200
+      Other income                            $14,800
+      Total revenue                          $900,000
+
+    Expenses
+      Property management                     $36,000
+      Repairs & maintenance                   $72,400
+      Property taxes                          $94,800
+      Insurance                               $18,500
+      Utilities (common areas)                $11,300
+      Total expenses                         $233,000
+
+    Net operating income                     $667,000
+expected:
+  noi: 667000
+  currency: USD
+metadata:
+  source: synthetic
+  doc_type: operating_statement
+  property_type: multifamily
+  edge_case: "tabular format with sub-categories"

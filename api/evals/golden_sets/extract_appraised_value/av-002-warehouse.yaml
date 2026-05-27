@@ -1,0 +1,20 @@
+id: av-002-warehouse
+inputs:
+  document_text: |
+    INDUSTRIAL APPRAISAL — 42,000 SF WAREHOUSE
+    7800 E Marginal Way S, Seattle WA
+
+    Indicated values:
+    - Sales comparison:  $6,200,000
+    - Income (DCR):      $6,300,000
+    - Cost approach:     $6,520,000
+
+    The reconciled market value as of the effective date is
+    SIX MILLION THREE HUNDRED THOUSAND DOLLARS ($6,300,000).
+expected:
+  appraised_value: 6300000
+metadata:
+  source: synthetic
+  doc_type: appraisal_report
+  property_type: industrial
+  edge_case: "value written in words + figures"

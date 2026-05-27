@@ -1,0 +1,18 @@
+id: la-003-millions
+inputs:
+  document_text: |
+    LOAN PROPOSAL SUMMARY
+
+    Borrower:           Baobab Industrial Partners LLC
+    Property:           42,000 sf warehouse, Seattle WA
+    Appraised value:    $6.30M
+
+    Loan request:       $4.20M (4,200,000 USD)
+    LTV:                66.7%
+    Term:               7-year balloon, 25-year amort
+expected:
+  loan_amount: 4200000
+metadata:
+  source: synthetic
+  doc_type: loan_proposal
+  edge_case: "millions notation + numeric form together"

@@ -1,0 +1,24 @@
+id: email-002-personal-credit-id
+description: |
+  Personal-loan borrower missing credit score + government ID.
+  The email should request a photo ID + bank statements (the
+  documents the credit_score field comes from), NOT business
+  documents.
+inputs:
+  borrower_name: Samuel Otieno
+  loan_reference: MK-2025-0188
+  officer_name: Jordan Davis
+  officer_email: j.davis@mkopo.dev
+  officer_title: Loan Officer
+  institution: Mkopo Lens
+  loan_class: personal
+  missing_fields:
+    - credit_score
+    - ssn_last4
+expected:
+  borrower_name: Samuel Otieno
+  loan_class: personal
+metadata:
+  fixture_class: personal
+  category: intake_email_compliance
+  source: synthetic

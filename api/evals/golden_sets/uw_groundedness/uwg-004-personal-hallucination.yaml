@@ -1,0 +1,42 @@
+id: uwg-004-personal-hallucination
+description: |
+  Personal unsecured loan — summary contains ONE planted
+  hallucination: the borrower's employer name is wrong (source
+  "Cascade Engineering", summary says "Cascade Logistics") and
+  the summary asserts "10 years of tenure" which has no source
+  span. Expected: judge flags both unsupported claims.
+
+  This pair tests categorical / textual hallucinations (vs the
+  numeric pair in uwg-003) — the failure mode where the model
+  confabulates a plausible-sounding string.
+inputs:
+  source_excerpts: |
+    Loan reference: MK-2025-0299
+    Borrower: Brian Ouma
+    Loan class: personal (unsecured)
+    Requested amount: $18,500
+    Annual income: $72,000 (W-2)
+    Outstanding monthly debt: $410
+    Credit score: 745
+    Employer: Cascade Engineering
+
+    Rule outcomes:
+    - dti_under_cap:    passed=true (DTI = 6.8%; cap = 43%)
+    - fico_floor:       passed=true (FICO = 745; floor = 660)
+    - income_verified:  passed=true (W-2 matches paystubs)
+    - doc_complete:     passed=true (all required docs received)
+  summary_text: |
+    MK-2025-0299: Brian Ouma requests a $18,500 unsecured personal
+    loan. Annual income is $72,000 verified by W-2 from Cascade
+    Logistics, where the applicant has 10 years of tenure. Monthly
+    debt of $410 yields a DTI of 6.8%, well inside the 43% cap.
+    Credit score of 745 clears the 660 floor and all rules pass.
+    Recommend approval.
+expected:
+  expected_band: low
+metadata:
+  category: uw_groundedness
+  source: synthetic
+  planted_hallucinations:
+    - "Cascade Logistics (source says Cascade Engineering)"
+    - "10 years of tenure (no mention in source)"

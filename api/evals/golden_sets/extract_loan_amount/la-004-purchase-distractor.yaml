@@ -1,0 +1,18 @@
+id: la-004-purchase-distractor
+inputs:
+  document_text: |
+    PURCHASE & FINANCING SUMMARY
+
+    Purchase price:           $2,000,000
+    Earnest money deposit:    $50,000
+    Borrower equity:          $400,000
+    Senior loan request:      $1,600,000
+
+    The borrower's contribution will be 20% of the purchase
+    price; the senior loan is the remaining 80%.
+expected:
+  loan_amount: 1600000
+metadata:
+  source: synthetic
+  doc_type: purchase_financing_summary
+  edge_case: "purchase price + equity + loan; must pick loan"

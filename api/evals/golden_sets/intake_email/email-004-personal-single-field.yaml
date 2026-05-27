@@ -1,0 +1,24 @@
+id: email-004-personal-single-field
+description: |
+  Personal-loan borrower missing one field — annual income. Tests
+  the short-prompt path: the drafter shouldn't pad the email out to
+  120 words when only one document is needed. Body should still
+  greet by name + reference the loan + mention W-2 / pay stub /
+  tax return.
+inputs:
+  borrower_name: Brian Ouma
+  loan_reference: MK-2025-0299
+  officer_name: Jordan Davis
+  officer_email: j.davis@mkopo.dev
+  officer_title: Loan Officer
+  institution: Mkopo Lens
+  loan_class: personal
+  missing_fields:
+    - annual_income
+expected:
+  borrower_name: Brian Ouma
+  loan_class: personal
+metadata:
+  fixture_class: personal
+  category: intake_email_compliance
+  source: synthetic

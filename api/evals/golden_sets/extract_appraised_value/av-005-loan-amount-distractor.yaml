@@ -1,0 +1,19 @@
+id: av-005-loan-amount-distractor
+inputs:
+  document_text: |
+    LOAN PACKET COVER PAGE
+
+    Requested loan amount:      $1,800,000
+    Loan-to-value (LTV):              72.0%
+    Appraised value:            $2,500,000
+    Property:  12-unit multifamily, Tacoma WA
+
+    The appraised value above was obtained from the most recent
+    full appraisal dated 2026-01-15. The loan amount is the figure
+    the borrower requested.
+expected:
+  appraised_value: 2500000
+metadata:
+  source: synthetic
+  doc_type: loan_cover
+  edge_case: "loan amount + appraised value side-by-side"

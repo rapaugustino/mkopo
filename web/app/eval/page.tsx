@@ -36,6 +36,8 @@ import { DecisionVerdictCard } from "./cards/DecisionVerdictCard";
 import { AALFidelityCard } from "./cards/AALFidelityCard";
 import { CalibrationCard } from "./cards/CalibrationCard";
 import { AdversarialInjectionCard } from "./cards/AdversarialInjectionCard";
+import { IntakeEmailCard } from "./cards/IntakeEmailCard";
+import { UWGroundednessCard } from "./cards/UWGroundednessCard";
 
 /** Tooltip definitions for the eval dashboard. Centralised so the
  *  wording stays consistent across cards + so a regulator-friendly
@@ -567,6 +569,8 @@ export default function EvalDashboardPage() {
         <AALFidelityCard />
         <CalibrationCard />
         <AdversarialInjectionCard />
+        <IntakeEmailCard />
+        <UWGroundednessCard />
       </div>
 
       {/* Diagnostics row — confidence calibration + review queue +

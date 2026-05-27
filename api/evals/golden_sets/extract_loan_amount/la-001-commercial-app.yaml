@@ -1,0 +1,18 @@
+id: la-001-commercial-app
+inputs:
+  document_text: |
+    COMMERCIAL LOAN APPLICATION
+
+    Borrower:           Acacia Holdings LLC
+    Property:           12-unit multifamily, Tacoma WA
+    Appraised value:    $2,500,000
+
+    Requested loan amount:    $1,800,000
+    Purpose:                  Acquisition financing
+    Requested term:           5 years
+    Amortization:             25 years
+expected:
+  loan_amount: 1800000
+metadata:
+  source: synthetic
+  doc_type: commercial_loan_application

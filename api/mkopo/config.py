@@ -1,9 +1,38 @@
 """Application settings, loaded from environment variables and .env file."""
 
+import os
 from functools import lru_cache
 from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _strip_empty_env_overrides() -> None:
+    """Remove environment variables that are literally the empty
+    string, so the ``.env`` file value wins.
+
+    Background: Claude Code (and a handful of other dev harnesses)
+    inject ``ANTHROPIC_API_KEY=`` with no value into the process
+    environment. Pydantic-settings reads env vars BEFORE the .env
+    file, so an empty env var silently shadows the real key in
+    ``.env`` and every LLM call fails with "Could not resolve
+    authentication method." Treating empty as unset gives the .env
+    file a chance to provide the value. Only applied to a fixed
+    allowlist of settings we know are sensitive to this — we don't
+    want to wholesale strip every empty env var.
+    """
+    SENSITIVE_TO_EMPTY = (
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_BASE_URL",
+        "OPENAI_API_KEY",
+        "RESEND_API_KEY",
+    )
+    for name in SENSITIVE_TO_EMPTY:
+        if name in os.environ and os.environ[name] == "":
+            del os.environ[name]
+
+
+_strip_empty_env_overrides()
 
 
 class Settings(BaseSettings):
@@ -84,6 +113,11 @@ class Settings(BaseSettings):
     # Eval harness
     eval_golden_set_dir: str = "./evals/golden_sets"
     eval_results_dir: str = "./evals/results"
+    # Drift monitor — per-field sample floor. Default 5 keeps prod
+    # honest; demo / dev DBs with only a few resolved extractions per
+    # field can drop it to 3 so the dashboard still populates. Lower
+    # than 3 is noise.
+    drift_min_samples_per_field: int = 5
 
     # Auth — staff bearer (dev) + borrower JWT signing secret.
     dev_api_token: str = "dev-token-replace-me"

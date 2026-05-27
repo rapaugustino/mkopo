@@ -1,0 +1,17 @@
+id: cs-003-low-band
+inputs:
+  document_text: |
+    Credit Report Summary
+
+    Borrower: Samuel Otieno
+    FICO 8 (Experian): 648
+
+    Score band: Subprime
+    Recent inquiries: 5 in the last 90 days
+    Open delinquencies: 1 (medical collection, $312, in dispute)
+expected:
+  credit_score: 648
+metadata:
+  source: synthetic
+  doc_type: credit_report
+  edge_case: "subprime band; would trip FICO floor"

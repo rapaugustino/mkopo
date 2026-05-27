@@ -1,0 +1,23 @@
+id: email-006-business-tax-returns
+description: |
+  Commercial loan missing the business tax returns + a guarantor's
+  PFS. The email should reference business tax returns and a
+  personal financial statement.
+inputs:
+  borrower_name: Baobab Industrial Partners LLC
+  loan_reference: MK-2025-0621
+  officer_name: Jordan Davis
+  officer_email: j.davis@mkopo.dev
+  officer_title: Loan Officer
+  institution: Mkopo Lens
+  loan_class: business
+  missing_fields:
+    - guarantor_list
+    - annual_noi
+expected:
+  borrower_name: Baobab Industrial Partners LLC
+  loan_class: business
+metadata:
+  fixture_class: business
+  category: intake_email_compliance
+  source: synthetic

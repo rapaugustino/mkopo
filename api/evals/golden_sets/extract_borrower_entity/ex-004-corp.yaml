@@ -1,0 +1,22 @@
+id: ex-004-corp
+inputs:
+  document_text: |
+    LOAN INTAKE PACKET — PAGE 1 OF 8
+
+    APPLICANT (BORROWING ENTITY)
+    Cassia Retail Group Corporation
+    1100 Pine Street, Suite 400
+    Seattle, WA 98101
+
+    Sponsor / Principal: Lillian Okafor (100% owner)
+    Guarantor (separate entity): Acacia Holdings LLC
+
+    Note: the loan request below is in the name of the BORROWING
+    ENTITY shown above, not the guarantor.
+expected:
+  borrower_entity: "Cassia Retail Group Corp"
+metadata:
+  source: synthetic
+  doc_type: loan_intake
+  legal_form: corporation
+  edge_case: "disambiguates borrower from guarantor mention"

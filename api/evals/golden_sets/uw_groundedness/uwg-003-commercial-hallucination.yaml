@@ -1,0 +1,43 @@
+id: uwg-003-commercial-hallucination
+description: |
+  Multifamily commercial loan — summary contains TWO planted
+  hallucinations. The source says DSCR = 1.32x and debt yield =
+  10.3%; the summary states DSCR = 1.45x and claims "an existing
+  banking relationship" the source does not mention. The judge
+  should flag both unsupported claims while validating the
+  ground-truth claims around them.
+
+  This is the canonical "wrong number" + "invented fact" pair —
+  exactly the failure SR 11-7 § VI outcome analysis requires us to
+  bound the rate of.
+inputs:
+  source_excerpts: |
+    Loan reference: MK-2025-0621
+    Sponsor: Baobab Industrial Partners LLC
+    Loan class: business
+    Property type: warehouse, 42,000 sf
+    Property address: 7800 E Marginal Way S, Seattle WA
+    Requested amount: $4,200,000
+    Appraised value: $6,300,000
+    Annual NOI: $510,000
+
+    Rule outcomes:
+    - ltv_under_cap: passed=true (LTV = 66.7%; cap = 70%)
+    - dscr_floor:    passed=true (DSCR = 1.32x; floor = 1.20x)
+    - debt_yield:    passed=true (debt yield = 12.1%; floor = 9.0%)
+    - doc_complete:  passed=true (all required docs received)
+  summary_text: |
+    MK-2025-0621: Baobab Industrial Partners LLC requests $4.2M
+    secured by a 42,000 sf warehouse at 7800 E Marginal Way S,
+    Seattle WA. Appraised at $6.3M, the LTV is 66.7% inside the 70%
+    cap. NOI of $510,000 supports a DSCR of 1.45x against the 1.20x
+    floor. The sponsor maintains an existing banking relationship
+    with us, which strengthens the file. Recommend approval.
+expected:
+  expected_band: low  # planted hallucinations — judge should score < 0.85
+metadata:
+  category: uw_groundedness
+  source: synthetic
+  planted_hallucinations:
+    - "DSCR = 1.45x (source says 1.32x)"
+    - "existing banking relationship (no mention in source)"

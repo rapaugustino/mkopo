@@ -1,0 +1,22 @@
+id: ex-006-individual
+inputs:
+  document_text: |
+    PERSONAL LOAN APPLICATION
+
+    Applicant: Brian Ouma
+    SSN (last 4): 4192
+    Date of birth: 1988-03-21
+    Address: 22 Elm St, Apt 4B, Tacoma WA 98404
+
+    Requested amount: $18,500
+    Purpose: Debt consolidation
+
+    Note: this is an unsecured personal loan; applicant is an
+    individual, not an entity.
+expected:
+  borrower_entity: "Brian Ouma"
+metadata:
+  source: synthetic
+  doc_type: personal_loan_application
+  legal_form: individual
+  edge_case: "natural person, not an entity"

@@ -1,0 +1,23 @@
+id: email-001-personal-paystubs
+description: |
+  Personal-loan borrower missing pay stubs + bank statements. The
+  email should mention pay stubs (or W-2s / tax returns) — NOT
+  appraisals or rent rolls.
+inputs:
+  borrower_name: Jane Mwangi
+  loan_reference: MK-2025-0142
+  officer_name: Jordan Davis
+  officer_email: j.davis@mkopo.dev
+  officer_title: Loan Officer
+  institution: Mkopo Lens
+  loan_class: personal
+  missing_fields:
+    - annual_income
+    - employer
+expected:
+  borrower_name: Jane Mwangi
+  loan_class: personal
+metadata:
+  fixture_class: personal
+  category: intake_email_compliance
+  source: synthetic

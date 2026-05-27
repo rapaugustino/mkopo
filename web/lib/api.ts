@@ -992,6 +992,50 @@ export interface AdversarialInjectionDetails {
   >;
 }
 
+/** Intake-email compliance. Per-criterion pass rates + a per-class
+ *  (personal vs business) breakdown — a regression on one loan class
+ *  shouldn't be masked by the other's pass rate. */
+export interface IntakeEmailDetails {
+  per_criterion: Record<
+    string,
+    { n: number; passed: number; rate: number }
+  >;
+  by_class: Record<
+    string,
+    { n: number; passed: number; rate: number }
+  >;
+}
+
+/** UW-summary groundedness (RAGAS-style faithfulness).
+ *
+ *  - ``judge_accuracy`` — fraction of fixtures the judge classified
+ *    into the right band (clean vs hallucinated). This is the
+ *    gate-relevant number; also equals ``TaskDetail.accuracy``.
+ *  - ``avg_grounded_clean`` — mean groundedness on clean fixtures;
+ *    the "how grounded are our good summaries?" headline.
+ *  - ``avg_grounded_hallucinated`` — mean groundedness on planted-
+ *    hallucination fixtures; should sit well below the clean bar to
+ *    prove the judge actually discriminates.
+ *  - ``per_example`` — every fixture's score + expected band, so the
+ *    card can render a per-fixture row. */
+export interface UWGroundednessDetails {
+  judge_accuracy: number;
+  avg_grounded_clean: number;
+  avg_grounded_hallucinated: number;
+  total_claims: number;
+  supported_claims: number;
+  n_clean: number;
+  n_hallucinated: number;
+  per_example: {
+    id: string;
+    score: number;
+    passed: boolean;
+    total_claims: number;
+    supported_claims: number;
+    expected_band: string;
+  }[];
+}
+
 export const api = {
   listLoans: () => request<Loan[]>("/loans"),
   getLoan: (id: string) => request<Loan>(`/loans/${id}`),

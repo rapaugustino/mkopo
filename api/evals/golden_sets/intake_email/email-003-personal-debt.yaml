@@ -1,0 +1,24 @@
+id: email-003-personal-debt
+description: |
+  Personal-loan borrower missing outstanding-debt + loan-purpose
+  fields. Email should ask for tax returns and bank statements
+  (where debt obligations + cash-flow live), in personal-loan
+  vocabulary.
+inputs:
+  borrower_name: Aisha Mohamed
+  loan_reference: MK-2025-0223
+  officer_name: Jordan Davis
+  officer_email: j.davis@mkopo.dev
+  officer_title: Loan Officer
+  institution: Mkopo Lens
+  loan_class: personal
+  missing_fields:
+    - outstanding_debt
+    - loan_purpose
+expected:
+  borrower_name: Aisha Mohamed
+  loan_class: personal
+metadata:
+  fixture_class: personal
+  category: intake_email_compliance
+  source: synthetic

@@ -325,12 +325,17 @@ uv run arq mkopo.workers.tasks.WorkerSettings
 
 | Task | Threshold | Golden-set size | What it pins |
 |---|---|---|---|
-| ``extract_borrower_entity`` | 95% | 2 | Extractor returns the canonical borrower entity name from a loan-application doc |
-| ``extract_noi`` | 90% | 1 | Extractor returns the right annual NOI from an operating statement |
+| ``extract_borrower_entity`` | 95% | 7 | Extractor returns the canonical borrower entity name across legal forms (LLC / Inc / Corp / Trust / individual) and multi-entity disambiguation |
+| ``extract_noi`` | 90% | 6 | Extractor returns the right annual NOI across multifamily / retail / industrial / office (incl. millions notation + tabular formats) |
 | ``summarize_underwriting`` | 80% | 1 | Summary cites the right rule outcomes + uses the correct vocabulary for the loan class |
+| ``extract_appraised_value`` | 90% | 5 | LTV denominator: reconciled appraised value across multifamily / warehouse / retail / office (as-is vs as-stabilized) + loan-amount distractors |
+| ``extract_credit_score`` | 95% | 5 | FICO floor input: single-bureau, tri-merge middle score, FICO vs Vantage disambiguation, and narrative-form ("seven hundred forty-five") parsing |
+| ``extract_loan_amount`` | 90% | 5 | LTV numerator / DTI input: commercial + personal, millions notation, refinance with existing-balance distractors |
 | ``adversarial_injection`` | 100% | 2 | Input-layer detector blocks every documented attack pattern at HIGH severity. CI fails on any miss |
 | ``decision_verdict`` | 85% | 10 | Decision LLM picks the right path (approve / conditional / decline). Aggregate emits per-class precision/recall/F1 + macro-F1 + a confusion matrix (SR 11-7 outcome analysis) |
 | ``aal_fidelity`` | 75% | 6 | AAL drafter cites every blocking rule, uses friendly labels not rule_id tokens, includes the ECOA right-to-know disclosure (CFPB Circular 2022-03). Per-criterion pass rates surface on the dashboard |
+| ``intake_email`` | 80% | 8 | Borrower doc-request email drafter: addressed by name, no markdown, doc asks match loan class (personal vs business), ≤ 130 words. Per-class breakdown on the dashboard |
+| ``uw_groundedness`` | 80% | 4 | RAGAS-style faithfulness (Es et al. 2024) — pinned Opus judge decomposes the UW summary into atomic claims and verifies each against source. Gate measures judge accuracy on clean vs planted-hallucination fixtures |
 
 Plus a non-CLI **calibration monitor** (``services/calibration.py``) that
 computes Expected Calibration Error + Brier score on the last 30 days

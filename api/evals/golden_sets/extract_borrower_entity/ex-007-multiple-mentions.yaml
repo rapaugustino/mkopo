@@ -1,0 +1,20 @@
+id: ex-007-multiple-mentions
+inputs:
+  document_text: |
+    PURCHASE AND SALE AGREEMENT — EXCERPT
+
+    This agreement is entered into between Seller, Tacoma Realty
+    Partners LLC, and Buyer, Baobab Industrial Partners LLC.
+
+    The Buyer (hereinafter "Borrower" for purposes of the
+    associated bridge financing) shall obtain a $4,200,000 loan
+    facility to fund the acquisition.
+
+    Lender of record: First Pacific Bank.
+expected:
+  borrower_entity: "Baobab Industrial Partners LLC"
+metadata:
+  source: synthetic
+  doc_type: purchase_agreement
+  legal_form: llc
+  edge_case: "borrower vs seller vs lender disambiguation"

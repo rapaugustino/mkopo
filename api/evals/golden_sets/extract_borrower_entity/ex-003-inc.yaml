@@ -1,0 +1,18 @@
+id: ex-003-inc
+inputs:
+  document_text: |
+    UNIFORM COMMERCIAL LOAN APPLICATION
+
+    Borrower (legal entity): Westridge Health Systems, Inc.
+    Tax ID: 91-1234567
+    State of incorporation: Washington
+    Principal place of business: 4421 16th Ave S, Tacoma WA 98404
+
+    Loan officer: Jordan Davis
+    Application date: 2026-01-08
+expected:
+  borrower_entity: "Westridge Health Systems Inc"
+metadata:
+  source: synthetic
+  doc_type: loan_application
+  legal_form: corporation

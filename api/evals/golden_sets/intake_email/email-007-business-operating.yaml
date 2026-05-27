@@ -1,0 +1,24 @@
+id: email-007-business-operating
+description: |
+  Commercial retail loan missing the trailing-12 operating statements
+  + the appraisal. Tests that the drafter handles multi-document
+  asks in business vocabulary.
+inputs:
+  borrower_name: Cassia Retail Group Inc
+  loan_reference: MK-2025-0735
+  officer_name: Jordan Davis
+  officer_email: j.davis@mkopo.dev
+  officer_title: Loan Officer
+  institution: Mkopo Lens
+  loan_class: business
+  missing_fields:
+    - annual_noi
+    - appraised_value
+    - property_address
+expected:
+  borrower_name: Cassia Retail Group Inc
+  loan_class: business
+metadata:
+  fixture_class: business
+  category: intake_email_compliance
+  source: synthetic

@@ -1,0 +1,19 @@
+id: av-004-office-as-is
+inputs:
+  document_text: |
+    OFFICE BUILDING APPRAISAL — 4-STORY CLASS A
+
+    "As-Is" market value:    $48,310,000
+    "As-Stabilized" value:   $51,400,000
+    "As-Completed" (post tenant-improvement): $52,000,000
+
+    For underwriting purposes, the relevant figure is the AS-IS
+    market value of $48,310,000 (forty-eight million three
+    hundred ten thousand dollars).
+expected:
+  appraised_value: 48310000
+metadata:
+  source: synthetic
+  doc_type: appraisal_report
+  property_type: office
+  edge_case: "multiple value scenarios; underwriting wants as-is"

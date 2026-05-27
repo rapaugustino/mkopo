@@ -1,0 +1,18 @@
+id: cs-005-narrative
+inputs:
+  document_text: |
+    Bureau pull notes — Cascade Engineering payroll loan applicant
+
+    The applicant reports a current FICO 8 score of seven hundred
+    forty-five (745) as of the latest bureau pull. No major
+    derogatory marks; one closed-in-good-standing auto loan from
+    2021.
+
+    Score is well above the underwriting floor and consistent
+    with the applicant's stated income and stable employment.
+expected:
+  credit_score: 745
+metadata:
+  source: synthetic
+  doc_type: underwriter_notes
+  edge_case: "score spelled in words"

@@ -1,0 +1,23 @@
+id: av-001-multifamily
+inputs:
+  document_text: |
+    APPRAISAL OF REAL PROPERTY
+
+    Subject: 12-unit multifamily, Tacoma WA
+    Effective date of value: 2026-01-15
+
+    Approaches to value:
+      Sales comparison approach:  $2,480,000
+      Income approach:            $2,520,000
+      Cost approach:              $2,610,000
+
+    Final reconciliation: the Income Approach is given primary
+    weight in this valuation.
+
+    RECONCILED APPRAISED VALUE: $2,500,000
+expected:
+  appraised_value: 2500000
+metadata:
+  source: synthetic
+  doc_type: appraisal_report
+  property_type: multifamily

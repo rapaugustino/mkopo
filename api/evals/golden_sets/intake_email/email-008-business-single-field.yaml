@@ -1,0 +1,23 @@
+id: email-008-business-single-field
+description: |
+  Commercial loan missing one field — the appraisal. Short-prompt
+  path: drafter should not pad the email beyond the word limit when
+  only one document is needed. Body still greets by entity name +
+  references the loan + mentions the appraisal.
+inputs:
+  borrower_name: Daphne Realty Trust
+  loan_reference: MK-2025-0844
+  officer_name: Jordan Davis
+  officer_email: j.davis@mkopo.dev
+  officer_title: Loan Officer
+  institution: Mkopo Lens
+  loan_class: business
+  missing_fields:
+    - appraised_value
+expected:
+  borrower_name: Daphne Realty Trust
+  loan_class: business
+metadata:
+  fixture_class: business
+  category: intake_email_compliance
+  source: synthetic

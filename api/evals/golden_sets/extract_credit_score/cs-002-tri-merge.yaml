@@ -1,0 +1,20 @@
+id: cs-002-tri-merge
+inputs:
+  document_text: |
+    TRI-MERGE CREDIT REPORT
+
+    Applicant: Brian Ouma
+    Pulled: 2026-02-02
+
+    Bureau Scores (FICO 8):
+      Equifax:    762
+      Experian:   745
+      TransUnion: 738
+
+    Middle score (used for underwriting): 745
+expected:
+  credit_score: 745
+metadata:
+  source: synthetic
+  doc_type: tri_merge_credit_report
+  edge_case: "tri-merge; underwriting uses middle"

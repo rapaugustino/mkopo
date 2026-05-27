@@ -1,0 +1,20 @@
+id: cs-004-with-vantage-distractor
+inputs:
+  document_text: |
+    Personal Loan Packet — Credit Snapshot
+
+    Aisha Mohamed
+    DOB: 1991-08-14
+
+    FICO Score 8:      758
+    VantageScore 4.0:  774
+
+    For underwriting purposes, the FICO score is the system of
+    record. The VantageScore is reported for borrower visibility
+    only and should NOT be used as the FICO floor input.
+expected:
+  credit_score: 758
+metadata:
+  source: synthetic
+  doc_type: personal_loan_packet
+  edge_case: "FICO vs Vantage — must pick FICO"

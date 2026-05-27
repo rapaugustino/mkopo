@@ -40,6 +40,7 @@ import structlog
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from mkopo.config import get_settings
 from mkopo.models import Extraction, ExtractionStatus
 from mkopo.models.eval import TaskRun
 
@@ -51,8 +52,25 @@ logger = structlog.get_logger()
 DEFAULT_WINDOW = 200
 
 # Below this many resolved extractions on a field, accuracy is too
-# noisy to write a row. Skip and log.
-MIN_SAMPLES_PER_FIELD = 5
+# noisy to write a row. Default is 5 (statistically meaningful floor);
+# override via ``drift_min_samples_per_field`` in settings to lower it
+# in dev so demo databases with a handful of resolved extractions per
+# field still populate the dashboard.
+DEFAULT_MIN_SAMPLES_PER_FIELD = 5
+
+
+def _min_samples() -> int:
+    """Resolved sample floor per field, settings-overridable.
+
+    Kept as a function (not module-level constant) so tests + scripts
+    can monkeypatch ``settings`` and have the change reflected
+    immediately without reloading the module.
+    """
+    return getattr(
+        get_settings(),
+        "drift_min_samples_per_field",
+        DEFAULT_MIN_SAMPLES_PER_FIELD,
+    )
 
 
 @dataclass(frozen=True)
@@ -98,12 +116,13 @@ async def compute_field_accuracy(
     results: list[FieldResult] = []
     for field_name, extractions in by_field.items():
         n = len(extractions)
-        if n < MIN_SAMPLES_PER_FIELD:
+        min_n = _min_samples()
+        if n < min_n:
             logger.debug(
                 "drift_skip_low_n",
                 field=field_name,
                 n=n,
-                min=MIN_SAMPLES_PER_FIELD,
+                min=min_n,
             )
             continue
         accepted = sum(1 for e in extractions if e.status == ExtractionStatus.ACCEPTED)

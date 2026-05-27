@@ -1,0 +1,23 @@
+id: ex-102-retail
+inputs:
+  document_text: |
+    OPERATING STATEMENT — TRAILING TWELVE MONTHS
+
+    Property: 12,400 sf single-tenant retail, Tacoma WA
+    Period: Jan 2025 – Dec 2025
+
+    Effective gross income:        $412,800
+    Operating expenses (CAM):       $58,400
+    Real estate taxes:              $34,100
+    Insurance:                      $8,600
+    Management fee (4%):            $16,512
+    Total operating expenses:      $117,612
+
+    NET OPERATING INCOME:          $295,188
+expected:
+  noi: 295188
+  currency: USD
+metadata:
+  source: synthetic
+  doc_type: operating_statement
+  property_type: retail

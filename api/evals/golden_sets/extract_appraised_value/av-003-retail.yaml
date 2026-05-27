@@ -1,0 +1,21 @@
+id: av-003-retail
+inputs:
+  document_text: |
+    Property: 8,400 sf retail strip center, Kent WA
+
+    SUMMARY OF VALUE INDICATIONS
+      Income approach:    $3.85M
+      Sales comparison:   $3.92M
+      Cost approach:      $4.10M
+
+    Appraiser's reconciled opinion of market value:    $3.90M
+
+    (Prior appraisal completed in 2024 indicated $3,600,000 —
+    not relied upon for this report.)
+expected:
+  appraised_value: 3900000
+metadata:
+  source: synthetic
+  doc_type: appraisal_report
+  property_type: retail
+  edge_case: "scaled (M suffix) + prior-value distractor"

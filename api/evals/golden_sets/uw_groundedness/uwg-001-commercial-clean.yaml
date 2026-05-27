@@ -1,0 +1,38 @@
+id: uwg-001-commercial-clean
+description: |
+  Multifamily commercial loan — summary is fully grounded in the
+  source data. Every numeric and categorical claim has a matching
+  span in the source. Expected: all claims SUPPORTED.
+inputs:
+  source_excerpts: |
+    Loan reference: MK-2025-0517
+    Sponsor: Acacia Holdings LLC
+    Loan class: business
+    Property type: multifamily, 12 units
+    Property address: 4421 16th Ave S, Tacoma WA
+    Requested amount: $1,800,000
+    Appraised value: $2,500,000
+    Annual NOI: $185,000
+
+    Rule outcomes:
+    - ltv_under_cap: passed=true (LTV = 72.0%; cap = 75%)
+    - dscr_floor:    passed=true (DSCR = 1.32x; floor = 1.20x)
+    - debt_yield:    passed=true (debt yield = 10.3%; floor = 8.0%)
+    - doc_complete:  passed=true (all required docs received)
+
+    Sponsor profile: Acacia has owned 3 multifamily properties in
+    Pierce County since 2018. No prior delinquencies in our records.
+  summary_text: |
+    MK-2025-0517: Acacia Holdings LLC requests $1.8M secured by a
+    12-unit multifamily at 4421 16th Ave S, Tacoma WA. Appraised at
+    $2.5M, the LTV is 72%, comfortably inside the 75% cap. NOI of
+    $185,000 supports DSCR of 1.32x against the 1.20x floor, with
+    debt yield of 10.3% above the 8% floor. The sponsor has owned
+    three multifamily properties in Pierce County since 2018 with
+    no recorded delinquencies. All four blocking rules pass and
+    the document package is complete. Recommend approval.
+expected:
+  expected_band: high  # judge should score ≥0.85 on this clean summary
+metadata:
+  category: uw_groundedness
+  source: synthetic

@@ -1,0 +1,34 @@
+id: uwg-002-personal-clean
+description: |
+  Personal unsecured loan — summary is fully grounded. Every fact
+  (income, debts, credit score, rule outcomes) traces to the source.
+  Expected: all claims SUPPORTED.
+inputs:
+  source_excerpts: |
+    Loan reference: MK-2025-0142
+    Borrower: Jane Mwangi
+    Loan class: personal (unsecured)
+    Requested amount: $25,000
+    Annual income: $84,000 (W-2, two paystubs verified)
+    Outstanding monthly debt: $850
+    Credit score: 712
+    Employer: Westridge Health Systems
+
+    Rule outcomes:
+    - dti_under_cap:    passed=true (DTI = 12.1%; cap = 43%)
+    - fico_floor:       passed=true (FICO = 712; floor = 660)
+    - income_verified:  passed=true (W-2 + paystubs match)
+    - doc_complete:     passed=true (all required docs received)
+  summary_text: |
+    MK-2025-0142: Jane Mwangi requests a $25,000 unsecured personal
+    loan. Annual income is $84,000 (verified via W-2 and two
+    paystubs); outstanding monthly debt is $850, producing a DTI of
+    12.1% well inside the 43% cap. Credit score of 712 clears the
+    660 floor. Employer Westridge Health Systems is on file. All
+    four required documents are present and the income source
+    matches the W-2. Recommend approval.
+expected:
+  expected_band: high
+metadata:
+  category: uw_groundedness
+  source: synthetic

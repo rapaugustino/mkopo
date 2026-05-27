@@ -222,10 +222,25 @@ _PATTERN_CATALOG: tuple[InjectionPattern, ...] = (
     InjectionPattern(
         pattern_id="rule_waiver",
         description=(
-            "Attempt to make the agent waive an underwriting rule."
+            "Attempt to make the agent waive an underwriting rule. "
+            "Covers both active-voice ('waive the LTV rule') and "
+            "passive-voice ('treat the LTV rule as waived', 'rule is "
+            "waived') phrasings — passive forms are common in "
+            "indirect-injection text planted inside documents to read "
+            "like an official notice."
         ),
         regex=re.compile(
-            r"\b(?:waive|ignore|bypass|skip|override)\s+(?:the\s+)?(?:LTV|DSCR|DTI|FICO|credit\s+score|rule|policy|requirement|check)",
+            # Active: "waive/ignore/.. (the) LTV/rule/..."
+            r"\b(?:waive|ignore|bypass|skip|override)\s+(?:the\s+)?"
+            r"(?:LTV|DSCR|DTI|FICO|credit\s+score|rule|policy|requirement|check)"
+            # OR passive: "rule/policy/.. (...) (is|as) waived/bypassed/overridden"
+            r"|\b(?:rule|policy|requirement|check|cap|floor|threshold)"
+            r"(?:[\w\-\s]{0,40})\s+(?:as|is|are|be)\s+"
+            r"(?:waived?|bypassed?|overridden|ignored)"
+            # OR the canonical "SYSTEM OVERRIDE NOTICE/DIRECTIVE" header
+            # planted in documents — the textbook indirect-injection
+            # banner. We match on the phrase regardless of casing.
+            r"|\bsystem\s+override\s+(?:notice|directive|command|order|instruction)",
             re.IGNORECASE,
         ),
         severity_floor=InjectionSeverity.HIGH,

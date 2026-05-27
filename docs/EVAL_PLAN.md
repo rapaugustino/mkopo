@@ -139,15 +139,45 @@ new ``GET /eval/task-detail/{task_name}`` endpoint serves them.
 Remaining for **Phase 2.5** (deferred — each substantial enough for
 a focused turn):
 
-- [ ] **Intake email task per loan class** — 10 personal + 10
-  commercial. Score: addressed by name, no markdown, doc asks
-  match loan class, ≤120 words.
-- [ ] **Faithfulness / groundedness on underwriting summaries** —
-  RAGAS-style atomic-claim verification. Run on every persisted
-  summary + the golden set. Render: groundedness time series.
-- [ ] **Bigger extraction goldens** — bump each existing task to
-  25–30 examples. Add tasks for the other ~10 fields the extractor
-  handles (property_address, appraised_value, credit_score, etc.).
+- [x] **Intake email task per loan class** — implemented as
+  ``evals/tasks/intake_email.py`` with 4 personal + 4 commercial
+  fixtures (scale-up path ready — drop more YAMLs into
+  ``evals/golden_sets/intake_email/``). Scores four AND-ed
+  criteria: addressed-by-name, no-markdown, doc-asks-match-class,
+  within-word-limit. Aggregates per-criterion pass rates AND a
+  per-class (personal vs business) breakdown so a regression on
+  one prompt is visible. Threshold 0.80. Dashboard surface:
+  ``web/app/eval/cards/IntakeEmailCard.tsx``. Uses the live
+  ``intake.draft_doc_request.{personal|business}`` prompts from
+  the registry — i.e. measures the prompt-as-deployed.
+- [x] **Faithfulness / groundedness on underwriting summaries** —
+  Implemented as ``evals/tasks/uw_groundedness.py``. A pinned Opus
+  judge decomposes the candidate summary into atomic claims and
+  verifies each against ``source_excerpts`` (RAGAS Faithfulness;
+  Es et al. 2024, arXiv:2309.15217) in a single structured call.
+  Fixtures declare ``expected.expected_band`` ∈ {``high``,
+  ``low``} so the gate measures *judge accuracy* — whether the
+  judge correctly classifies clean vs hallucinated summaries.
+  The aggregate exposes ``judge_accuracy``, ``avg_grounded_clean``,
+  ``avg_grounded_hallucinated`` (so the discrimination gap is
+  visible), and per-fixture rows. Initial fixture set: 4 (2 clean
+  + 2 hallucination-planted); scale-up path is more YAMLs. Dashboard
+  card: ``web/app/eval/cards/UWGroundednessCard.tsx``. Production-
+  trend pass (RAGAS on the live underwriting_results stream) is
+  the natural next step — defer until we want a continuous
+  groundedness time series.
+- [x] **Bigger extraction goldens** — bumped ``extract_borrower
+  _entity`` from n=2 to n=7 (legal-form coverage: LLC, Inc, Corp,
+  Trust, individual, multi-entity disambig) and ``extract_noi``
+  from n=1 to n=6 (retail, industrial, office in millions,
+  multifamily, tabular). Added three new field tasks for the
+  load-bearing numerics: ``extract_appraised_value`` (LTV
+  denominator, n=5), ``extract_credit_score`` (FICO floor, n=5),
+  ``extract_loan_amount`` (LTV numerator / DTI input, n=5). Each
+  fixture intentionally includes a distractor (loan amount next
+  to appraised value; FICO vs Vantage; "as-is" vs "as-stabilized";
+  borrower vs seller vs lender). Suite at 11 tasks; scale-up to
+  25–30 fixtures each is just adding more YAMLs.
 - [x] **Frontend rendering** — dashboard cards for the Phase 2
   payloads. Implemented as four cards under
   ``web/app/eval/cards/``:

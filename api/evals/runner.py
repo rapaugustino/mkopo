@@ -202,20 +202,33 @@ async def _main() -> int:
     from evals.tasks.aal_fidelity import AALFidelityTask
     from evals.tasks.adversarial_injection import AdversarialInjectionTask
     from evals.tasks.decision_verdict import DecisionVerdictTask
+    from evals.tasks.extract_appraised_value import ExtractAppraisedValueTask
     from evals.tasks.extract_borrower_entity import ExtractBorrowerEntityTask
+    from evals.tasks.extract_credit_score import ExtractCreditScoreTask
+    from evals.tasks.extract_loan_amount import ExtractLoanAmountTask
     from evals.tasks.extract_noi import ExtractNOITask
+    from evals.tasks.intake_email import IntakeEmailTask
     from evals.tasks.summarize_underwriting import SummarizeUnderwritingTask
+    from evals.tasks.uw_groundedness import UWGroundednessTask
 
     tasks: list[EvalTask] = [
-        # Extraction tasks (the original three) — keep first so the
-        # output ordering stays familiar.
+        # Extraction tasks. Original three + Phase 2.5 expansion to
+        # cover the load-bearing numerics (LTV denominator, FICO
+        # floor, principal amount). Order keeps the original three
+        # first so existing dashboard/CI snapshots read consistently.
         ExtractBorrowerEntityTask(),
         ExtractNOITask(),
         SummarizeUnderwritingTask(),
+        ExtractAppraisedValueTask(),
+        ExtractCreditScoreTask(),
+        ExtractLoanAmountTask(),
         # Phase 2 additions — see docs/EVAL_PLAN.md.
         AdversarialInjectionTask(),
         DecisionVerdictTask(),
         AALFidelityTask(),
+        # Phase 2.5 — borrower-facing email + RAGAS-style faithfulness.
+        IntakeEmailTask(),
+        UWGroundednessTask(),
     ]
 
     print("Running eval suite...")

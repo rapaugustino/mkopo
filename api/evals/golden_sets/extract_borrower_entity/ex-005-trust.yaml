@@ -1,0 +1,18 @@
+id: ex-005-trust
+inputs:
+  document_text: |
+    Loan Application Summary
+
+    Borrower legal name: Daphne Realty Trust
+    Entity type: irrevocable trust
+    Tax ID: 80-9876543
+
+    Loan request: $1,650,000 secured by 3 single-tenant retail
+    properties owned by the trust.
+expected:
+  borrower_entity: "Daphne Realty Trust"
+metadata:
+  source: synthetic
+  doc_type: loan_application
+  legal_form: trust
+  edge_case: "trust (no LLC/Inc/Corp suffix)"

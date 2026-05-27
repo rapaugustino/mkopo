@@ -1,0 +1,23 @@
+id: email-005-business-appraisal
+description: |
+  Commercial multifamily loan missing appraisal + rent roll. The
+  email should mention an appraisal and a rent roll — NOT pay
+  stubs or W-2s.
+inputs:
+  borrower_name: Acacia Holdings LLC
+  loan_reference: MK-2025-0517
+  officer_name: Jordan Davis
+  officer_email: j.davis@mkopo.dev
+  officer_title: Loan Officer
+  institution: Mkopo Lens
+  loan_class: business
+  missing_fields:
+    - appraised_value
+    - annual_noi
+expected:
+  borrower_name: Acacia Holdings LLC
+  loan_class: business
+metadata:
+  fixture_class: business
+  category: intake_email_compliance
+  source: synthetic

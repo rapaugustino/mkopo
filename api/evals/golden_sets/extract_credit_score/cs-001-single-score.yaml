@@ -1,0 +1,20 @@
+id: cs-001-single-score
+inputs:
+  document_text: |
+    CREDIT REPORT — SUMMARY
+
+    Applicant: Jane Mwangi
+    Report date: 2026-01-14
+
+    FICO Score: 712
+    Bureau: Experian
+    Tier: Prime
+
+    Open accounts: 4
+    Total balances: $4,210
+    Derogatory items: 0
+expected:
+  credit_score: 712
+metadata:
+  source: synthetic
+  doc_type: credit_report
