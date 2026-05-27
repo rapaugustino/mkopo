@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import {
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -37,6 +38,13 @@ import { StatTile } from "./components/StatTile";
  *  survives refreshes — same key the kanban toggle reads on mount. */
 type PipelineView = "list" | "kanban";
 const VIEW_STORAGE_KEY = "mkopo.pipeline.view";
+/** Same-tab pub/sub channel name for view changes. The native
+ *  ``storage`` event doesn't fire on the tab that made the change
+ *  (and browsers reject manually-dispatched ``StorageEvent``s as a
+ *  spec-compliance measure), so we use a CustomEvent for the
+ *  same-tab path. The ``storage`` listener still handles
+ *  cross-tab sync. */
+const VIEW_CHANGE_EVENT = "mkopo:pipeline-view-change";
 
 const STAGES: {
   stage: LoanStage;
@@ -281,7 +289,25 @@ function PipelineSkeleton() {
   );
 }
 
+/**
+ * Default export. Wraps the searchParams-consuming inner component in
+ * a Suspense boundary because Next 14+ flags any client component that
+ * calls ``useSearchParams()`` outside Suspense as a prerender
+ * bailout — ``next build`` fails on the root route otherwise. The
+ * fallback reuses the same skeleton shape as the post-mount loading
+ * state so the visual handoff is seamless.
+ *
+ * See https://nextjs.org/docs/messages/missing-suspense-with-csr-bailout
+ */
 export default function PipelinePage() {
+  return (
+    <Suspense fallback={<PipelineSkeleton />}>
+      <PipelineContent />
+    </Suspense>
+  );
+}
+
+function PipelineContent() {
   const {
     data: loans = [],
     isPending,
@@ -317,13 +343,24 @@ export default function PipelinePage() {
   // the component subscribes via ``useSyncExternalStore`` so the value
   // reads correctly under SSR (returns the default) AND on the client
   // (reads localStorage) without needing a ``setState`` inside an
-  // effect. ``setView`` writes through localStorage + dispatches a
-  // synthetic storage event so the snapshot re-fires for this tab
-  // (the native event only fires for OTHER tabs).
+  // effect.
+  //
+  // Same-tab updates use a ``CustomEvent`` on ``VIEW_CHANGE_EVENT``
+  // because the native ``storage`` event is, by spec, only fired in
+  // *other* tabs — and browsers silently drop manually-constructed
+  // ``StorageEvent``s for the same reason (they check the event's
+  // ``url`` against the current document and refuse to dispatch to
+  // local listeners). Cross-tab sync still works via the ``storage``
+  // listener; same-tab works via the CustomEvent. Both feed the
+  // same snapshot, so the subscriber doesn't care which fired.
   const view = useSyncExternalStore<PipelineView>(
     (cb) => {
       window.addEventListener("storage", cb);
-      return () => window.removeEventListener("storage", cb);
+      window.addEventListener(VIEW_CHANGE_EVENT, cb);
+      return () => {
+        window.removeEventListener("storage", cb);
+        window.removeEventListener(VIEW_CHANGE_EVENT, cb);
+      };
     },
     () => {
       try {
@@ -338,11 +375,10 @@ export default function PipelinePage() {
   const setView = (next: PipelineView) => {
     try {
       window.localStorage.setItem(VIEW_STORAGE_KEY, next);
-      // Storage events don't fire for the tab that performed the
-      // write, so we synthesize one to re-snapshot here too.
-      window.dispatchEvent(
-        new StorageEvent("storage", { key: VIEW_STORAGE_KEY }),
-      );
+      // Notify the same-tab subscriber. CustomEvent always fires on
+      // local listeners, unlike StorageEvent (see notes on
+      // VIEW_CHANGE_EVENT).
+      window.dispatchEvent(new CustomEvent(VIEW_CHANGE_EVENT));
     } catch {
       // localStorage can throw in restricted browser modes — ignore.
     }

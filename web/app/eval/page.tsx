@@ -32,6 +32,10 @@ import { Pill } from "@/app/components/Pill";
 import { PrimaryButton } from "@/app/components/PrimaryButton";
 import { StatTile } from "@/app/components/StatTile";
 import { Tooltip } from "@/app/components/Tooltip";
+import { DecisionVerdictCard } from "./cards/DecisionVerdictCard";
+import { AALFidelityCard } from "./cards/AALFidelityCard";
+import { CalibrationCard } from "./cards/CalibrationCard";
+import { AdversarialInjectionCard } from "./cards/AdversarialInjectionCard";
 
 /** Tooltip definitions for the eval dashboard. Centralised so the
  *  wording stays consistent across cards + so a regulator-friendly
@@ -539,6 +543,30 @@ export default function EvalDashboardPage() {
             ))}
           </div>
         )}
+      </div>
+
+      {/* Phase 2 — task-specific eval cards. Each one renders the
+          ``details`` JSONB written by an AggregatingEvalTask in
+          ``evals/runner.py`` (decision verdict, AAL fidelity,
+          adversarial injection) or by the calibration monitor in
+          ``services/calibration.py``. Same shape on the wire (GET
+          /eval/task-detail/{task_name}); each card narrows the
+          payload to its own typed view.
+
+          Why a separate section: the top metrics + trend + per-field
+          rows above answer "are extractions still accurate?". These
+          four answer the harder regulator questions — "in what
+          direction are decisions wrong?" (confusion matrix), "is
+          the AAL drafter ECOA-compliant?" (per-criterion fidelity),
+          "is confidence well-calibrated?" (ECE + Brier), "do we
+          catch known injection attacks?" (per-pattern coverage).
+          Each of those needs a different visual; one row of bars
+          can't carry the load. */}
+      <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
+        <DecisionVerdictCard />
+        <AALFidelityCard />
+        <CalibrationCard />
+        <AdversarialInjectionCard />
       </div>
 
       {/* Diagnostics row — confidence calibration + review queue +

@@ -148,12 +148,24 @@ a focused turn):
 - [ ] **Bigger extraction goldens** — bump each existing task to
   25–30 examples. Add tasks for the other ~10 fields the extractor
   handles (property_address, appraised_value, credit_score, etc.).
-- [ ] **Frontend rendering** — dashboard cards for the Phase 2
-  payloads. Today the data is in ``task_runs.details`` + reachable
-  via ``GET /eval/task-detail/{name}``, but the existing eval page
-  doesn't yet render the confusion matrix / per-criterion bars /
-  reliability diagram. Mock data + endpoint shape are ready; the
-  UI is a focused frontend pass.
+- [x] **Frontend rendering** — dashboard cards for the Phase 2
+  payloads. Implemented as four cards under
+  ``web/app/eval/cards/``:
+  - ``DecisionVerdictCard`` — confusion matrix heatmap (row-
+    normalized colour intensity, brand-green diagonal / soft-red
+    off-diagonal) + per-class precision/recall/F1 pills + macro-F1
+    headline.
+  - ``AALFidelityCard`` — four horizontal bars, one per ECOA-load-
+    bearing criterion. Tooltips name the regulation (CFPB Circular
+    2022-03/2023-09, 12 CFR §1002.9(b)) each one enforces.
+  - ``CalibrationCard`` — SVG reliability diagram with y=x
+    reference line + bin-level over/under-confidence colour code,
+    plus ECE + Brier pills.
+  - ``AdversarialInjectionCard`` — per-pattern coverage list,
+    sorted by rate ascending so any regression floats to the top.
+  Mounted in a 2-column grid on ``/eval`` between per-field
+  accuracy and the diagnostics row. All four refetch on 60s
+  cadence + the existing manual Refresh.
 
 ### Phase 3 — Operational + compliance metrics (~3–5 days)
 

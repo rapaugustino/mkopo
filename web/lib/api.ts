@@ -917,6 +917,81 @@ export interface ScenariosResponse {
   known_gaps: ScenarioRow[];
 }
 
+// ---- Per-task detail (Phase 2 eval metrics) --------------------------------
+//
+// Generic shape returned by GET /eval/task-detail/{task_name}. The
+// ``details`` field is task-specific — the dashboard card component
+// for each task dispatches on its known structure (confusion matrix
+// for decision_verdict, per-criterion for aal_fidelity, bins for
+// calibration, by_pattern for adversarial_injection). Tasks that
+// don't implement AggregatingEvalTask leave details empty.
+
+export interface TaskDetail {
+  task_name: string;
+  found: boolean;
+  accuracy: number | null;
+  avg_score: number | null;
+  n: number | null;
+  source: string | null;
+  ran_at: string | null;
+  // Task-specific aggregate payload. Shape depends on task_name —
+  // each card declares its own narrowed view.
+  details: Record<string, unknown> | null;
+}
+
+/** Decision-verdict aggregate. Per-class metrics use the standard
+ *  one-vs-rest decomposition; confusion matrix is keyed
+ *  [expected][predicted]. */
+export interface DecisionVerdictDetails {
+  classes: string[];
+  confusion_matrix: Record<string, Record<string, number>>;
+  per_class: Record<
+    string,
+    {
+      n: number;
+      precision: number;
+      recall: number;
+      f1: number;
+      tp: number;
+      fp: number;
+      fn: number;
+    }
+  >;
+  macro_f1: number;
+}
+
+/** AAL fidelity per-criterion pass rates. Keys mirror the score
+ *  function's flags so a regression on one criterion (e.g. the
+ *  ECOA right-to-know disclosure) shows on its own bar. */
+export interface AALFidelityDetails {
+  per_criterion: Record<
+    string,
+    { n: number; passed: number; rate: number }
+  >;
+}
+
+/** Calibration reliability-diagram bins + headline metrics. */
+export interface CalibrationDetails {
+  ece: number;
+  brier: number;
+  window_days: number;
+  bins: {
+    lower: number;
+    upper: number;
+    n: number;
+    mean_confidence: number;
+    empirical_accuracy: number;
+  }[];
+}
+
+/** Adversarial-injection per-pattern coverage. */
+export interface AdversarialInjectionDetails {
+  by_pattern: Record<
+    string,
+    { n: number; passed: number; rate: number }
+  >;
+}
+
 export const api = {
   listLoans: () => request<Loan[]>("/loans"),
   getLoan: (id: string) => request<Loan>(`/loans/${id}`),
@@ -1166,6 +1241,12 @@ export const api = {
    *  audit documentation. */
   getSafetyScenarios: () =>
     request<ScenariosResponse>(`/safety/scenarios`),
+  /** Per-task detail snapshot. ``details`` is task-specific —
+   *  callers narrow the type at the use site. Renders the
+   *  Phase 2 metric cards (confusion matrix, per-criterion bars,
+   *  reliability diagram, per-pattern). */
+  getTaskDetail: (taskName: string) =>
+    request<TaskDetail>(`/eval/task-detail/${encodeURIComponent(taskName)}`),
   // ---- Prompts ----
   /** List every registered prompt with its current active version. */
   listPrompts: () => request<PromptSummary[]>(`/prompts`),

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { use, useEffect, useMemo, useState } from "react";
+import { Suspense, use, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -216,7 +216,19 @@ function LoanDetailSkeleton() {
   );
 }
 
+// useSearchParams() requires a Suspense boundary at build time —
+// otherwise ``next build`` bails out prerendering the route. The
+// wrapper forwards the dynamic ``params`` promise; the inner
+// component reads it via ``use()`` as before.
 export default function LoanPage({ params }: PageProps) {
+  return (
+    <Suspense fallback={null}>
+      <LoanPageContent params={params} />
+    </Suspense>
+  );
+}
+
+function LoanPageContent({ params }: PageProps) {
   const { id } = use(params);
   const queryClient = useQueryClient();
   const router = useRouter();

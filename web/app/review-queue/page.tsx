@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
@@ -44,7 +44,19 @@ function ConfidenceBadge({ pct }: { pct: number }) {
   );
 }
 
+// useSearchParams() requires a Suspense boundary in Next 14+ — the
+// prerender pass bails out otherwise. The fallback can be ``null``
+// because there's no perceptible render gap at runtime; the boundary
+// only matters during ``next build``.
 export default function ReviewQueuePage() {
+  return (
+    <Suspense fallback={null}>
+      <ReviewQueueContent />
+    </Suspense>
+  );
+}
+
+function ReviewQueueContent() {
   const [activeTask, setActiveTask] = useState<ReviewTask | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();

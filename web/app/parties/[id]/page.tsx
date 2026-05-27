@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useMemo } from "react";
+import { Suspense, use, useMemo } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
@@ -253,7 +253,19 @@ function RelatedPartyRow({ p }: { p: RelatedParty }) {
   );
 }
 
+// useSearchParams() requires a Suspense boundary at build time —
+// otherwise ``next build`` bails out prerendering the route. The
+// wrapper forwards the dynamic ``params`` promise; the inner
+// component reads it via ``use()`` as before.
 export default function PartyInspectorPage({ params }: PageProps) {
+  return (
+    <Suspense fallback={null}>
+      <PartyInspectorContent params={params} />
+    </Suspense>
+  );
+}
+
+function PartyInspectorContent({ params }: PageProps) {
   const { id } = use(params);
   const searchParams = useSearchParams();
 
