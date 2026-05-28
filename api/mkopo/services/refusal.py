@@ -114,18 +114,49 @@ async def _count_window(
     return int(total), int(blocked)
 
 
-async def compute_refusal_rate(session: AsyncSession) -> RefusalResult:
-    """Compute the refusal rate + a z-score against baseline.
-
-    The z-score uses the standard binomial-proportion test:
+def compute_z_score(
+    cur_rate: float,
+    base_rate: float,
+    n_cur: int,
+    n_base: int,
+    *,
+    min_current: int = _MIN_CURRENT,
+    min_baseline: int = _MIN_BASELINE,
+) -> float | None:
+    """Pure binomial-proportion z-test. Extracted from
+    ``compute_refusal_rate`` so it's unit-testable in isolation.
 
         z = (p_cur - p_base) / sqrt(p_base * (1 - p_base) / n_cur)
 
-    This is the right form because the baseline rate is treated as
-    a known parameter and the current rate is the observed
-    proportion. We don't apply Bonferroni correction across
-    multiple comparisons — this metric is the only one its
-    operator looks at.
+    Returns ``None`` when the test isn't meaningful: not enough
+    samples on either side, or a baseline rate of 0 or 1 (zero
+    variance → the test statistic is undefined). The dashboard
+    surfaces "insufficient data" rather than a noisy z in those
+    cases.
+
+    Keyword-only floors so a caller can pass different thresholds
+    in a test without confusion — the production thresholds are
+    the module constants.
+    """
+    if (
+        n_cur < min_current
+        or n_base < min_baseline
+        or base_rate == 0.0
+        or base_rate == 1.0
+    ):
+        return None
+    std_err = math.sqrt(base_rate * (1.0 - base_rate) / n_cur)
+    if std_err <= 0:
+        return None
+    return (cur_rate - base_rate) / std_err
+
+
+async def compute_refusal_rate(session: AsyncSession) -> RefusalResult:
+    """Compute the refusal rate + a z-score against baseline.
+
+    Uses ``compute_z_score`` for the math so the formula is
+    pinned by ``tests/test_refusal_math.py``. This async wrapper
+    handles only the DB queries and the wire shape.
     """
     now = datetime.now(UTC)
     cur_end = now
@@ -139,17 +170,7 @@ async def compute_refusal_rate(session: AsyncSession) -> RefusalResult:
     cur_rate = blk_cur / n_cur if n_cur > 0 else 0.0
     base_rate = blk_base / n_base if n_base > 0 else 0.0
 
-    z: float | None
-    if (
-        n_cur < _MIN_CURRENT
-        or n_base < _MIN_BASELINE
-        or base_rate == 0.0
-        or base_rate == 1.0
-    ):
-        z = None
-    else:
-        std_err = math.sqrt(base_rate * (1.0 - base_rate) / n_cur)
-        z = (cur_rate - base_rate) / std_err if std_err > 0 else None
+    z = compute_z_score(cur_rate, base_rate, n_cur, n_base)
 
     return RefusalResult(
         window_current_days=_CURRENT_DAYS,

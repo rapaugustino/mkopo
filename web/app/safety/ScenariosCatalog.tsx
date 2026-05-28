@@ -231,9 +231,10 @@ export function ScenariosCatalog() {
         <SectionLabel>Protected by tests</SectionLabel>
         <p className="mb-3 text-[12px] text-[var(--color-text-tertiary)]">
           Each card describes a way the system can be attacked, the
-          defense layer that catches it, and the test that pins it.
-          A test failure flips the corresponding card to a regression
-          banner.
+          defense layer that catches it, and the pytest that pins
+          it. The <em>Verified by</em> line is a static reference,
+          not a live link — open the test path to confirm it still
+          passes on your branch.
         </p>
         {protectedRows.length === 0 ? (
           <p className="text-[12px] text-[var(--color-text-tertiary)]">

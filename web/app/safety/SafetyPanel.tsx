@@ -50,13 +50,13 @@ const TILE_DEFINITIONS: Record<string, string> = {
   Scanned:
     "Every input that flowed through the injection detector in this window — documents, chat messages, application form text. Empty inputs are skipped and don't count here.",
   Allowed:
-    "The detector returned ``decision=allowed`` — either the pattern catalog found nothing (silent allow, no row persisted), or a medium-band pattern hit was downgraded to ``low`` by the Haiku second-pass.",
+    "Rows in ``injection_detections`` where the catalog matched but Haiku downgraded the verdict to ``allowed`` (medium-band hit cleared by the second-pass). Silent allows — where no pattern matched and no row is written — are NOT counted here by definition; they show up as the gap between Scanned and Allowed+Flagged+Blocked.",
   Flagged:
     "Medium-severity pattern hit was confirmed as ``medium`` by Haiku — input was allowed through but the row is persisted so a reviewer can audit it. Surfaced on per-loan safety chips.",
   Blocked:
     "Fail-closed events. Either a HIGH-severity pattern matched (immediate block, no LLM cost), or Haiku confirmed a MEDIUM hit as ``high``. The input never reached the LLM context.",
   "Haiku judge":
-    "Number of Haiku second-pass calls triggered in the window (only the medium-severity escalation path uses Haiku). The dollar value is the cost estimate at Haiku list pricing (~$0.001 per call).",
+    "Number of Haiku second-pass calls triggered in the window (only the medium-severity escalation path uses Haiku). The dollar value is a conservative flat-rate ESTIMATE (calls × $0.001) — not the actual billed cost. For real cost, see the Observability page's LLM cost tile, which sums per-call ``cost_input_usd + cost_output_usd``.",
 };
 
 interface Props {

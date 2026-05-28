@@ -170,7 +170,7 @@ export function ToolCallAccuracyCard() {
           >
             overall
           </Tooltip>
-          <Pill variant={overallAcc >= 0.85 ? "success" : "warn"}>
+          <Pill variant={overallAcc >= 0.75 ? "success" : "warn"}>
             {PCT(overallAcc, 1)}
           </Pill>
           <span>·</span>

@@ -477,12 +477,31 @@ export interface PartyProfile {
 // ---- Eval dashboard (Phase G) ----
 
 export interface EvalSummary {
+  /** Mean accuracy across the INTERSECTION of (latest production
+   *  rows, latest golden rows) keyed by task_name. Same denominator
+   *  as ``overall_golden_accuracy`` — apples-to-apples comparison. */
   overall_production_accuracy: number | null;
+  /** Mean accuracy across the intersection — same task set as
+   *  production. Comparing the full golden suite against a
+   *  production set that only covers extraction would produce a
+   *  misleading delta. */
   overall_golden_accuracy: number | null;
+  /** production - golden over the intersection. Defined iff both
+   *  sides have data. */
   overall_delta: number | null;
+  /** Size of the intersection — denominator behind the three values
+   *  above. */
   fields_tracked: number;
   fields_drifting: number;
   drift_threshold: number;
+  /** Full golden eval suite mean — every latest golden task, not
+   *  just the intersection. Surfaced as a separate tile because the
+   *  question "how is the eval suite doing overall" is different
+   *  from "how does production match its golden baseline". */
+  golden_suite_accuracy: number | null;
+  /** Number of tasks in the full golden suite (denominator behind
+   *  ``golden_suite_accuracy``). */
+  golden_suite_n_tasks: number;
   llm_calls_24h: number;
   llm_p95_latency_seconds: number | null;
   llm_error_rate_24h: number | null;

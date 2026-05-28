@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   IconActivity,
   IconChartLine,
+  IconHelp,
   IconLayoutGrid,
   IconListSearch,
   IconPencil,
@@ -39,6 +40,10 @@ const NAV: NavItem[] = [
   // credit reporting agency. Drives the "Real identifiers" block
   // every borrower-visible agent threads into its LLM prompt.
   { href: "/settings", label: "Settings", Icon: IconSettings },
+  // Help — glossary + scope/limits. Last in the row because it's
+  // a reference surface, not a daily-driver. Tooltips elsewhere
+  // deep-link into this page via #anchor.
+  { href: "/help", label: "Help", Icon: IconHelp },
 ];
 
 /**

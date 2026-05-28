@@ -16,6 +16,7 @@ Three reads + one write, all keyed off ``task_runs`` and ``llm_calls``:
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, status
@@ -63,12 +64,28 @@ class FieldRow(BaseModel):
 
 
 class EvalSummary(BaseModel):
+    # Apples-to-apples production vs golden — same task set on both
+    # sides. ``overall_production_accuracy`` and ``overall_golden_accuracy``
+    # are means over the INTERSECTION of (latest_prod, latest_gold) by
+    # task_name. Comparing the full production set (extraction-only,
+    # because the drift monitor only writes those) against the full
+    # golden set (12 tasks) would produce a misleading delta — see the
+    # June 2026 cleanup. ``fields_tracked`` is the size of that
+    # intersection.
     overall_production_accuracy: float | None
     overall_golden_accuracy: float | None
     overall_delta: float | None
     fields_tracked: int
     fields_drifting: int  # count where delta <= -drift_threshold
     drift_threshold: float
+    # Full eval suite — the average across ALL latest golden rows
+    # (not just those with a production counterpart). Surfaced as a
+    # separate tile so the dashboard reads honestly: ``overall_golden``
+    # answers "how does golden look on the things we monitor live",
+    # while ``golden_suite`` answers "how is the eval suite doing
+    # overall". Confusing them was the pre-cleanup bug.
+    golden_suite_accuracy: float | None
+    golden_suite_n_tasks: int
     # LLM stats. We try 24h first, but cascade to 7d → all-time so a
     # demo environment that hasn't had a call today still shows
     # meaningful numbers. ``llm_window_label`` reports which window the
@@ -165,6 +182,87 @@ def _latest_accuracy_rows(
     }
 
 
+@dataclass
+class _SummaryAggregates:
+    """Wire shape between ``compute_summary_aggregates`` (pure) and
+    ``get_eval_summary`` (async router). Kept tiny so a test can
+    construct one without touching SQLAlchemy."""
+
+    prod_acc: float | None
+    gold_acc: float | None
+    delta: float | None
+    suite_acc: float | None
+    fields_tracked: int
+    drifting: int
+    n_suite_tasks: int
+
+
+def compute_summary_aggregates(
+    prod_by_task: dict[str, float],
+    gold_by_task: dict[str, float],
+    drift_threshold: float = DRIFT_THRESHOLD,
+) -> _SummaryAggregates:
+    """Pure-function version of the headline aggregation that the
+    ``/eval/summary`` endpoint serves. Extracted from
+    ``get_eval_summary`` so the apples-to-apples pairing logic is
+    unit-testable without a database session.
+
+    Inputs are pre-flattened ``{task_name: accuracy}`` dicts of the
+    latest accuracy-shaped rows. The caller is responsible for
+    filtering to accuracy-shaped tasks (i.e. excluding the
+    economics / fairness / PSI / refusal / prompt_drift /
+    calibration prefixes) — same filter the endpoint applies.
+
+    Behaviour:
+    - ``prod_acc`` / ``gold_acc`` / ``delta`` are means over the
+      **intersection** of the two task sets — apples-to-apples.
+      Comparing the full production set against the full golden
+      set would over-count tasks that exist on only one side.
+    - ``suite_acc`` is the unweighted mean over the entire golden
+      set (NOT restricted to the intersection) — the "how is the
+      eval suite doing overall" headline.
+    - ``drifting`` counts paired tasks where
+      ``prod − gold ≤ -threshold``.
+    - ``fields_tracked`` is the size of the intersection (same
+      denominator as the three headline values).
+    """
+    paired = set(prod_by_task) & set(gold_by_task)
+    prod_acc = (
+        sum(prod_by_task[k] for k in paired) / len(paired)
+        if paired
+        else None
+    )
+    gold_acc = (
+        sum(gold_by_task[k] for k in paired) / len(paired)
+        if paired
+        else None
+    )
+    delta = (
+        prod_acc - gold_acc
+        if prod_acc is not None and gold_acc is not None
+        else None
+    )
+    suite_acc = (
+        sum(gold_by_task.values()) / len(gold_by_task)
+        if gold_by_task
+        else None
+    )
+    drifting = sum(
+        1
+        for k in paired
+        if prod_by_task[k] - gold_by_task[k] <= -drift_threshold
+    )
+    return _SummaryAggregates(
+        prod_acc=prod_acc,
+        gold_acc=gold_acc,
+        delta=delta,
+        suite_acc=suite_acc,
+        fields_tracked=len(paired),
+        drifting=drifting,
+        n_suite_tasks=len(gold_by_task),
+    )
+
+
 def _percentile(values: list[float], pct: float) -> float | None:
     """Plain nearest-rank percentile. ``values`` is mutated (sorted).
 
@@ -205,26 +303,21 @@ async def get_eval_summary(
     latest_prod = _latest_accuracy_rows(list(rows), "production")
     latest_gold = _latest_accuracy_rows(list(rows), "golden")
 
-    prod_acc = (
-        sum(r.accuracy for r in latest_prod.values()) / len(latest_prod)
-        if latest_prod
-        else None
+    # Headline aggregation is delegated to the pure
+    # ``compute_summary_aggregates`` helper so the pairing /
+    # apples-to-apples logic is unit-testable independently of the
+    # async session, the SQL, and the FastAPI runtime. The helper
+    # accepts pre-flattened {task_name: accuracy} maps; we adapt
+    # the ORM rows here.
+    agg = compute_summary_aggregates(
+        prod_by_task={k: r.accuracy for k, r in latest_prod.items()},
+        gold_by_task={k: r.accuracy for k, r in latest_gold.items()},
     )
-    gold_acc = (
-        sum(r.accuracy for r in latest_gold.values()) / len(latest_gold)
-        if latest_gold
-        else None
-    )
-    delta = (prod_acc - gold_acc) if (prod_acc is not None and gold_acc is not None) else None
-
-    # Per-field drift count uses paired (prod, gold) only.
-    drifting = 0
-    for name, prod_row in latest_prod.items():
-        gold_row = latest_gold.get(name)
-        if gold_row is None:
-            continue
-        if prod_row.accuracy - gold_row.accuracy <= -DRIFT_THRESHOLD:
-            drifting += 1
+    prod_acc = agg.prod_acc
+    gold_acc = agg.gold_acc
+    delta = agg.delta
+    suite_acc = agg.suite_acc
+    drifting = agg.drifting
 
     # LLM call stats. Cascade through windows so a quiet 24h doesn't
     # leave the page showing "—" everywhere — the same stat at "7d" or
@@ -235,15 +328,18 @@ async def get_eval_summary(
     errors = sum(1 for _elapsed, status in calls if status != "ok")
     error_rate = errors / len(calls) if calls else None
 
-    fields_tracked = len({*latest_prod.keys(), *latest_gold.keys()})
-
     return EvalSummary(
         overall_production_accuracy=prod_acc,
         overall_golden_accuracy=gold_acc,
         overall_delta=delta,
-        fields_tracked=fields_tracked,
+        # ``fields_tracked`` is the intersection size — same
+        # denominator as the three values above. Comes straight
+        # from the pure aggregator so the test pins this too.
+        fields_tracked=agg.fields_tracked,
         fields_drifting=drifting,
         drift_threshold=DRIFT_THRESHOLD,
+        golden_suite_accuracy=suite_acc,
+        golden_suite_n_tasks=agg.n_suite_tasks,
         llm_calls_24h=len(calls),
         llm_p95_latency_seconds=p95,
         llm_error_rate_24h=error_rate,

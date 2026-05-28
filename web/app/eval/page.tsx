@@ -63,9 +63,11 @@ const TOC_ENTRIES: TOCEntry[] = [
  *  measured + how it's computed + where the number comes from. */
 const EVAL_TOOLTIP: Record<string, string> = {
   "Production accuracy":
-    "Unweighted mean accuracy across tracked extraction fields, computed from staff overrides in the review queue. A 'production' task_run is written by services/drift.py:run_drift_monitor each time the drift sweep runs (manually via Refresh, or on the scheduled sweep). Compare to Golden baseline to spot drift.",
+    "Mean accuracy across tasks that have BOTH a production row and a golden row — the apples-to-apples set. Production rows come from staff overrides in the review queue (services/drift.py:run_drift_monitor). Today this means the extraction fields, so the delta against golden is meaningful — same task set on both sides.",
   "Golden baseline":
-    "Unweighted mean accuracy on the labelled YAML golden sets in api/evals/golden_sets/. A 'golden' task_run is written by the CLI eval runner (cd api && uv run python -m evals.runner) and by the periodic golden sweep. This is the reference the model is supposed to hit.",
+    "Same denominator as Production accuracy — the intersection of (latest golden, latest production) by task_name. Comparing the full golden suite against a production set that only covers extraction would produce a misleading delta; see the Full eval suite tile below for the broader picture.",
+  "Full eval suite":
+    "Mean accuracy across ALL latest golden eval rows (extraction + decision verdict + AAL fidelity + intake email + adversarial injection + UW groundedness + tool-call accuracy). Answers 'how is the eval suite doing overall'. Separate from Golden baseline above because that one is restricted to the production-paired subset.",
   "LLM p95 latency":
     "95th percentile of LLM call duration in the last 24h. p95 (not p50) because tail latency is what users feel — a fast median with a slow p95 is still a bad experience.",
   "LLM error rate":
@@ -562,7 +564,15 @@ export default function EvalDashboardPage() {
               </Tooltip>
             }
             value={PCT(summary.overall_golden_accuracy)}
-            trend={`${summary.fields_tracked} field${summary.fields_tracked === 1 ? "" : "s"} tracked`}
+            trend={
+              // Two-line trend: paired count + full-suite reference.
+              // Keeps the apples-to-apples headline honest while
+              // surfacing the broader "how is the eval suite doing
+              // overall" number in the same glance.
+              summary.golden_suite_accuracy != null
+                ? `${summary.fields_tracked} paired · suite ${PCT(summary.golden_suite_accuracy, 0)} across ${summary.golden_suite_n_tasks} tasks`
+                : `${summary.fields_tracked} field${summary.fields_tracked === 1 ? "" : "s"} paired`
+            }
           />
         </div>
         <div className="rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)]">
