@@ -167,7 +167,7 @@ function CitationDrawer({
       role="dialog"
       aria-label="Citation source"
       className="fixed inset-0 z-50 flex justify-end"
-      style={{ background: "rgba(0,0,0,0.32)" }}
+      style={{ background: "var(--color-overlay-light)" }}
       onClick={onClose}
       onKeyDown={(e) => {
         if (e.key === "Escape") onClose();

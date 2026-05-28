@@ -668,6 +668,11 @@ export interface ToolUseRow {
 
 export interface LLMCallDetail extends LLMCallRow {
   error_detail: string | null;
+  /** Per-call costs. ``null`` when the gateway didn't have pricing
+   *  data for the model (third-party / unknown). The drawer renders
+   *  ``—`` in that case rather than a misleading ``$0.0000``. */
+  cost_input_usd: number | null;
+  cost_output_usd: number | null;
   related: LLMCallRow[];
   /** Tool trajectory for this call. Empty when the call didn't use
    *  tools. Ordered by ``sequence_num`` so the drawer can render the
@@ -1006,6 +1011,90 @@ export interface IntakeEmailDetails {
   >;
 }
 
+/** Refusal-rate trend. Block-rate over last 7d compared against
+ *  baseline (prior 28d), with a z-score for spike detection. ``flag``
+ *  trips ``spike`` at |z| ≥ 2; ``stable`` otherwise. The dashboard
+ *  reads ``current_rate`` for the headline and ``z_score`` for the
+ *  flag colour. */
+export interface RefusalDetails {
+  current_rate: number;
+  baseline_rate: number;
+  n_current: number;
+  n_current_blocked: number;
+  n_baseline: number;
+  n_baseline_blocked: number;
+  z_score: number | null;
+  flag: "stable" | "spike" | "insufficient_data";
+  window_current_days: number;
+  window_baseline_days: number;
+  spike_threshold_sigma: number;
+}
+
+/** Per-agent economics row. Returned by ``GET /eval/agent-economics``;
+ *  the dashboard card renders one row per agent. ``cost_per_run_usd``
+ *  drives the headline, p95 is the latency-tail signal. */
+export interface AgentEconRow {
+  agent_name: string;
+  n_runs: number;
+  n_calls: number;
+  total_cost_usd: number;
+  cost_per_run_usd: number;
+  p95_latency_seconds: number | null;
+  p50_latency_seconds: number | null;
+}
+
+export interface AgentEconResponse {
+  rows: AgentEconRow[];
+  window_days: number;
+}
+
+/** PSI per-feature drift. The details payload written by
+ *  ``mkopo/services/psi.py:run_psi_monitor`` — one task_runs row per
+ *  feature (task_name = ``psi.loan_amount`` / ``psi.loan_class`` /
+ *  ``psi.loan_type``). Bands follow Siddiqi 2017: <0.10 stable,
+ *  0.10–0.25 minor, ≥0.25 major. ``feature_kind`` is "numeric" or
+ *  "categorical"; the dashboard renders bin labels differently per
+ *  kind. */
+export interface PSIDetails {
+  feature: string;
+  feature_kind: "numeric" | "categorical";
+  psi: number;
+  flag: "stable" | "minor" | "major";
+  n_reference: number;
+  n_current: number;
+  window_current_days: number;
+  window_reference_days: number;
+  bins: {
+    label: string;
+    reference_pct: number;
+    current_pct: number;
+    psi_contribution: number;
+  }[];
+  thresholds: { stable: number; minor: number };
+}
+
+/** Adverse Impact Ratio (four-fifths rule).
+ *
+ *  AIR = min_group_approval_rate / max_group_approval_rate. EEOC
+ *  flags < 0.80 as a screening threshold for disparate impact. The
+ *  ``flag`` field is the dashboard's pre-computed band; ``groups``
+ *  carries the per-class counts so the card can render a side-by-
+ *  side comparison. ``four_fifths_threshold`` is stashed so the
+ *  card doesn't have to know the 0.80 constant. */
+export interface FairnessDetails {
+  air: number | null;
+  flag: "ok" | "watch" | "concern" | "insufficient_data";
+  window_days: number;
+  four_fifths_threshold: number;
+  groups: {
+    name: string;
+    n_decisioned: number;
+    n_approved: number;
+    n_declined: number;
+    approval_rate: number;
+  }[];
+}
+
 /** UW-summary groundedness (RAGAS-style faithfulness).
  *
  *  - ``judge_accuracy`` — fraction of fixtures the judge classified
@@ -1175,6 +1264,39 @@ export const api = {
    *  eval page's "is the AI actually working?" framing. */
   getEvalDiagnostics: () => request<EvalDiagnostics>(`/eval/diagnostics`),
   refreshDrift: () => request<EvalRefreshResult>(`/eval/refresh`, { method: "POST" }),
+  refreshFairness: () =>
+    request<{
+      status: string;
+      n_loans_decisioned: number;
+      air: number | null;
+      flag: "ok" | "watch" | "concern" | "insufficient_data";
+      window_days: number;
+    }>(`/eval/fairness/refresh`, { method: "POST" }),
+  refreshPSI: () =>
+    request<{
+      status: string;
+      features: {
+        feature: string;
+        psi: number;
+        flag: "stable" | "minor" | "major";
+        n_reference: number;
+        n_current: number;
+      }[];
+      window_current_days: number;
+      window_reference_days: number;
+    }>(`/eval/psi/refresh`, { method: "POST" }),
+  refreshRefusal: () =>
+    request<{
+      status: string;
+      current_rate: number;
+      baseline_rate: number;
+      n_current: number;
+      n_baseline: number;
+      z_score: number | null;
+      flag: "stable" | "spike" | "insufficient_data";
+    }>(`/eval/refusal/refresh`, { method: "POST" }),
+  getAgentEconomics: () =>
+    request<AgentEconResponse>(`/eval/agent-economics`),
   // ---- Eval annotations ----
   /** List annotations on one trace row, newest first. Drives the
    *  "Existing annotations" section of LLMCallDrawer + AgentRunDrawer. */

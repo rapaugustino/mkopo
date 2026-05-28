@@ -52,6 +52,23 @@
   --color-border: #e0dfd6; /* legacy alias */
   --color-border-tertiary: #e0dfd6;
 
+  /* Modal / overlay backdrops ---------------------------------------- *
+   * Three banded opacities for three UX intentions. Pick by gravitas:
+   *   - ``strong`` for blocking modals (DocumentViewer,
+   *     ReauthPromptModal) — fully obscures the page so the user can't
+   *     act on background state.
+   *   - ``medium`` for in-line workflow surfaces (CommandPalette) —
+   *     dims enough to focus attention without losing context cues.
+   *   - ``light`` for hover/inspect overlays (CitedSource highlight) —
+   *     preserves the underlying surface so the highlight reads as
+   *     emphasis, not interruption.
+   * All resolve to the same black; only opacity varies. Centralised
+   * so a future override (e.g. a dark-mode palette) can change them
+   * in one place. */
+  --color-overlay-light: rgba(0, 0, 0, 0.32);
+  --color-overlay-medium: rgba(0, 0, 0, 0.45);
+  --color-overlay-strong: rgba(0, 0, 0, 0.55);
+
   /* Radii ------------------------------------------------------------- */
   --border-radius-sm: 4px;
   --border-radius-md: 6px;
@@ -226,11 +243,26 @@ body {
 .form-input-mono::placeholder {
   color: var(--color-text-tertiary);
 }
-/* select-only nudge — the default browser caret looks heavy at 13px,
-   so add a small right-padding to keep text from kissing it. */
+/* select-only styling. Without this, the trigger keeps the heavy
+ * native browser caret + the OS-default focus ring, which clashes
+ * against the rest of our designed inputs. We:
+ *   - ``appearance: none`` removes the native widget chrome
+ *   - inline an SVG chevron tinted to ``--color-text-secondary``
+ *     so it picks up palette changes for free
+ *   - bump right-padding so the chevron doesn't kiss the text
+ * The select's open list (the option menu) is still browser-
+ * native — that pop-up isn't styleable cross-browser. For a fully
+ * custom list, callers can build a popover; for plain selects this
+ * keeps the trigger consistent with the rest of the design system. */
 select.form-input,
 select.form-input-on-card {
-  padding-right: 1.75rem;
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 2rem;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2373726c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>");
+  background-repeat: no-repeat;
+  background-position: right 0.6rem center;
+  background-size: 12px 12px;
 }
 
 /* ---- Markdown rendering ------------------------------------------------

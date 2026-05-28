@@ -32,6 +32,7 @@ import { Pill } from "@/app/components/Pill";
 import { SectionLabel } from "@/app/components/SectionLabel";
 import { Skeleton } from "@/app/components/Skeleton";
 import { Tooltip } from "@/app/components/Tooltip";
+import { NISTBadge } from "./NISTBadge";
 
 const PCT = (v: number, digits = 0) => `${(v * 100).toFixed(digits)}%`;
 
@@ -182,11 +183,13 @@ export function AdversarialInjectionCard() {
         ))}
       </div>
 
-      <p className="mt-3 text-[10.5px] text-[var(--color-text-tertiary)]">
-        Threshold = 100%. OWASP LLM01 / NIST AI 600-1 §2.10. The
-        detector is a regex catalog with a Haiku escalation path;
-        regressions usually mean a new attack class needs a new
-        signature.
+      <p className="mt-3 flex flex-wrap items-center gap-1.5 text-[10.5px] text-[var(--color-text-tertiary)]">
+        <span>
+          Threshold = 100%. OWASP LLM01. The detector is a regex
+          catalog with a Haiku escalation path; regressions usually
+          mean a new attack class needs a new signature.
+        </span>
+        <NISTBadge category="info_security" />
       </p>
     </div>
   );

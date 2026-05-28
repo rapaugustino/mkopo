@@ -124,6 +124,47 @@ def _latest_per_field(
     return out
 
 
+# Task-name prefixes whose ``accuracy`` column repurposes the field for
+# a NON-accuracy metric (cost, ratio, PSI, MMD, block rate, ...).
+# Their per-card dashboards decode the value correctly; the headline
+# "Production accuracy" average MUST exclude them or it averages
+# dollars-per-run alongside extraction accuracy and produces a
+# nonsensical 74.1% number.
+#
+# Add new prefixes here when wiring up a new derived-metric monitor.
+# Accuracy-shaped tasks (extraction.*, the golden eval tasks) do NOT
+# need to register — they're the default.
+_DERIVED_METRIC_PREFIXES = (
+    "economics.",
+    "fairness.",
+    "psi.",
+    "refusal.",
+    "prompt_drift.",
+    "calibration.",
+)
+
+
+def _is_accuracy_metric(task_name: str) -> bool:
+    """True iff ``task_run.accuracy`` for this task is a proper
+    [0, 1] accuracy value comparable across tasks. False for derived
+    metrics that repurpose the column (see ``_DERIVED_METRIC_PREFIXES``).
+    """
+    return not any(task_name.startswith(p) for p in _DERIVED_METRIC_PREFIXES)
+
+
+def _latest_accuracy_rows(
+    rows: list[TaskRun], source: str
+) -> dict[str, TaskRun]:
+    """Same as ``_latest_per_field`` but filtered to accuracy-shaped
+    tasks only. Used by the headline KPI + drift count where the math
+    only makes sense across like-shaped metrics."""
+    return {
+        name: r
+        for name, r in _latest_per_field(rows, source).items()
+        if _is_accuracy_metric(name)
+    }
+
+
 def _percentile(values: list[float], pct: float) -> float | None:
     """Plain nearest-rank percentile. ``values`` is mutated (sorted).
 
@@ -155,8 +196,14 @@ async def get_eval_summary(
         await db.execute(select(TaskRun).order_by(desc(TaskRun.created_at)))
     ).scalars().all()
 
-    latest_prod = _latest_per_field(list(rows), "production")
-    latest_gold = _latest_per_field(list(rows), "golden")
+    # Accuracy headline uses ONLY accuracy-shaped tasks — see
+    # ``_is_accuracy_metric``. Derived monitors (fairness AIR,
+    # PSI, economics $/run, refusal block rate, calibration ECE)
+    # write to ``task_runs.accuracy`` for trend-chart compatibility
+    # but mean entirely different things across rows; averaging
+    # them produces a nonsense number.
+    latest_prod = _latest_accuracy_rows(list(rows), "production")
+    latest_gold = _latest_accuracy_rows(list(rows), "golden")
 
     prod_acc = (
         sum(r.accuracy for r in latest_prod.values()) / len(latest_prod)
@@ -253,8 +300,11 @@ async def get_eval_fields(
     rows = (
         await db.execute(select(TaskRun).order_by(desc(TaskRun.created_at)))
     ).scalars().all()
-    latest_prod = _latest_per_field(list(rows), "production")
-    latest_gold = _latest_per_field(list(rows), "golden")
+    # Same accuracy-only filter as ``/summary`` — the per-field table
+    # is for accuracy drift, not for surfacing the derived monitors
+    # (those have dedicated cards under /eval).
+    latest_prod = _latest_accuracy_rows(list(rows), "production")
+    latest_gold = _latest_accuracy_rows(list(rows), "golden")
 
     names = {*latest_prod.keys(), *latest_gold.keys()}
     out: list[FieldRow] = []
@@ -301,6 +351,11 @@ async def get_eval_trend(
         .order_by(TaskRun.created_at.asc())
     )
     rows = (await db.execute(stmt)).scalars().all()
+    # Same accuracy-only filter as ``/summary`` — the chart's y-axis
+    # is a 0–1 accuracy scale, so plotting fairness AIR (also 0–1
+    # but lower-is-better), PSI (≥0, unbounded), or cost-per-run
+    # ($, on the same axis) is misleading at best. Those metrics
+    # have dedicated cards.
     return TrendResponse(
         days=days,
         points=[
@@ -312,6 +367,7 @@ async def get_eval_trend(
                 n=r.n,
             )
             for r in rows
+            if _is_accuracy_metric(r.task_name)
         ],
     )
 
@@ -330,6 +386,178 @@ async def refresh_drift(
     persisted = await run_drift_monitor(db)
     await db.commit()
     return RefreshResponse(status="ok", fields_written=len(persisted))
+
+
+class FairnessRefreshResponse(BaseModel):
+    """Hand-rolled return shape for the manual fairness refresh.
+
+    Mirrors what ``run_fairness_monitor`` would log — gives the UI
+    enough to render an updated card without re-fetching."""
+
+    status: str
+    n_loans_decisioned: int
+    air: float | None
+    flag: str
+    window_days: int
+
+
+@router.post("/fairness/refresh", response_model=FairnessRefreshResponse)
+async def refresh_fairness(
+    user: CurrentUserDep,
+    db: DbSessionDep,
+) -> FairnessRefreshResponse:
+    """Manually re-run the fairness (AIR) monitor.
+
+    Same code path the Arq cron at 3:45 UTC calls. Useful for the
+    dashboard's "Refresh" button so demos don't have to wait — and
+    so a staff user who just transitioned a loan can see the AIR
+    move immediately.
+    """
+    from mkopo.services.fairness import run_fairness_monitor
+
+    result = await run_fairness_monitor(db)
+    await db.commit()
+    return FairnessRefreshResponse(
+        status="ok",
+        n_loans_decisioned=result.n_loans_decisioned,
+        air=result.air,
+        flag=result.flag,
+        window_days=result.window_days,
+    )
+
+
+class PSIFeatureSummary(BaseModel):
+    """Per-feature summary returned by the manual PSI refresh."""
+
+    feature: str
+    psi: float
+    flag: str
+    n_reference: int
+    n_current: int
+
+
+class PSIRefreshResponse(BaseModel):
+    """Return shape for the manual PSI refresh."""
+
+    status: str
+    features: list[PSIFeatureSummary]
+    window_current_days: int
+    window_reference_days: int
+
+
+class RefusalRefreshResponse(BaseModel):
+    """Return shape for the manual refusal-rate refresh."""
+
+    status: str
+    current_rate: float
+    baseline_rate: float
+    n_current: int
+    n_baseline: int
+    z_score: float | None
+    flag: str
+
+
+@router.post("/refusal/refresh", response_model=RefusalRefreshResponse)
+async def refresh_refusal(
+    user: CurrentUserDep,
+    db: DbSessionDep,
+) -> RefusalRefreshResponse:
+    """Manually re-run the refusal-rate monitor. Mirrors the 3:52
+    UTC cron path."""
+    from mkopo.services.refusal import run_refusal_monitor
+
+    result = await run_refusal_monitor(db)
+    await db.commit()
+    return RefusalRefreshResponse(
+        status="ok",
+        current_rate=result.current_rate,
+        baseline_rate=result.baseline_rate,
+        n_current=result.n_current,
+        n_baseline=result.n_baseline,
+        z_score=result.z_score,
+        flag=result.flag,
+    )
+
+
+class AgentEconRowOut(BaseModel):
+    """Per-agent economics row — what the dashboard card renders."""
+
+    agent_name: str
+    n_runs: int
+    n_calls: int
+    total_cost_usd: float
+    cost_per_run_usd: float
+    p95_latency_seconds: float | None
+    p50_latency_seconds: float | None
+
+
+class AgentEconResponse(BaseModel):
+    rows: list[AgentEconRowOut]
+    window_days: int
+
+
+@router.get("/agent-economics", response_model=AgentEconResponse)
+async def agent_economics(
+    user: CurrentUserDep,
+    db: DbSessionDep,
+) -> AgentEconResponse:
+    """Per-agent $/run + p95 latency over the last 30 days.
+
+    Read-only — doesn't persist a task_runs row. The dashboard
+    card uses this for the at-a-glance table; the trend chart picks
+    up persisted rows from ``economics.<agent_name>`` written by
+    the 3:55 UTC cron.
+    """
+    from mkopo.services.agent_economics import get_agent_economics_summary
+
+    rows = await get_agent_economics_summary(db)
+    return AgentEconResponse(
+        rows=[
+            AgentEconRowOut(
+                agent_name=r.agent_name,
+                n_runs=r.n_runs,
+                n_calls=r.n_calls,
+                total_cost_usd=r.total_cost_usd,
+                cost_per_run_usd=r.cost_per_run_usd,
+                p95_latency_seconds=r.p95_latency_seconds,
+                p50_latency_seconds=r.p50_latency_seconds,
+            )
+            for r in rows
+        ],
+        window_days=30,
+    )
+
+
+@router.post("/psi/refresh", response_model=PSIRefreshResponse)
+async def refresh_psi(
+    user: CurrentUserDep,
+    db: DbSessionDep,
+) -> PSIRefreshResponse:
+    """Manually re-run the PSI monitor.
+
+    Same code path the Arq cron at 3:50 UTC calls. Useful for the
+    dashboard's "Refresh" button. Returns a per-feature summary so
+    the UI can render the updated bars without re-fetching.
+    """
+    from mkopo.services.psi import run_psi_monitor
+
+    result = await run_psi_monitor(db)
+    await db.commit()
+    return PSIRefreshResponse(
+        status="ok",
+        features=[
+            PSIFeatureSummary(
+                feature=f.feature,
+                psi=f.psi,
+                flag=f.flag,
+                n_reference=f.n_reference,
+                n_current=f.n_current,
+            )
+            for f in result.features
+        ],
+        window_current_days=result.window_current_days,
+        window_reference_days=result.window_reference_days,
+    )
 
 
 # ----- task detail endpoint (Phase 2) ---------------------------------------

@@ -211,11 +211,11 @@ class UWGroundednessTask:
         # own-paraphrase (e.g. judge marks "DSCR is 1.32x" against
         # "DSCR=1.32" as unsupported on string-match) without
         # collapsing the discrimination signal.
-        DISCRIMINATION = 0.85
+        discrimination = 0.85
         if expected_band == "low":
-            passed = raw_score < DISCRIMINATION
+            passed = raw_score < discrimination
         else:
-            passed = raw_score >= DISCRIMINATION
+            passed = raw_score >= discrimination
 
         unsupported = [
             {"claim": c.get("claim"), "evidence": c.get("evidence")}
@@ -230,7 +230,7 @@ class UWGroundednessTask:
                 "supported_claims": supported,
                 "unsupported_claims": unsupported,
                 "expected_band": expected_band,
-                "discrimination_threshold": DISCRIMINATION,
+                "discrimination_threshold": discrimination,
             },
         )
 

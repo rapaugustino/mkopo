@@ -85,11 +85,11 @@ class LLMCallDetail(BaseModel):
     """Full LLM call record for the observability drill-in drawer.
 
     Same shape as ``LLMCallRow`` plus ``error_detail`` (long-form
-    technical content), a small list of *related* calls — rows
-    sharing the same ``system_prompt_hash`` in the recent window, so an
-    operator looking at one schema_failed call can see whether the
-    same prompt fails repeatedly or is a one-off — and the full
-    ``tool_uses`` trajectory if this was a tool-using call.
+    technical content), per-call costs (always stored on the SQL
+    row but only surfaced on the detail endpoint to keep the
+    recent-calls table payload small), a small list of *related*
+    calls — rows sharing the same ``system_prompt_hash`` in the
+    recent window — and the full ``tool_uses`` trajectory.
     """
 
     id: str
@@ -101,6 +101,8 @@ class LLMCallDetail(BaseModel):
     elapsed_seconds: float
     input_tokens: int | None
     output_tokens: int | None
+    cost_input_usd: float | None
+    cost_output_usd: float | None
     system_prompt_hash: str  # full hash (64 chars) for grouping
     error_reason: str | None
     error_detail: str | None
@@ -388,6 +390,15 @@ async def llm_call_detail(
         elapsed_seconds=call.elapsed_seconds,
         input_tokens=call.input_tokens,
         output_tokens=call.output_tokens,
+        # Decimal → float for JSON serialisation. None when the
+        # gateway didn't have pricing data (third-party / unknown
+        # model) — the dashboard renders this as "—" rather than $0.
+        cost_input_usd=(
+            float(call.cost_input_usd) if call.cost_input_usd is not None else None
+        ),
+        cost_output_usd=(
+            float(call.cost_output_usd) if call.cost_output_usd is not None else None
+        ),
         system_prompt_hash=call.system_prompt_hash,
         error_reason=call.error_reason,
         error_detail=call.error_detail,

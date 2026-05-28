@@ -209,6 +209,7 @@ async def _main() -> int:
     from evals.tasks.extract_noi import ExtractNOITask
     from evals.tasks.intake_email import IntakeEmailTask
     from evals.tasks.summarize_underwriting import SummarizeUnderwritingTask
+    from evals.tasks.tool_call_accuracy import ToolCallAccuracyTask
     from evals.tasks.uw_groundedness import UWGroundednessTask
 
     tasks: list[EvalTask] = [
@@ -229,6 +230,8 @@ async def _main() -> int:
         # Phase 2.5 — borrower-facing email + RAGAS-style faithfulness.
         IntakeEmailTask(),
         UWGroundednessTask(),
+        # Phase 3 — chat-agent tool-selection accuracy.
+        ToolCallAccuracyTask(),
     ]
 
     print("Running eval suite...")

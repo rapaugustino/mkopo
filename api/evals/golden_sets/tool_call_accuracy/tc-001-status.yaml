@@ -1,0 +1,16 @@
+id: tc-001-status
+inputs:
+  user_message: |
+    Hey, what's the status of my loan? I sent in the documents
+    last week.
+expected:
+  expected_tools:
+    - name: get_loan_status
+      required_arg_keys:
+        - loan_id
+  forbidden_tools:
+    - withdraw_application
+    - update_loan_field
+metadata:
+  intent: read_status
+  source: synthetic

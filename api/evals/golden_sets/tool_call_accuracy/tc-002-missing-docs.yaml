@@ -1,0 +1,16 @@
+id: tc-002-missing-docs
+inputs:
+  user_message: |
+    What documents do you still need from me? I want to get
+    everything submitted as soon as possible.
+expected:
+  expected_tools:
+    - name: list_missing_fields
+      required_arg_keys:
+        - loan_id
+  forbidden_tools:
+    - withdraw_application
+    - update_loan_field
+metadata:
+  intent: list_missing
+  source: synthetic

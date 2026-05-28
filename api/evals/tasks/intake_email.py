@@ -48,7 +48,6 @@ from mkopo.config import get_settings
 from mkopo.llm_gateway import get_gateway
 from mkopo.services.prompts import get as get_prompt
 
-
 # Doc-keyword vocabularies for the per-class match. Lowercased; the
 # scorer does case-insensitive substring matching against the body.
 # Keep these in sync with ``mkopo.agents.intake._DOC_ASKS_PERSONAL`` /

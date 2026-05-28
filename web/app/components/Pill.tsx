@@ -34,9 +34,11 @@ const STYLE: Record<PillVariant, { bg: string; fg: string }> = {
     bg: "var(--color-background-success)",
     fg: "var(--color-text-success)",
   },
-  // "ai" is a brand-flavoured success — used for AI-drafted markers
+  // "ai" is a brand-flavoured success — used for AI-drafted markers.
+  // ``--color-brand-light`` is the canonical token for this tint;
+  // see globals.css.
   ai: {
-    bg: "#E1F5EE",
+    bg: "var(--color-brand-light)",
     fg: "var(--color-brand)",
   },
   neutral: {

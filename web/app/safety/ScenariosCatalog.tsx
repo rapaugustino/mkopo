@@ -202,7 +202,7 @@ export function ScenariosCatalog() {
             onChange={(e) =>
               setCategory(e.target.value as ScenarioCategory | "all")
             }
-            className="rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-2 py-1 text-[11.5px]"
+            className="form-input-on-card"
           >
             {CATEGORY_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>
@@ -218,7 +218,7 @@ export function ScenariosCatalog() {
             onChange={(e) =>
               setSeverity(e.target.value as ScenarioSeverity | "all")
             }
-            className="rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-2 py-1 text-[11.5px]"
+            className="form-input-on-card"
           >
             {SEVERITY_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>

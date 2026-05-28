@@ -38,6 +38,23 @@ import { CalibrationCard } from "./cards/CalibrationCard";
 import { AdversarialInjectionCard } from "./cards/AdversarialInjectionCard";
 import { IntakeEmailCard } from "./cards/IntakeEmailCard";
 import { UWGroundednessCard } from "./cards/UWGroundednessCard";
+import { FairnessCard } from "./cards/FairnessCard";
+import { PSICard } from "./cards/PSICard";
+import { RefusalCard } from "./cards/RefusalCard";
+import { AgentEconomicsCard } from "./cards/AgentEconomicsCard";
+import { EvalSection } from "./EvalSection";
+import { EvalSectionTOC, type TOCEntry } from "./EvalSectionTOC";
+
+// Table-of-contents entries for the sticky in-page nav. Order
+// matters — top → bottom of the dashboard. Keep in sync with the
+// section ids below.
+const TOC_ENTRIES: TOCEntry[] = [
+  { id: "overview", label: "Overview" },
+  { id: "extraction", label: "Extraction" },
+  { id: "golden", label: "Golden gate" },
+  { id: "production", label: "Production drift" },
+  { id: "operations", label: "Operations" },
+];
 
 /** Tooltip definitions for the eval dashboard. Centralised so the
  *  wording stays consistent across cards + so a regulator-friendly
@@ -80,13 +97,16 @@ function colourForAccuracy(accuracy: number | null): string {
  * and golden dashed so the eye can read drift instantly.
  *
  * Coordinates are sized to a fixed viewBox (600x150) matching the mockup;
- * the parent makes it fluid via width:100%.
+ * the parent makes it fluid via width:100%. PAD_R is intentionally
+ * larger than PAD_L because the rightmost "Now" axis label is
+ * right-anchored at ``W - PAD_R`` — without the wider gutter the text
+ * would still need to fit visibly under the last data point.
  */
 function TrendChart({ trend }: { trend: EvalTrend }) {
   const W = 600;
   const H = 150;
   const PAD_L = 36;
-  const PAD_R = 12;
+  const PAD_R = 28;
   const PAD_T = 12;
   const PAD_B = 26;
   const innerW = W - PAD_L - PAD_R;
@@ -109,12 +129,30 @@ function TrendChart({ trend }: { trend: EvalTrend }) {
     );
   }
 
-  // x-domain: oldest..newest, parsed timestamps
+  // x-domain: anchored to the REQUESTED window (now - days .. now),
+  // NOT to the data's tMin..tMax. Why: on a fresh DB all data lives
+  // in a tiny time window so tMax - tMin ≈ minutes; the chart would
+  // stretch that to fill the full width and label all three x-ticks
+  // with the same date (with the rightmost clipping past the
+  // viewBox). Anchoring to the request window gives:
+  //   - meaningful x-axis dates spanning ``days`` actual days
+  //   - recent data clustered on the right, with empty space to the
+  //     left when production is young — which is the truthful picture
+  //   - stable scale that doesn't jump as new data lands
+  const now = Date.now();
   const ts = trend.points.map((p) => new Date(p.created_at).getTime());
-  const tMin = Math.min(...ts);
-  const tMax = Math.max(...ts);
+  const dataMax = Math.max(...ts, now);
+  const xMax = dataMax;
+  const xMin = now - trend.days * 86_400_000;
   const xFor = (t: number) =>
-    tMax === tMin ? PAD_L + innerW / 2 : PAD_L + innerW * ((t - tMin) / (tMax - tMin));
+    xMax === xMin ? PAD_L + innerW / 2 : PAD_L + innerW * ((t - xMin) / (xMax - xMin));
+
+  // Heuristic for "is the data actually spread across the window, or
+  // is it all clustered in the last day?". Used to surface a hint
+  // when the chart can't show meaningful drift yet.
+  const tMin = Math.min(...ts);
+  const dataSpanDays = (dataMax - tMin) / 86_400_000;
+  const isSparse = dataSpanDays < 2 && trend.days >= 7;
 
   // group: task_name -> source -> sorted [{t, accuracy}]
   type Pt = { t: number; accuracy: number };
@@ -154,8 +192,8 @@ function TrendChart({ trend }: { trend: EvalTrend }) {
             y1={yFor(y)}
             x2={W - PAD_R}
             y2={yFor(y)}
-            stroke="#888780"
-            strokeOpacity={0.25}
+            stroke="var(--color-border-tertiary)"
+            strokeOpacity={0.6}
             strokeWidth={0.5}
           />
           <text
@@ -204,19 +242,51 @@ function TrendChart({ trend }: { trend: EvalTrend }) {
         }),
       )}
 
-      {/* x-axis labels: oldest / midpoint / newest */}
-      {[tMin, (tMin + tMax) / 2, tMax].map((t, i) => (
+      {/* x-axis labels at the window edges + midpoint. ``textAnchor``
+          is set per-tick so the leftmost label flows right from the
+          chart edge (start), the middle one centres on its tick, and
+          the rightmost flows LEFT from the chart edge (end) — without
+          this the rightmost "Now" overflows the viewBox and renders
+          as a clipped "Now" / partial date. */}
+      {([
+        [xMin, "start"],
+        [(xMin + xMax) / 2, "middle"],
+        [xMax, "end"],
+      ] as const).map(([t, anchor], i) => (
         <text
           key={i}
           x={xFor(t)}
           y={H - 6}
-          textAnchor="middle"
+          textAnchor={anchor}
           fontSize={10}
           fill="var(--color-text-secondary)"
         >
-          {new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+          {anchor === "end"
+            ? "Now"
+            : new Date(t).toLocaleDateString(undefined, {
+                month: "short",
+                day: "numeric",
+              })}
         </text>
       ))}
+
+      {/* Sparse-data hint. When the data clusters in a tiny window
+          (fresh DB, post-seed) the polylines are short stubs at the
+          right. Without the hint, the empty left side reads as "we
+          had stable 100% accuracy for weeks then suddenly something
+          happened" — the opposite of the truth. */}
+      {isSparse && (
+        <text
+          x={PAD_L + 8}
+          y={PAD_T + 16}
+          fontSize={9.5}
+          fill="var(--color-text-tertiary)"
+          fontStyle="italic"
+        >
+          Data clusters in the last {Math.max(1, Math.ceil(dataSpanDays))}d;
+          earlier window has no runs yet.
+        </text>
+      )}
     </svg>
   );
 }
@@ -436,6 +506,18 @@ export default function EvalDashboardPage() {
           the toast system now — see Providers. The inline banners that
           used to live here duplicated that signal. */}
 
+      {/* Sticky in-page TOC. Lets the operator jump between the
+          five major sections without scrolling. See
+          ``EvalSectionTOC`` for the rationale on why this is a TOC
+          and not a left sidebar (top-nav-only app layout; the pain
+          is within-page, not across-page navigation). */}
+      <EvalSectionTOC entries={TOC_ENTRIES} />
+
+      <EvalSection
+        id="overview"
+        title="Overview"
+        description="Headline accuracy + LLM-call health across the platform. Use these to spot regressions; the sections below decompose them."
+      >
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <div className="rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)]">
           <StatTile
@@ -529,68 +611,80 @@ export default function EvalDashboardPage() {
         </div>
         <TrendChart trend={trend} />
       </div>
+      </EvalSection>
 
-      <div className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-4 py-3">
-        <p className="mb-3 text-[13px] font-medium">Per-field accuracy (most recent run)</p>
-        {fields.length === 0 ? (
-          <p className="text-xs text-[var(--color-text-secondary)]">
-            No fields evaluated yet. Run intake on the seed loans, accept
-            or override a few extractions in the review queue, then click
-            <em> Refresh drift</em>.
+      <EvalSection
+        id="extraction"
+        title="Extraction"
+        description="Field-level extraction accuracy from the drift monitor. Drifting fields link directly to the review queue for the underlying samples."
+      >
+        <div className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-4 py-3">
+          <p className="mb-3 text-[13px] font-medium">
+            Per-field accuracy (most recent run)
           </p>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {fields.map((row) => (
-              <FieldBar key={row.field_name} row={row} />
-            ))}
-          </div>
-        )}
-      </div>
+          {fields.length === 0 ? (
+            <p className="text-xs text-[var(--color-text-secondary)]">
+              No fields evaluated yet. Run intake on the seed loans, accept
+              or override a few extractions in the review queue, then click
+              <em> Refresh drift</em>.
+            </p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {fields.map((row) => (
+                <FieldBar key={row.field_name} row={row} />
+              ))}
+            </div>
+          )}
+        </div>
+      </EvalSection>
 
-      {/* Phase 2 — task-specific eval cards. Each one renders the
-          ``details`` JSONB written by an AggregatingEvalTask in
-          ``evals/runner.py`` (decision verdict, AAL fidelity,
-          adversarial injection) or by the calibration monitor in
-          ``services/calibration.py``. Same shape on the wire (GET
-          /eval/task-detail/{task_name}); each card narrows the
-          payload to its own typed view.
+      <EvalSection
+        id="golden"
+        title="Golden gate"
+        description="Task-specific accuracy against the labelled YAML fixtures. Each card decodes the AggregatingEvalTask payload for its task — confusion matrix, per-criterion bars, reliability diagram, per-pattern coverage."
+      >
+        <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
+          <DecisionVerdictCard />
+          <AALFidelityCard />
+          <AdversarialInjectionCard />
+          <IntakeEmailCard />
+          <UWGroundednessCard />
+        </div>
+      </EvalSection>
 
-          Why a separate section: the top metrics + trend + per-field
-          rows above answer "are extractions still accurate?". These
-          four answer the harder regulator questions — "in what
-          direction are decisions wrong?" (confusion matrix), "is
-          the AAL drafter ECOA-compliant?" (per-criterion fidelity),
-          "is confidence well-calibrated?" (ECE + Brier), "do we
-          catch known injection attacks?" (per-pattern coverage).
-          Each of those needs a different visual; one row of bars
-          can't carry the load. */}
-      <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
-        <DecisionVerdictCard />
-        <AALFidelityCard />
-        <CalibrationCard />
-        <AdversarialInjectionCard />
-        <IntakeEmailCard />
-        <UWGroundednessCard />
-      </div>
+      <EvalSection
+        id="production"
+        title="Production drift"
+        description="Leading indicators read off live production data — calibration, fairness, input-feature drift, refusal-rate spike detection. Surface here before they trip the golden gate."
+      >
+        <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
+          <CalibrationCard />
+          <FairnessCard />
+          <PSICard />
+          <RefusalCard />
+        </div>
+      </EvalSection>
 
-      {/* Diagnostics row — confidence calibration + review queue +
-          agent reliability + recent failures. The eval page is about
-          "is the AI doing the job well", and these four cards each
-          answer a different facet of that question without
-          duplicating the observability page (which answers "is the
-          system healthy"). */}
-      <div className="grid grid-cols-2 gap-2">
-        <ConfidenceCard diagnostics={diagnostics} />
-        <ReviewQueueCard diagnostics={diagnostics} />
-      </div>
+      <EvalSection
+        id="operations"
+        title="Operations"
+        description="Cost, latency, reviewer load, recent failures. The 'are we keeping up?' view alongside the quality metrics."
+      >
+        <AgentEconomicsCard />
 
-      <AgentReliabilityCard diagnostics={diagnostics} />
+        <div className="grid grid-cols-2 gap-2">
+          <ConfidenceCard diagnostics={diagnostics} />
+          <ReviewQueueCard diagnostics={diagnostics} />
+        </div>
 
-      <RecentFailuresCard
-        diagnostics={diagnostics}
-        onOpenCall={setOpenCallId}
-        onOpenRun={setOpenRunId}
-      />
+        <AgentReliabilityCard diagnostics={diagnostics} />
+
+        <RecentFailuresCard
+          diagnostics={diagnostics}
+          onOpenCall={setOpenCallId}
+          onOpenRun={setOpenRunId}
+        />
+      </EvalSection>
 
       {/* Reuse the observability drawers — drilling into a failure
           from here lands the operator in the same prompt-hash / step

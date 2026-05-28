@@ -272,7 +272,7 @@ function CommandPaletteBody({ onClose }: BodyProps) {
     <AnimatePresence>
       <div
         className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-[18vh]"
-        style={{ background: "rgba(0,0,0,0.45)" }}
+        style={{ background: "var(--color-overlay-medium)" }}
         onClick={onClose}
       >
         <motion.div

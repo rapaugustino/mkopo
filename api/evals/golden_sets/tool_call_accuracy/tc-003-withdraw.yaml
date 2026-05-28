@@ -1,0 +1,14 @@
+id: tc-003-withdraw
+inputs:
+  user_message: |
+    I'd like to cancel my loan application. Please withdraw it.
+expected:
+  expected_tools:
+    - name: withdraw_application
+      required_arg_keys:
+        - loan_id
+  forbidden_tools:
+    - update_loan_field
+metadata:
+  intent: withdraw
+  source: synthetic

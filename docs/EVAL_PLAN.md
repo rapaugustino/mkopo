@@ -201,27 +201,81 @@ a focused turn):
 
 These are the "you're running this in production" metrics.
 
-- [ ] **Adverse Impact Ratio** — synthetic-data add a "protected
-  class" demographic field on test loans, compute approval rate per
-  class, surface ratio. Flag <0.80. Document the four-fifths-rule
-  caveat (it's not a legal safe harbor — see Watkins et al. 2024).
-- [ ] **PSI on input features** — DSCR, LTV, loan size, FICO,
-  property type. Compare last 30 days vs prior 90 days. Standard
-  bands (<0.10 stable, 0.10–0.25 minor, >0.25 major).
-- [ ] **Embedding-distribution drift on prompts** — MMD test on
-  embedded user-message corpus, this week vs baseline. Catches
-  semantic shifts PSI misses.
-- [ ] **Tool-call accuracy** task for the borrower + staff chat agents.
-  Golden conversations with expected tool sequences. Score: Trajectory
-  Inclusion (all required tools called) + Tool Argument Correctness.
-- [ ] **Refusal / abstain rate trend** — track the rate at which the
-  detector / judge blocks; sudden spike = leading indicator of
-  prompt drift or new attack.
-- [ ] **$/decision + p95 latency per agent.** Already partly in
-  observability; surface on the eval page alongside accuracy so you
-  can correlate quality regressions with cost / latency regressions.
-- [ ] **NIST AI 600-1 mapping** — each panel cards which generative-AI
-  risk category it addresses (Confabulation, Harmful Bias,
+- [x] **Adverse Impact Ratio** — implemented as
+  ``mkopo/services/fairness.py``. Bucketises decisioned loans
+  (APPROVED / SERVICING / CONDITIONS / CLOSING / DECLINED, 90-day
+  window) by a stable hash of ``loan.id`` (synthetic protected
+  class — production path replaces with HMDA demographic). AIR
+  = lowest-group approval rate ÷ highest-group approval rate.
+  Banded ``ok`` ≥ 0.85, ``watch`` 0.80–0.85, ``concern`` < 0.80
+  (EEOC four-fifths convention). Writes ``task_runs`` row only
+  when AIR is computable (≥ 2 populated groups) so the trend
+  chart doesn't pollute with 0.0 points on empty windows. Cron
+  3:45 UTC, between calibration (3:30) and golden sweep (4:00).
+  Manual refresh via ``POST /eval/fairness/refresh``. Dashboard
+  surface: ``web/app/eval/cards/FairnessCard.tsx``. Explicitly
+  documented as a screening heuristic, not a per-se finding
+  (Watkins et al. 2024).
+- [x] **PSI on input features** — implemented as
+  ``mkopo/services/psi.py``. Quantile-binned numeric PSI for
+  ``loan_amount`` (10 bins, equal-count from the reference);
+  categorical PSI for ``loan_class`` (personal/business) and
+  ``loan_type`` (bridge/permanent/refi/construction). Reference =
+  prior 90-day window ending 30 days ago; current = last 30 days
+  (with a 30-day gap so the windows don't trivially overlap).
+  Bands per Siddiqi 2017 / FDIC SR 11-7: < 0.10 stable, 0.10–0.25
+  minor, ≥ 0.25 major. Laplace-smoothed zero counts so a new bin
+  appearing doesn't blow up the divergence. Skips the row-write
+  below 30 samples in either window. Writes one ``task_runs`` row
+  per feature (``task_name='psi.<feature>'``) so the trend chart
+  can plot each independently. Cron at 3:50 UTC, between fairness
+  (3:45) and golden sweep (4:00). Manual refresh via
+  ``POST /eval/psi/refresh``. Dashboard surface:
+  ``web/app/eval/cards/PSICard.tsx``. Future expansion to DSCR /
+  LTV / FICO is just more queries — those features live on
+  ``extractions`` / ``underwriting_results``, not ``loans``.
+- [x] **Embedding-distribution drift on prompts** — implemented as
+  ``mkopo/services/prompt_drift.py``. Unbiased U-statistic MMD²
+  (Gretton et al. 2012) with an RBF kernel + median-heuristic σ
+  on borrower inbound messages. Reference = prior 30d (with 7d
+  gap); current = last 7d. Bands calibrated for OpenAI
+  text-embedding-3-small @ 1024d: < 0.005 stable, 0.005–0.02
+  minor, ≥ 0.02 major. Embeddings cached via the existing
+  ``EmbeddingService`` so each unique body costs one API call.
+  Cron 3:58 UTC.
+- [x] **Tool-call accuracy** task — implemented as
+  ``evals/tasks/tool_call_accuracy.py`` (5 fixtures). Scores
+  Trajectory Inclusion (every expected tool called) + Negative
+  Trajectory (no forbidden tool called, e.g. ``withdraw_application``
+  on a status question) + Argument Correctness (required arg keys
+  present). Mocked tool catalog mirrors the production
+  ``mkopo/agents/tools/borrower.py`` surface. Threshold 0.75;
+  aggregate exposes per-criterion + per-tool selection rates.
+- [x] **Refusal / abstain rate trend** — implemented as
+  ``mkopo/services/refusal.py``. Block-rate over last 7d vs
+  prior 28d baseline (with 7d gap) on InjectionDetection.
+  Binomial-proportion z-score; |z| ≥ 2 flips ``stable`` → ``spike``.
+  Cron 3:52 UTC. Manual refresh via ``POST /eval/refusal/refresh``.
+  Dashboard surface: ``web/app/eval/cards/RefusalCard.tsx``.
+  Not a CI gate — operator attention metric.
+- [x] **$/decision + p95 latency per agent** — implemented as
+  ``mkopo/services/agent_economics.py``. Joins ``llm_calls`` ↔
+  ``agent_runs.thread_id`` over the last 30 days; aggregates
+  total cost ÷ run count + 95th-percentile per-call latency per
+  agent. Pure-Python percentile (no numpy). Cron 3:55 UTC writes
+  one ``task_runs`` row per agent (``task_name='economics.<agent>'``)
+  so the trend chart can plot cost regression alongside accuracy.
+  Read-only endpoint at ``GET /eval/agent-economics``. Dashboard
+  surface: ``web/app/eval/cards/AgentEconomicsCard.tsx``.
+- [x] **NIST AI 600-1 mapping** — implemented as ``web/app/eval/
+  cards/NISTBadge.tsx``. Reusable badge primitive carrying the
+  NIST 600-1 risk category (Confabulation, Harmful Bias, Data
+  Privacy, Information Security, Information Integrity, Value
+  Chain, Dangerous Content). Stamped on Fairness, UW
+  Groundedness, Adversarial Injection, PSI, Refusal, Agent
+  Economics cards (the regulator-load-bearing surfaces). Each
+  badge tooltip quotes the NIST 600-1 section so the link to
+  the framework is direct.
   Information Integrity, Data Privacy). Reviewer-facing
   documentation tied to the regulator's framework.
 

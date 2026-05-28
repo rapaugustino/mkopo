@@ -1,0 +1,17 @@
+id: tc-004-update-address
+inputs:
+  user_message: |
+    Can you update my mailing address? It's now 4421 16th Ave S,
+    Tacoma WA 98404.
+expected:
+  expected_tools:
+    - name: update_loan_field
+      required_arg_keys:
+        - loan_id
+        - field
+        - value
+  forbidden_tools:
+    - withdraw_application
+metadata:
+  intent: mutate_address
+  source: synthetic

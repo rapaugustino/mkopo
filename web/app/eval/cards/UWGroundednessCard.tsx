@@ -37,6 +37,7 @@ import { Pill } from "@/app/components/Pill";
 import { SectionLabel } from "@/app/components/SectionLabel";
 import { Skeleton } from "@/app/components/Skeleton";
 import { Tooltip } from "@/app/components/Tooltip";
+import { NISTBadge } from "./NISTBadge";
 
 const PCT = (v: number, digits = 0) =>
   v == null ? "—" : `${(v * 100).toFixed(digits)}%`;
@@ -146,10 +147,13 @@ export function UWGroundednessCard() {
               {PCT(contrast, 1)}
             </span>
           </div>
-          <p className="text-[10.5px] text-[var(--color-text-tertiary)]">
-            {d.supported_claims} of {d.total_claims} claims supported
-            across the suite. RAGAS — Es et al. 2024,
-            arXiv:2309.15217.
+          <p className="flex flex-wrap items-center gap-1.5 text-[10.5px] text-[var(--color-text-tertiary)]">
+            <span>
+              {d.supported_claims} of {d.total_claims} claims
+              supported across the suite. RAGAS — Es et al. 2024,
+              arXiv:2309.15217.
+            </span>
+            <NISTBadge category="confabulation" />
           </p>
         </div>
 

@@ -129,7 +129,8 @@ export function DocSourceViewer({ taskId, onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: "var(--color-overlay-medium)" }}
       role="dialog"
       aria-modal="true"
       onClick={onClose}

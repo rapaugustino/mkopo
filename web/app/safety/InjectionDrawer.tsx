@@ -49,7 +49,8 @@ export function InjectionDrawer({ detectionId, onClose }: Props) {
   return (
     <>
       <div
-        className="fixed inset-0 z-40 bg-black/30"
+        className="fixed inset-0 z-40"
+        style={{ background: "var(--color-overlay-light)" }}
         onClick={onClose}
         aria-hidden
       />

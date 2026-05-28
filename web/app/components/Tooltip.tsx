@@ -71,6 +71,14 @@ export function Tooltip({
   const [actualPlacement, setActualPlacement] = useState<"top" | "bottom">(
     "top",
   );
+  // Horizontal anchor — ``center`` is the default; flips to ``left``
+  // or ``right`` when the trigger sits too close to the matching
+  // viewport edge for the centred-on-trigger tooltip to fit. This
+  // prevents the tooltip from clipping inside narrow side-drawers
+  // and at the edges of the eval-page TOC.
+  const [hAnchor, setHAnchor] = useState<"center" | "left" | "right">(
+    "center",
+  );
   const tooltipId = useId();
   const triggerRef = useRef<HTMLSpanElement>(null);
   const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -85,17 +93,34 @@ export function Tooltip({
   const handleOpen = useCallback(() => {
     cancelOpenTimer();
     openTimerRef.current = setTimeout(() => {
-      // Decide placement based on the trigger's position in the
-      // viewport. If there's < 80px above, flip below.
-      if (placement === "auto" && triggerRef.current) {
+      // Decide vertical + horizontal placement based on the trigger's
+      // position in the viewport.
+      if (triggerRef.current) {
         const rect = triggerRef.current.getBoundingClientRect();
-        setActualPlacement(rect.top < 80 ? "bottom" : "top");
-      } else if (placement !== "auto") {
-        setActualPlacement(placement);
+        const vw = window.innerWidth;
+        // Vertical: flip below if there's < 80px above the trigger.
+        if (placement === "auto") {
+          setActualPlacement(rect.top < 80 ? "bottom" : "top");
+        } else {
+          setActualPlacement(placement);
+        }
+        // Horizontal: if the trigger sits within ``maxWidth / 2 + 12``
+        // px of either edge, anchor the tooltip to that edge so it
+        // grows inwards instead of clipping. 12px is the breathing
+        // gap to the viewport / drawer wall.
+        const halfWidth = maxWidth / 2 + 12;
+        const centerX = (rect.left + rect.right) / 2;
+        if (centerX < halfWidth) {
+          setHAnchor("left");
+        } else if (centerX > vw - halfWidth) {
+          setHAnchor("right");
+        } else {
+          setHAnchor("center");
+        }
       }
       setOpen(true);
     }, OPEN_DELAY_MS);
-  }, [cancelOpenTimer, placement]);
+  }, [cancelOpenTimer, placement, maxWidth]);
 
   const handleClose = useCallback(() => {
     cancelOpenTimer();
@@ -141,14 +166,24 @@ export function Tooltip({
         <span
           role="tooltip"
           id={tooltipId}
-          className="pointer-events-none absolute z-50 left-1/2 -translate-x-1/2 rounded-md px-2.5 py-1.5 text-[11.5px] leading-relaxed shadow-md"
+          // Horizontal positioning: see ``hAnchor`` logic in
+          // ``handleOpen``. ``center`` is the default (most cases);
+          // ``left``/``right`` only triggered near viewport edges so
+          // the tooltip doesn't clip inside drawers or off-screen.
+          className={
+            "pointer-events-none absolute z-50 rounded-md px-2.5 py-1.5 text-[11.5px] leading-relaxed shadow-md " +
+            (hAnchor === "center"
+              ? "left-1/2 -translate-x-1/2"
+              : hAnchor === "left"
+                ? "left-0"
+                : "right-0")
+          }
           style={{
             background: "var(--color-background-inverse, #1a1a1a)",
             color: "var(--color-text-inverse, #fafafa)",
             maxWidth,
             // Position above (mt-1.5 from bottom) or below (mt-1.5
-            // from top) the trigger. The translateY centres on the
-            // gap.
+            // from top) the trigger.
             top: actualPlacement === "bottom" ? "calc(100% + 6px)" : undefined,
             bottom: actualPlacement === "top" ? "calc(100% + 6px)" : undefined,
             whiteSpace: "normal",

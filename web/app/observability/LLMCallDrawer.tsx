@@ -10,6 +10,7 @@ import { AnnotationPanel } from "@/app/components/AnnotationPanel";
 import { IconButton } from "@/app/components/IconButton";
 import { Pill, type PillVariant } from "@/app/components/Pill";
 import { SectionLabel } from "@/app/components/SectionLabel";
+import { InfoTooltip } from "@/app/components/Tooltip";
 
 interface Props {
   callId: string | null;
@@ -49,7 +50,8 @@ export function LLMCallDrawer({ callId, onClose }: Props) {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.14 }}
-          className="fixed inset-0 z-40 bg-black/30"
+          className="fixed inset-0 z-40"
+          style={{ background: "var(--color-overlay-light)" }}
           onClick={onClose}
           role="dialog"
           aria-modal="true"
@@ -141,8 +143,19 @@ function CallBody({ detail }: { detail: LLMCallDetail }) {
               {detail.elapsed_seconds.toFixed(2)}s
             </span>
           </Meta>
-          <Meta label="Attempt">
-            <span className="tabular-nums">{detail.attempt}</span>
+          <Meta
+            label="Attempt"
+            hint="0 = first call. Positive values mean the gateway retried after a schema-fail or transient error; each retry is its own llm_calls row."
+          >
+            {/* ``attempt`` is stored 0-indexed on the row (0 = first
+                call). Rendering the raw "0" reads as broken; convert
+                to a 1-based ordinal so an operator scanning the
+                drawer sees "1 of 1" mental-model'd as "first try". */}
+            <span className="tabular-nums">
+              {detail.attempt === 0
+                ? "First call"
+                : `Retry #${detail.attempt}`}
+            </span>
           </Meta>
           <Meta label="Tokens">
             <span className="tabular-nums">
@@ -151,7 +164,20 @@ function CallBody({ detail }: { detail: LLMCallDetail }) {
                 : "—"}
             </span>
           </Meta>
-          <Meta label="Prompt hash" hint="sha256(system_prompt) — for grouping">
+          <Meta
+            label="Cost"
+            hint="Per-call USD = input × per-million-input + output × per-million-output, priced at the model's published rate at write time. — = no pricing for this model in the gateway."
+          >
+            <span className="tabular-nums">
+              {detail.cost_input_usd != null || detail.cost_output_usd != null
+                ? `$${(
+                    (detail.cost_input_usd ?? 0) +
+                    (detail.cost_output_usd ?? 0)
+                  ).toFixed(4)}`
+                : "—"}
+            </span>
+          </Meta>
+          <Meta label="Prompt hash" hint="sha256(system_prompt) — same hash = same prompt text. Use it to group related failures.">
             <code className="text-[11px] text-[var(--color-text-secondary)]">
               {detail.system_prompt_hash.slice(0, 16)}…
             </code>
@@ -305,9 +331,12 @@ function DiffSection({
       >
         <option value="">— pick a call —</option>
         {candidates.map((r) => (
+          // Same field order + casing as the Same-prompt calls table
+          // above so an operator's eye doesn't have to retrain when
+          // jumping between the two views.
           <option key={r.id} value={r.id}>
-            {relativeShort(r.created_at)} · {r.model} · {r.status} ·{" "}
-            {r.elapsed_seconds.toFixed(2)}s
+            {relativeShort(r.created_at)} · {r.model} ·{" "}
+            {titleCase(r.status)} · {r.elapsed_seconds.toFixed(2)}s
           </option>
         ))}
       </select>
@@ -387,11 +416,13 @@ function Meta({
 }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <span
-        className="text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-secondary)]"
-        title={hint}
-      >
+      {/* Label row. When ``hint`` is provided we surface an inline
+         ⓘ glyph next to the label that opens our custom Tooltip on
+         hover (vs the previous native ``title=`` which was browser-
+         themed and didn't read as a learn-more affordance). */}
+      <span className="inline-flex items-center text-[10px] font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
         {label}
+        {hint && <InfoTooltip content={hint} maxWidth={260} />}
       </span>
       <span className="text-[var(--color-text-primary)]">{children}</span>
     </div>
