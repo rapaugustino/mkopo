@@ -19,7 +19,10 @@ import {
  *   - alert    — red, used for risk-signal events
  *   - borrower — amber, used for inbound emails
  *   - user     — info-blue, used for user actions (send, assign, note)
- *   - ai       — brand green, used for AI actions (extraction, summary, decision)
+ *   - ai       — coral accent, used for AI actions (extraction, summary,
+ *                decision). Carries the secondary "agent" voice so an
+ *                operator scanning the timeline can tell rule outcomes
+ *                (brand green) from model output (coral) without reading.
  *   - system   — neutral grey, used for plumbing (application received)
  */
 
@@ -51,7 +54,7 @@ const PALETTE: Record<
     fg: "var(--color-text-warning)",
   },
   user: { bg: "var(--color-background-info)", fg: "var(--color-text-info)" },
-  ai: { bg: "var(--color-brand-light)", fg: "var(--color-brand)" },
+  ai: { bg: "var(--color-accent-light)", fg: "var(--color-accent-text)" },
   system: {
     bg: "var(--color-background-secondary)",
     fg: "var(--color-text-secondary)",

@@ -31,7 +31,7 @@ export function BorrowerShell({ children }: { children: React.ReactNode }) {
               letterSpacing: "-0.04em",
             }}
           >
-            MK
+            ML
           </div>
           <div className="flex flex-col leading-tight">
             <span className="brand-wordmark text-[14.5px] font-medium">

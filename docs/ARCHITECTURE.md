@@ -367,25 +367,30 @@ columns, and drawer views. Tool invocations are persisted in
 
 ## Eval harness
 
-``evals/runner.py`` runs labeled golden-set tasks (YAML in
+``evals/runner.py`` runs 12 labeled golden-set tasks (YAML in
 ``evals/golden_sets/``). The eval database table is ``task_runs``;
-the dashboard is ``/eval``. Drift monitoring is wired (the eval
-"summarize_underwriting" task uses a pinned judge model so trend
-lines aren't disrupted by model upgrades).
+the dashboard is ``/eval``. Judge models are pinned across tasks
+so trend lines aren't disrupted by model upgrades.
 
-Two integrations between eval + production:
+Three integrations between eval + production:
 
 - A failing eval gates promotion of a prompt version (the "promote
   with eval" path exists; the gating is currently advisory).
 - Review-queue overrides feed back into the drift_monitor: when a
   staff member overrides an LLM extraction, that's a signal the
   prompt is drifting and the eval surfaces it.
+- Seven production-side monitors run nightly on the arq worker —
+  drift, calibration, fairness (AIR), PSI on input features,
+  refusal-rate spike, per-agent $/run + p95 latency, and
+  embedding-distribution drift (MMD on prompts). Each writes
+  ``task_runs`` rows so the dashboard's trend chart and per-card
+  surfaces share one storage path.
 
 **Running it**: ``cd api && uv run python -m evals.runner``. The
 [README's "Eval suite" section](../README.md#eval-suite) lists the
-current tasks + thresholds + the workflow for adding a new task —
-kept there (not duplicated here) so the command + task list stay
-in one place.
+current tasks + thresholds + the production monitors + the workflow
+for adding a new task — kept there (not duplicated here) so the
+command + task list stay in one place.
 
 ---
 

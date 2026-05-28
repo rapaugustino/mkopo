@@ -336,19 +336,55 @@ uv run arq mkopo.workers.tasks.WorkerSettings
 | ``aal_fidelity`` | 75% | 6 | AAL drafter cites every blocking rule, uses friendly labels not rule_id tokens, includes the ECOA right-to-know disclosure (CFPB Circular 2022-03). Per-criterion pass rates surface on the dashboard |
 | ``intake_email`` | 80% | 8 | Borrower doc-request email drafter: addressed by name, no markdown, doc asks match loan class (personal vs business), ≤ 130 words. Per-class breakdown on the dashboard |
 | ``uw_groundedness`` | 80% | 4 | RAGAS-style faithfulness (Es et al. 2024) — pinned Opus judge decomposes the UW summary into atomic claims and verifies each against source. Gate measures judge accuracy on clean vs planted-hallucination fixtures |
+| ``tool_call_accuracy`` | 75% | 5 | Borrower-chat tool selection: every expected tool called, no forbidden mutating tool called for read-only intents, required arg keys present. Aggregate exposes per-criterion + per-tool selection rate |
 
-Plus a non-CLI **calibration monitor** (``services/calibration.py``) that
-computes Expected Calibration Error + Brier score on the last 30 days
-of resolved extractions. Runs on the arq scheduler at 3:30 AM UTC
-alongside the drift + golden sweeps; results land in ``task_runs`` so
-the dashboard's trend chart picks them up.
+### Production monitors
+
+Five non-CLI monitors run on the arq scheduler alongside the golden
+sweep. Each writes ``task_runs`` rows so the ``/eval`` dashboard's
+trend chart picks them up; each has a manual ``POST /eval/<name>/refresh``
+for on-demand recomputation from the dashboard.
+
+| Monitor | Cron (UTC) | What it pins | Card |
+|---|---|---|---|
+| ``services/drift.py`` | 3:00 | Per-extraction-field accuracy from staff overrides in the review queue. ``source='production'`` rows that pair against the golden baselines | Per-field bars + the trend chart |
+| ``services/calibration.py`` | 3:30 | Expected Calibration Error + Brier score on the last 30 days of resolved extractions. Guo et al. 2017 | ``CalibrationCard`` — reliability diagram + ECE/Brier pills |
+| ``services/fairness.py`` | 3:45 | Adverse Impact Ratio (EEOC four-fifths rule) on decisioned loans, bucketed by synthetic protected class (production replaces with HMDA) | ``FairnessCard`` |
+| ``services/psi.py`` | 3:50 | Population Stability Index on loan_amount + loan_class + loan_type vs prior-90d reference (Siddiqi 2017 / FDIC SR 11-7) | ``PSICard`` |
+| ``services/refusal.py`` | 3:52 | Injection-detector block rate this week vs prior 28d baseline; binomial z-score for spike detection | ``RefusalCard`` |
+| ``services/agent_economics.py`` | 3:55 | Per-agent $/run + p95 latency over the last 30 days. Joins ``llm_calls`` ↔ ``agent_runs.thread_id`` | ``AgentEconomicsCard`` |
+| ``services/prompt_drift.py`` | 3:58 | MMD² (Gretton et al. 2012) on borrower-inbound message embeddings, last 7d vs prior 30d. Catches semantic shifts PSI can't see | (trend chart row) |
 
 ### Eval dashboard
 
-The runner's results also feed the staff-facing ``/eval`` page
-(drift over time, calibration, agent reliability, recent failures).
-``scripts/seed_eval_baseline.py`` populates it with synthetic
-baseline data so the dashboard isn't empty on a fresh clone.
+The runner's results feed the staff-facing ``/eval`` page. Layout:
+
+- **Sticky in-page TOC** at the top — five sections (Overview /
+  Extraction / Golden gate / Production drift / Operations). Click
+  a pill, smooth-scroll, URL hash updates so deep-links work.
+- **Overview**: headline accuracy + trend chart (last 30 days, two
+  series per task: production solid, golden dashed).
+- **Extraction**: per-field accuracy bars with "Investigate" links
+  to the filtered review queue when a field drifts ≥ 3pp below
+  baseline.
+- **Golden gate**: confusion matrix (decision verdict), per-
+  criterion bars (AAL fidelity), per-pattern coverage (adversarial
+  injection), per-class email compliance, RAGAS faithfulness.
+- **Production drift**: calibration reliability diagram, fairness
+  AIR with per-group counts, PSI per-feature bars, refusal-rate
+  spike detection.
+- **Operations**: per-agent $/run + p95 latency, confidence
+  calibration accept-rate, review-queue throughput, agent
+  reliability, recent failures with drill-through to the LLM-call
+  / agent-run detail drawers.
+
+Most cards carry a **NIST AI 600-1 risk-category badge** in the
+footer (Confabulation, Harmful Bias, Information Security,
+Information Integrity, Value Chain) — hover the badge for the
+section citation.
+
+``scripts/seed_eval_baseline.py`` populates the dashboard with
+synthetic baseline data so a fresh clone isn't empty.
 
 ### Adding a new task
 

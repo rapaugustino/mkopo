@@ -1095,6 +1095,20 @@ export interface FairnessDetails {
   }[];
 }
 
+/** Tool-call accuracy on the borrower-chat agent's tool-selection
+ *  pass. Per-criterion bars (3 criteria) + per-tool selection rate
+ *  (was the right tool reached for when the fixture expected it?). */
+export interface ToolCallAccuracyDetails {
+  per_criterion: Record<
+    string,
+    { n: number; passed: number; rate: number }
+  >;
+  per_tool: Record<
+    string,
+    { n: number; selected: number; rate: number }
+  >;
+}
+
 /** UW-summary groundedness (RAGAS-style faithfulness).
  *
  *  - ``judge_accuracy`` — fraction of fixtures the judge classified

@@ -34,12 +34,14 @@ const STYLE: Record<PillVariant, { bg: string; fg: string }> = {
     bg: "var(--color-background-success)",
     fg: "var(--color-text-success)",
   },
-  // "ai" is a brand-flavoured success — used for AI-drafted markers.
-  // ``--color-brand-light`` is the canonical token for this tint;
-  // see globals.css.
+  // "ai" carries the secondary-accent (coral) voice — used wherever
+  // we mark AI / agent-generated content (drafts, agent runs, AI
+  // suggestions). The two-voice palette (brand-green = system-
+  // validated, coral = AI-drafted) lets operators scan a screen and
+  // distinguish rule outcomes from model output without reading.
   ai: {
-    bg: "var(--color-brand-light)",
-    fg: "var(--color-brand)",
+    bg: "var(--color-accent-light)",
+    fg: "var(--color-accent-text)",
   },
   neutral: {
     bg: "var(--color-background-secondary)",

@@ -13,9 +13,16 @@
  * - Warm neutrals (off-white #FAFAF7 page, #F4F3EE inset, #3D3D3A ink)
  *   rather than the default cool Tailwind grays. Lender workflows take
  *   hours; warm gray reads as paper instead of screen.
- * - One brand accent (`--color-brand`) plus four muted status colours.
- *   No secondary accents. If something needs a chip, it goes through
- *   Pill's five variants — not a new hex.
+ * - Two-voice accent system:
+ *     * ``--color-brand`` (green) — system-validated content: rule
+ *       outcomes, decision verdicts, approved-state badges, primary
+ *       buttons, focused inputs. The "this is the system speaking"
+ *       voice.
+ *     * ``--color-accent`` (warm coral) — AI-drafted / agent-
+ *       generated content: AI pills, agent runs, drafted messages,
+ *       intake email previews. The "this came from an LLM" voice.
+ *   Two voices let the operator scan a screen and instantly tell
+ *   verified rule outcomes from AI assistance without reading.
  * - Status fg/bg pairs are tuned for WCAG AA on `--color-background-primary`.
  *   See README for the deltas; do not retune one without rechecking.
  *
@@ -23,34 +30,85 @@
  * follows.
  */
 @theme {
-  /* Brand ------------------------------------------------------------- */
-  --color-brand: #0f6e56;
-  --color-brand-light: #e1f5ee;
+  /* Brand (green — system-validated voice) ---------------------------- *
+   * Slightly more chromatic than the original (#0f6e56) — same warm-
+   * editorial family, but with enough saturation to actually read as
+   * an accent on a cream background instead of dissolving into it.
+   * Contrast on white: 5.4:1 (WCAG AA at any size). */
+  --color-brand: #0a7d62;
+  --color-brand-light: #d8f0e6;
   --color-ink: #3d3d3a;
   --color-bg: #fafaf7;
+
+  /* Accent (warm coral — AI / agent voice) ---------------------------- *
+   * Used wherever the system is showing model output: AI-drafted
+   * pills, agent-run indicators, the avatar tint for the
+   * "agent" actor, the coral chevron on tool-trajectory steps. A
+   * second voice — paired with brand-green for system-validated
+   * content — so an operator can scan a screen and know which
+   * surface they're looking at without reading. Contrast on white:
+   * 4.8:1 (passes AA for normal text). */
+  --color-accent: #c25a3d;
+  --color-accent-light: #fbe6db;
+  --color-accent-text: #8a3a23;
 
   /* Backgrounds ------------------------------------------------------- */
   --color-background-primary: #ffffff; /* card / surface */
   --color-background-secondary: #f4f3ee; /* inset / muted */
 
-  --color-background-success: #e1f5ee;
-  --color-background-info: #e0ebf6;
-  --color-background-warning: #fbf1d6;
-  --color-background-danger: #fbe7e7;
+  --color-background-success: #d8f0e6;
+  --color-background-info: #dee9f5;
+  --color-background-warning: #fbecc8;
+  --color-background-danger: #fbdedd;
 
-  /* Text -------------------------------------------------------------- */
+  /* Text -------------------------------------------------------------- *
+   * Slight saturation bump on the status tones (vs the previous
+   * very-muted set) so a "Failed" cell reads as failed on a quick
+   * scan, not as "everything's beige". Contrast on white retained:
+   * danger 6.2:1, warning 6.5:1, info 6.0:1, success 5.4:1. */
   --color-text-primary: #3d3d3a;
   --color-text-secondary: #73726c;
   --color-text-tertiary: #9c9a92;
 
-  --color-text-success: #0f6e56;
-  --color-text-info: #185fa5;
-  --color-text-warning: #8c6b0e;
-  --color-text-danger: #8c1d18;
+  --color-text-success: #0a7d62;
+  --color-text-info: #155a9e;
+  --color-text-warning: #806207;
+  --color-text-danger: #a02520;
 
   /* Borders ----------------------------------------------------------- */
   --color-border: #e0dfd6; /* legacy alias */
   --color-border-tertiary: #e0dfd6;
+
+  /* Data-viz palette -------------------------------------------------- *
+   * Eight curated hues for chart series, interpolating brand-green →
+   * teal → blue → indigo → purple → magenta → pink → coral. All
+   * tuned to ~4.5:1 contrast on white, so series labels stay legible.
+   * Use ``var(--color-data-N)`` in order; cycle modulo 8 when a
+   * chart has more series. Beats hash-from-string colours because
+   * the order is intentional (related series sit near each other)
+   * and the saturation/luminance band is uniform — no series jumps
+   * out as "darker" or "wrong-looking" just because its name
+   * happened to hash to an extreme HSL value. */
+  --color-data-1: #0a7d62;
+  --color-data-2: #0d7d8a;
+  --color-data-3: #1e5d99;
+  --color-data-4: #4b4ba0;
+  --color-data-5: #75429e;
+  --color-data-6: #a23983;
+  --color-data-7: #c14060;
+  --color-data-8: #c25a3d;
+
+  /* Elevation -------------------------------------------------------- *
+   * Very subtle 1px shadow used by cards + dropdowns to lift them
+   * off the page without going Material-heavy. Both shadows fade
+   * out warmly (rgba on the cream background) so they don't read as
+   * cool blue-grey on the warm palette. */
+  --shadow-card: 0 1px 2px rgba(45, 41, 35, 0.04),
+                 0 0 0 1px rgba(45, 41, 35, 0.02);
+  --shadow-card-hover: 0 2px 6px rgba(45, 41, 35, 0.06),
+                       0 0 0 1px rgba(45, 41, 35, 0.03);
+  --shadow-popover: 0 6px 16px rgba(45, 41, 35, 0.08),
+                    0 0 0 1px rgba(45, 41, 35, 0.04);
 
   /* Modal / overlay backdrops ---------------------------------------- *
    * Three banded opacities for three UX intentions. Pick by gravitas:
@@ -205,14 +263,32 @@ body {
  */
 .form-input,
 .form-input-on-card,
-.form-input-mono {
+.form-input-mono,
+.form-input-compact {
   border-radius: 6px;
   border: 0.5px solid var(--color-border-tertiary);
-  padding: 0.5rem 0.75rem;
   font-size: 13px;
   color: var(--color-text-primary);
   outline: none;
+}
+/* Full-width variants — used inside form columns where the input
+ * should fill its track. */
+.form-input,
+.form-input-on-card,
+.form-input-mono {
+  padding: 0.5rem 0.75rem;
   width: 100%;
+}
+/* Compact variant — auto-width + tighter padding + smaller font.
+ * Designed for inline filter rows (e.g. the safety scenarios
+ * Category + Severity selects) where the input sits next to a
+ * compact label, not as a stand-alone form field. Without this
+ * the full-width form-input class stretches across its flex
+ * container and reads as out-of-proportion against an 11px label. */
+.form-input-compact {
+  padding: 0.25rem 0.5rem;
+  font-size: 11.5px;
+  width: auto;
 }
 .form-input {
   background: white;
@@ -228,19 +304,22 @@ body {
 }
 .form-input:focus,
 .form-input-on-card:focus,
-.form-input-mono:focus {
+.form-input-mono:focus,
+.form-input-compact:focus {
   border-color: var(--color-brand);
-  box-shadow: 0 0 0 3px rgba(15, 110, 86, 0.08);
+  box-shadow: 0 0 0 3px rgba(10, 125, 98, 0.08);
 }
 .form-input:disabled,
 .form-input-on-card:disabled,
-.form-input-mono:disabled {
+.form-input-mono:disabled,
+.form-input-compact:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 .form-input::placeholder,
 .form-input-on-card::placeholder,
-.form-input-mono::placeholder {
+.form-input-mono::placeholder,
+.form-input-compact::placeholder {
   color: var(--color-text-tertiary);
 }
 /* select-only styling. Without this, the trigger keeps the heavy
@@ -255,14 +334,24 @@ body {
  * custom list, callers can build a popover; for plain selects this
  * keeps the trigger consistent with the rest of the design system. */
 select.form-input,
-select.form-input-on-card {
+select.form-input-on-card,
+select.form-input-compact {
   appearance: none;
   -webkit-appearance: none;
-  padding-right: 2rem;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2373726c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>");
   background-repeat: no-repeat;
-  background-position: right 0.6rem center;
   background-size: 12px 12px;
+}
+select.form-input,
+select.form-input-on-card {
+  padding-right: 2rem;
+  background-position: right 0.6rem center;
+}
+select.form-input-compact {
+  /* Tighter padding-right + caret position so the dropdown reads
+   * as a compact chip, not as a shrunk form field. */
+  padding-right: 1.5rem;
+  background-position: right 0.4rem center;
 }
 
 /* ---- Markdown rendering ------------------------------------------------

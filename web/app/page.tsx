@@ -476,7 +476,7 @@ function PipelineContent() {
             className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-md text-[13px] font-medium tracking-tight"
             style={{ background: "var(--color-brand)", color: "var(--color-brand-light)" }}
           >
-            MK
+            ML
           </div>
         }
         title="Mkopo Lens"

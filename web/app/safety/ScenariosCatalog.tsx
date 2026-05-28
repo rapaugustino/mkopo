@@ -23,6 +23,7 @@ import {
   IconShieldCheck,
   IconShieldX,
 } from "@tabler/icons-react";
+import { Dropdown } from "@/app/components/Dropdown";
 import {
   api,
   type ScenarioCategory,
@@ -194,39 +195,31 @@ export function ScenariosCatalog() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <label className="flex items-center gap-1.5 text-[11px]">
+      {/* Filter row. Uses the custom ``Dropdown`` primitive (not a
+          native ``<select>``) so the popup option list picks up the
+          design tokens — native ``<option>`` rows are OS-controlled
+          and unstyleable cross-browser, which made the previous
+          versions of this filter read as if they belonged to a
+          different app. */}
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="flex items-center gap-1.5 text-[11px]">
           <span className="text-[var(--color-text-tertiary)]">Category</span>
-          <select
+          <Dropdown<ScenarioCategory | "all">
             value={category}
-            onChange={(e) =>
-              setCategory(e.target.value as ScenarioCategory | "all")
-            }
-            className="form-input-on-card"
-          >
-            {CATEGORY_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex items-center gap-1.5 text-[11px]">
+            options={CATEGORY_OPTIONS}
+            onChange={setCategory}
+            label="Filter by category"
+          />
+        </span>
+        <span className="flex items-center gap-1.5 text-[11px]">
           <span className="text-[var(--color-text-tertiary)]">Severity</span>
-          <select
+          <Dropdown<ScenarioSeverity | "all">
             value={severity}
-            onChange={(e) =>
-              setSeverity(e.target.value as ScenarioSeverity | "all")
-            }
-            className="form-input-on-card"
-          >
-            {SEVERITY_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </label>
+            options={SEVERITY_OPTIONS}
+            onChange={setSeverity}
+            label="Filter by severity"
+          />
+        </span>
         <p className="ml-auto text-[11px] text-[var(--color-text-tertiary)]">
           {protectedRows.length} protected · {gapRows.length} known gap
           {gapRows.length === 1 ? "" : "s"}

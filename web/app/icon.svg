@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!--
+    Browser-tab favicon — the "ML" monogram on the brand-green tile
+    that the in-app AppShell, pipeline header, and borrower portal
+    all render. Kept as an SVG (not a rasterised .ico) so the tile
+    stays crisp on hi-DPR displays and the brand colour can be edited
+    in one place without re-exporting bitmaps.
+
+    Colours match --color-brand and --color-brand-light from
+    globals.css. They're inlined as hex here because the favicon is
+    fetched as a standalone resource — CSS variables don't resolve.
+  -->
+  <rect width="32" height="32" rx="6" fill="#0a7d62" />
+  <text
+    x="16"
+    y="22"
+    text-anchor="middle"
+    font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, system-ui, sans-serif"
+    font-size="16"
+    font-weight="600"
+    letter-spacing="-0.04em"
+    fill="#d8f0e6"
+  >ML</text>
+</svg>

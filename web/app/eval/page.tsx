@@ -42,6 +42,7 @@ import { FairnessCard } from "./cards/FairnessCard";
 import { PSICard } from "./cards/PSICard";
 import { RefusalCard } from "./cards/RefusalCard";
 import { AgentEconomicsCard } from "./cards/AgentEconomicsCard";
+import { ToolCallAccuracyCard } from "./cards/ToolCallAccuracyCard";
 import { EvalSection } from "./EvalSection";
 import { EvalSectionTOC, type TOCEntry } from "./EvalSectionTOC";
 
@@ -129,21 +130,18 @@ function TrendChart({ trend }: { trend: EvalTrend }) {
     );
   }
 
-  // x-domain: anchored to the REQUESTED window (now - days .. now),
-  // NOT to the data's tMin..tMax. Why: on a fresh DB all data lives
-  // in a tiny time window so tMax - tMin ≈ minutes; the chart would
-  // stretch that to fill the full width and label all three x-ticks
-  // with the same date (with the rightmost clipping past the
-  // viewBox). Anchoring to the request window gives:
-  //   - meaningful x-axis dates spanning ``days`` actual days
-  //   - recent data clustered on the right, with empty space to the
-  //     left when production is young — which is the truthful picture
-  //   - stable scale that doesn't jump as new data lands
-  const now = Date.now();
+  // x-domain: anchored to the requested window (size = ``days``).
+  // The right edge tracks the most recent data point — using the
+  // data timestamp (not ``Date.now()``) keeps this function pure
+  // (no impure render-time clock read) AND tells the truth about
+  // staleness: if the freshest point is a week old, the right
+  // edge sits a week back from "today" and the gap is visible.
+  // The left edge then sits exactly ``days`` days earlier so the
+  // axis spans the full request window — recent data clusters on
+  // the right, empty space to the left when production is young.
   const ts = trend.points.map((p) => new Date(p.created_at).getTime());
-  const dataMax = Math.max(...ts, now);
-  const xMax = dataMax;
-  const xMin = now - trend.days * 86_400_000;
+  const xMax = Math.max(...ts);
+  const xMin = xMax - trend.days * 86_400_000;
   const xFor = (t: number) =>
     xMax === xMin ? PAD_L + innerW / 2 : PAD_L + innerW * ((t - xMin) / (xMax - xMin));
 
@@ -151,7 +149,7 @@ function TrendChart({ trend }: { trend: EvalTrend }) {
   // is it all clustered in the last day?". Used to surface a hint
   // when the chart can't show meaningful drift yet.
   const tMin = Math.min(...ts);
-  const dataSpanDays = (dataMax - tMin) / 86_400_000;
+  const dataSpanDays = (xMax - tMin) / 86_400_000;
   const isSparse = dataSpanDays < 2 && trend.days >= 7;
 
   // group: task_name -> source -> sorted [{t, accuracy}]
@@ -170,11 +168,28 @@ function TrendChart({ trend }: { trend: EvalTrend }) {
     }
   }
 
-  // Stable palette across re-renders: hash task_name → hue.
+  // Stable, intentional palette across re-renders. We hash the
+  // ``task_name`` to a deterministic index in the curated 8-hue
+  // data-viz palette (see ``--color-data-N`` in globals.css). Was
+  // previously a free-form ``hsl(${h % 360} 55% 42%)`` which gave
+  // unpredictable hues — some readable, some clashing with the
+  // brand palette. The curated set keeps the saturation/luminance
+  // band uniform so no single series visually dominates because of
+  // its colour.
+  const PALETTE = [
+    "var(--color-data-1)",
+    "var(--color-data-2)",
+    "var(--color-data-3)",
+    "var(--color-data-4)",
+    "var(--color-data-5)",
+    "var(--color-data-6)",
+    "var(--color-data-7)",
+    "var(--color-data-8)",
+  ];
   const colourOf = (taskName: string): string => {
     let h = 0;
     for (let i = 0; i < taskName.length; i++) h = (h * 31 + taskName.charCodeAt(i)) >>> 0;
-    return `hsl(${h % 360} 55% 42%)`;
+    return PALETTE[h % PALETTE.length];
   };
 
   return (
@@ -649,6 +664,7 @@ export default function EvalDashboardPage() {
           <AdversarialInjectionCard />
           <IntakeEmailCard />
           <UWGroundednessCard />
+          <ToolCallAccuracyCard />
         </div>
       </EvalSection>
 

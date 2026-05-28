@@ -140,7 +140,7 @@ export function AppShell({ children }: Props) {
                 letterSpacing: "-0.04em",
               }}
             >
-              MK
+              ML
             </div>
             <div className="flex items-baseline gap-2">
               <span className="brand-wordmark text-[15px] font-medium">
