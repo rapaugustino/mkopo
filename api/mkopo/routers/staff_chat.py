@@ -46,6 +46,13 @@ class ToolResume(BaseModel):
     # persisted ``tool_uses`` row can link to it. Optional for
     # backwards compat.
     call_id: str | None = None
+    # Threaded through for symmetry with the borrower-side resume
+    # shape (see borrower_chat.ToolResume); no staff tool currently
+    # sets ``requires_reauth=True`` so the field is unused on this
+    # surface, but keeping it on the model means a future
+    # staff-side reauth-gated action (e.g. force-close) doesn't
+    # need a protocol change.
+    challenge_token: str | None = Field(default=None, max_length=128)
 
 
 class StaffChatRequest(BaseModel):

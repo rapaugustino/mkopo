@@ -15,7 +15,7 @@ gates who's allowed to call it. That means:
   - Adding a new agentable action is a code change in this file
     (and only this file). Reviewable.
 
-Each tool carries three pieces of metadata the agent loop needs:
+Each tool carries four pieces of metadata the agent loop needs:
 
   - **schema** — Pydantic model describing the args. Becomes the
     Anthropic ``input_schema`` for the tool, so the model can
@@ -24,6 +24,12 @@ Each tool carries three pieces of metadata the agent loop needs:
   - **is_destructive** — True for tools that mutate or surface
     sensitive data. The agent loop pauses on an interrupt so the
     user has to confirm before the tool actually runs.
+  - **requires_reauth** — True for IRREVERSIBLE actions (terminal
+    stage transitions, account erasure). The chat loop demands a
+    fresh password-challenge token alongside the confirmation —
+    same threat model as the REST endpoints' ``_require_challenge``
+    gate (#169): a stolen session cookie alone must not be able
+    to walk an account off the platform. Implies ``is_destructive``.
 
 Plus one runtime piece:
 
@@ -90,6 +96,13 @@ class Tool:
     # for the LLM) because the LLM-facing description tends to be
     # third-person and explanatory.
     human_action: str = ""
+    # Demand a fresh password-challenge token alongside the user's
+    # confirmation. Mirrors the REST gate at
+    # ``borrower_loans._require_challenge`` (#169). Implies
+    # ``is_destructive``; the chat loop refuses to start if a tool
+    # has ``requires_reauth=True`` but ``is_destructive=False`` —
+    # there's no confirmation interrupt to attach the password to.
+    requires_reauth: bool = False
 
 
 # Module-level registry. ``register`` decorates handler functions.

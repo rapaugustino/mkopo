@@ -48,9 +48,9 @@ import { InjectionDrawer } from "./InjectionDrawer";
  *  names what's counted + which code path produces the value. */
 const TILE_DEFINITIONS: Record<string, string> = {
   Scanned:
-    "Every input that flowed through the injection detector in this window — documents, chat messages, application form text. Empty inputs are skipped and don't count here.",
+    "Count of rows in ``injection_detections`` for this window — i.e. inputs where the pattern catalog matched OR Haiku escalation ran. Catalog-clean inputs (no pattern match, no LLM judge) do NOT write a row and are NOT counted here. This tile is a lower bound on detector throughput, not total inputs scanned.",
   Allowed:
-    "Rows in ``injection_detections`` where the catalog matched but Haiku downgraded the verdict to ``allowed`` (medium-band hit cleared by the second-pass). Silent allows — where no pattern matched and no row is written — are NOT counted here by definition; they show up as the gap between Scanned and Allowed+Flagged+Blocked.",
+    "Rows where the catalog matched but Haiku downgraded the verdict to ``allowed`` (medium-band hit cleared by the second-pass). Silent allows — where no pattern matched and no row is written — are NOT counted here by definition, same as Scanned above.",
   Flagged:
     "Medium-severity pattern hit was confirmed as ``medium`` by Haiku — input was allowed through but the row is persisted so a reviewer can audit it. Surfaced on per-loan safety chips.",
   Blocked:

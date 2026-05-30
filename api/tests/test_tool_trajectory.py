@@ -98,6 +98,41 @@ def test_staff_catalog_is_non_empty_and_well_formed():
 # ----- security-boundary invariants ----------------------------------------
 
 
+def test_borrower_irreversible_tools_require_reauth():
+    """Irreversible borrower-side actions (terminal stage transitions
+    + account erasure) MUST carry ``requires_reauth=True``. The REST
+    endpoints for these same actions are protected by
+    ``_require_challenge`` (see #169) — a stolen session cookie alone
+    cannot trigger withdraw or erasure over REST. The chat tool path
+    exposes the SAME actions; without ``requires_reauth=True`` the
+    cookie-only attack would work via chat, bypassing the REST gate.
+
+    If this list grows (e.g. a future ``close_loan`` tool), add it
+    here. Removing an entry without removing the underlying action
+    is a security regression — the test guards against silent flag
+    flips during refactors.
+    """
+    by_name = {t.name: t for t in tools_for_role("borrower")}
+    irreversible = {"withdraw_application", "request_erasure"}
+    for name in irreversible:
+        tool = by_name.get(name)
+        assert tool is not None, (
+            f"Irreversible tool {name!r} missing from borrower catalog. "
+            "If you renamed it, update this test AND ensure the new "
+            "name carries requires_reauth=True."
+        )
+        assert tool.is_destructive, (
+            f"{name!r}: requires_reauth implies is_destructive — the chat "
+            "loop attaches the password challenge to the confirm step."
+        )
+        assert tool.requires_reauth, (
+            f"Borrower tool {name!r} is irreversible but does NOT carry "
+            "requires_reauth=True. Without this flag the chat path can "
+            "trigger it from a session cookie alone, bypassing the "
+            "REST endpoint's _require_challenge gate (#169)."
+        )
+
+
 def test_borrower_destructive_tools_are_marked():
     """Mutation tools must carry ``is_destructive=True``. The chat
     loop reads this flag to gate execution behind a confirmation

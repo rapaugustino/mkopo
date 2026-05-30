@@ -45,6 +45,13 @@ class ToolResume(BaseModel):
     # persisted ``tool_uses`` row can link to it. Optional for
     # backwards compat — old clients still work, just with a null FK.
     call_id: str | None = None
+    # Fresh password-challenge token, minted via
+    # POST /borrower-auth/me/challenge. Required when the resumed
+    # tool is marked ``requires_reauth=True`` (currently
+    # withdraw_application + request_erasure). The chat loop
+    # consumes the token; if it's missing or invalid the tool does
+    # not execute. See #169.
+    challenge_token: str | None = Field(default=None, max_length=128)
 
 
 class ChatRequest(BaseModel):

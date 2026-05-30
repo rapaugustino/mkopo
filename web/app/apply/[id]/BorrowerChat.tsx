@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   IconAlertTriangle,
   IconCheck,
@@ -20,6 +20,7 @@ import {
   type ConfirmRequiredEvent,
   type ToolResume,
 } from "@/lib/borrowerChat";
+import { borrowerAuthApi } from "@/lib/borrowerApi";
 import { humanizeStage } from "@/lib/humanize";
 import { MarkdownBlock } from "@/app/components/MarkdownBlock";
 
@@ -198,7 +199,7 @@ export function BorrowerChat({ loanId }: Props) {
   }, [userInput, status, runStream]);
 
   const confirm = useCallback(
-    async (action: "confirm" | "cancel") => {
+    async (action: "confirm" | "cancel", challengeToken?: string) => {
       if (!pendingConfirm) return;
       setTranscript((t) => [
         ...t,
@@ -216,6 +217,9 @@ export function BorrowerChat({ loanId }: Props) {
         name: pendingConfirm.name,
         input: pendingConfirm.args,
         action,
+        // Only set when the backend asked for it; serializing
+        // ``undefined`` is fine since JSON.stringify drops the key.
+        ...(challengeToken ? { challenge_token: challengeToken } : {}),
       };
       setPendingConfirm(null);
       await runStream({ toolResume: resume });
@@ -301,7 +305,7 @@ export function BorrowerChat({ loanId }: Props) {
         {pendingConfirm && (
           <ConfirmModal
             event={pendingConfirm}
-            onDecide={(action) => void confirm(action)}
+            onDecide={(action, token) => void confirm(action, token)}
           />
         )}
       </AnimatePresence>
@@ -386,13 +390,54 @@ function TranscriptItem({ entry }: { entry: TranscriptEntry }) {
 
 // ---- confirmation modal ---------------------------------------------------
 
+/**
+ * Inline confirmation for destructive tool calls.
+ *
+ * When ``event.requires_reauth`` is true (currently
+ * withdraw_application + request_erasure — see #169) the modal
+ * additionally demands a fresh password. The user's password is
+ * exchanged for a single-use challenge token via
+ * ``borrowerAuthApi.mintChallenge(password)``, which is then
+ * forwarded to the chat loop as ``ToolResume.challenge_token``.
+ * Mirrors the REST-side ``_require_challenge`` gate so the chat
+ * surface can't be used to bypass it.
+ */
 function ConfirmModal({
   event,
   onDecide,
 }: {
   event: ConfirmRequiredEvent;
-  onDecide: (a: "confirm" | "cancel") => void;
+  onDecide: (a: "confirm" | "cancel", challengeToken?: string) => void;
 }) {
+  const reauth = Boolean(event.requires_reauth);
+  const [password, setPassword] = useState("");
+  const [reauthError, setReauthError] = useState<string | null>(null);
+  const mint = useMutation({
+    mutationFn: () => borrowerAuthApi.mintChallenge(password),
+    onSuccess: (res) => onDecide("confirm", res.token),
+    onError: (e: unknown) => {
+      const err = e as { status?: number; message?: string };
+      setReauthError(
+        err.status === 401
+          ? "Password incorrect."
+          : err.status === 400
+            ? err.message ||
+              "Set a password on your account first, then try again."
+            : err.message || "Couldn't verify your password.",
+      );
+    },
+  });
+
+  const onConfirmClick = () => {
+    setReauthError(null);
+    if (!reauth) {
+      onDecide("confirm");
+      return;
+    }
+    if (!password) return;
+    mint.mutate();
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -417,18 +462,54 @@ function ConfirmModal({
             Confirm: {event.human_action || event.name}
           </p>
           <p className="mt-1 text-[12px] text-[var(--color-text-secondary)]">
-            The assistant wants to run this on your application. It's
-            destructive or sensitive enough that we ask you to confirm
-            first.
+            {reauth
+              ? "This action is irreversible. To prevent a stolen session from triggering it, we also need your password."
+              : "The assistant wants to run this on your application. It's destructive or sensitive enough that we ask you to confirm first."}
           </p>
         </header>
-        <div className="px-5 py-4">
-          <p className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
-            Action details
-          </p>
-          <pre className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--color-background-secondary)] p-2.5 text-[11.5px] leading-snug text-[var(--color-text-primary)]">
-            {event.summary || JSON.stringify(event.args, null, 2)}
-          </pre>
+        <div className="px-5 py-4 space-y-3">
+          <div>
+            <p className="text-[11px] font-medium uppercase tracking-wider text-[var(--color-text-secondary)]">
+              Action details
+            </p>
+            <pre className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--color-background-secondary)] p-2.5 text-[11.5px] leading-snug text-[var(--color-text-primary)]">
+              {event.summary || JSON.stringify(event.args, null, 2)}
+            </pre>
+          </div>
+          {reauth && (
+            <label className="flex flex-col gap-1">
+              <span className="text-[11.5px] font-medium text-[var(--color-text-secondary)]">
+                Confirm your password
+              </span>
+              <input
+                type="password"
+                required
+                autoComplete="current-password"
+                autoFocus
+                placeholder="Your account password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    onConfirmClick();
+                  }
+                }}
+                className="form-input-on-card"
+              />
+              {reauthError && (
+                <p
+                  className="mt-1 rounded-md px-2.5 py-1.5 text-[11.5px]"
+                  style={{
+                    background: "var(--color-background-danger)",
+                    color: "var(--color-text-danger)",
+                  }}
+                >
+                  {reauthError}
+                </p>
+              )}
+            </label>
+          )}
         </div>
         <footer className="flex items-center justify-end gap-2 border-t-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-secondary)] px-5 py-3">
           <button
@@ -441,15 +522,16 @@ function ConfirmModal({
           </button>
           <button
             type="button"
-            onClick={() => onDecide("confirm")}
-            className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium"
+            onClick={onConfirmClick}
+            disabled={(reauth && !password) || mint.isPending}
+            className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium disabled:opacity-50"
             style={{
               background: "var(--color-text-danger)",
               color: "white",
             }}
           >
             <IconCheck size={12} />
-            Yes, do it
+            {mint.isPending ? "Verifying…" : reauth ? "Confirm with password" : "Yes, do it"}
           </button>
         </footer>
       </motion.div>

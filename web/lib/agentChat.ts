@@ -63,6 +63,12 @@ export interface ConfirmRequiredEvent {
   /** The conversation history up to and including the assistant turn
    *  that proposed the destructive tool call. */
   messages: ChatMessage[];
+  /** When true, the tool is irreversible (terminal stage transition,
+   *  account erasure) and the client MUST mint a fresh password
+   *  challenge token via ``/borrower-auth/me/challenge`` and include
+   *  it on the ``ToolResume`` payload — same threat model as the REST
+   *  endpoints' ``_require_challenge`` gate (#169). Default false. */
+  requires_reauth?: boolean;
 }
 
 export interface DoneEvent {
@@ -96,6 +102,11 @@ export interface ToolResume {
   name: string;
   input: Record<string, unknown>;
   action: "confirm" | "cancel";
+  /** One-shot password-challenge token. Required by the backend
+   *  when the original ``confirm_required`` event had
+   *  ``requires_reauth: true``. Minted by
+   *  ``borrowerAuthApi.mintChallenge(password)``. */
+  challenge_token?: string;
 }
 
 // ---- args ---------------------------------------------------------------
@@ -252,6 +263,7 @@ function parseFrame(frame: string): ChatEvent | null {
         human_action: String(data.human_action ?? ""),
         summary: String(data.summary ?? ""),
         messages: (data.messages as ChatMessage[]) ?? [],
+        requires_reauth: Boolean(data.requires_reauth),
       };
     case "done":
       return {

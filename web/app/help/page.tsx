@@ -197,7 +197,7 @@ const GLOSSARY: GlossarySection[] = [
         term: "MMD",
         expansion: "Maximum Mean Discrepancy",
         blurb:
-          "Distribution-shift test for high-dimensional data (Gretton et al. 2012). We compute MMD² between current and reference system-prompt embeddings to detect prompt-template drift. Computation lives in the backend; no UI card yet.",
+          "Distribution-shift test for high-dimensional data (Gretton et al. 2012). We compute MMD² between current vs reference INBOUND borrower-message embeddings to detect borrower-corpus drift — i.e. people are asking us something we haven't tuned for. It does NOT detect system-prompt template changes (those are versioned in the prompts table and diffed separately). Computation lives in the backend; no UI card yet.",
         where: "api/mkopo/services/prompt_drift.py",
       },
       {

@@ -526,6 +526,11 @@ register(
         schema=WithdrawApplicationArgs,
         roles=frozenset({"borrower"}),
         is_destructive=True,
+        # Mirror the REST endpoint's _require_challenge gate (#169):
+        # stolen session cookie alone must not be able to walk a loan
+        # off the platform. The chat loop demands a fresh password
+        # challenge token on the tool_resume payload.
+        requires_reauth=True,
         handler=_handle_withdraw_application,
         human_action="Withdraw this loan application",
     )
@@ -652,6 +657,11 @@ register(
         schema=RequestErasureArgs,
         roles=frozenset({"borrower"}),
         is_destructive=True,
+        # Same threat model as withdraw_application (#169) — see the
+        # equivalent flag there for the rationale. Erasure is even
+        # more destructive (whole account, not one loan) so the
+        # password gate matters more, not less.
+        requires_reauth=True,
         handler=_handle_request_erasure,
         human_action="Erase your account and all applications",
     )

@@ -161,6 +161,49 @@ async def run_chat_turn(
         # asked for the tool.
         held_call_id = tool_resume.get("call_id")
         if tool_resume.get("action") == "confirm":
+            # Re-auth gate (#169) — for any tool marked
+            # ``requires_reauth=True`` (currently withdraw_application
+            # and request_erasure on the borrower side), demand a
+            # fresh password-challenge token alongside the
+            # confirmation. The challenge is single-use and minted by
+            # POST /borrower-auth/me/challenge after the user re-enters
+            # their password in the ConfirmModal. Without this gate a
+            # stolen session cookie alone could walk an account off
+            # the platform via the chat path, bypassing the REST
+            # _require_challenge gate that protects the same actions.
+            resume_tool = get_tool(tool_resume["name"])
+            if resume_tool is not None and resume_tool.requires_reauth:
+                from mkopo.services.redis_client import consume_challenge
+
+                challenge_token = tool_resume.get("challenge_token")
+                if not challenge_token:
+                    yield _sse(
+                        "error",
+                        {
+                            "reason": "reauth_required",
+                            "detail": (
+                                "This action requires re-entering your "
+                                "password. Try again from the confirmation "
+                                "modal."
+                            ),
+                        },
+                    )
+                    return
+                ok = await consume_challenge(
+                    user_id=user_id, plain_token=str(challenge_token)
+                )
+                if not ok:
+                    yield _sse(
+                        "error",
+                        {
+                            "reason": "reauth_invalid",
+                            "detail": (
+                                "Password challenge was invalid or expired. "
+                                "Please confirm again."
+                            ),
+                        },
+                    )
+                    return
             async for chunk in _execute_one_tool(
                 user_id=user_id,
                 user_email=user_email,
@@ -308,6 +351,11 @@ async def run_chat_turn(
                         # the persisted tool_uses row to the original
                         # LLM call once the user confirms.
                         "call_id": response.call_id,
+                        # Tell the client whether to demand a fresh
+                        # password challenge inside the confirmation
+                        # modal (#169). Default false so old clients
+                        # behave correctly for non-reauth tools.
+                        "requires_reauth": tool.requires_reauth,
                     },
                 )
                 return
