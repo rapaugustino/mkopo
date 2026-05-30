@@ -78,6 +78,24 @@ export function DecisionVerdictCard() {
       </div>
     );
   }
+  if (query.isError) {
+    return (
+      <div className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-4 py-3">
+        <SectionLabel>Decision verdict</SectionLabel>
+        <EmptyState
+          size="compact"
+          variant="chart"
+          title="Couldn't load decision verdict"
+          description={
+            <>
+              {query.error?.message || "Backend request failed."}{" "}
+              Retrying every minute.
+            </>
+          }
+        />
+      </div>
+    );
+  }
   if (!query.data?.found || !query.data.details) {
     return (
       <div className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-4 py-3">

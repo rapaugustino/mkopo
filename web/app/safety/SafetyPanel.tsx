@@ -35,6 +35,7 @@ import {
   type JudgmentSummary,
   type SafetySummary,
 } from "@/lib/api";
+import { titleCase } from "@/lib/humanize";
 import { Pill, type PillVariant } from "@/app/components/Pill";
 import { SectionLabel } from "@/app/components/SectionLabel";
 import { Skeleton } from "@/app/components/Skeleton";
@@ -558,7 +559,7 @@ function JudgmentRollup({ summary }: { summary: JudgmentSummary }) {
               </Pill>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-xs">
-                  <span className="font-medium">{j.agent_name}</span>{" "}
+                  <span className="font-medium">{titleCase(j.agent_name)}</span>{" "}
                   <span className="text-[var(--color-text-tertiary)]">
                     · {j.attempts} attempt{j.attempts === 1 ? "" : "s"} ·{" "}
                     {relativeTime(j.started_at)}

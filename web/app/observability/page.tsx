@@ -620,7 +620,7 @@ function AgentRunTable({
             >
               {relativeTime(r.created_at)}
             </td>
-            <td className="px-2 py-2 font-medium">{r.agent_name}</td>
+            <td className="px-2 py-2 font-medium">{titleCase(r.agent_name)}</td>
             <td className="px-2 py-2">
               <Pill variant={statusVariant(r.status)} size="xs">
                 {titleCase(r.status)}

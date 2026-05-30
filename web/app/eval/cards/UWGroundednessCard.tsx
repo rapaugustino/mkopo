@@ -62,7 +62,14 @@ export function UWGroundednessCard() {
     return (
       <div className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-4 py-3">
         <SectionLabel Icon={IconBlockquote}>
-          UW summary groundedness (RAGAS)
+          <Tooltip
+            content="UW = Underwriting. RAGAS = Retrieval-Augmented Generation Assessment Suite (Es et al. 2023). We score the LLM-drafted underwriting summary on faithfulness + answer-relevance against the source documents."
+            helpAnchor="ragas"
+            underline
+          >
+            UW summary groundedness
+          </Tooltip>{" "}
+          <span className="text-[var(--color-text-tertiary)]">(RAGAS)</span>
         </SectionLabel>
         <EmptyState
           size="compact"
@@ -93,7 +100,14 @@ export function UWGroundednessCard() {
     <div className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-4 py-3">
       <div className="mb-2 flex items-center justify-between gap-2">
         <SectionLabel Icon={IconBlockquote} dense>
-          UW summary groundedness (RAGAS)
+          <Tooltip
+            content="UW = Underwriting. RAGAS = Retrieval-Augmented Generation Assessment Suite (Es et al. 2023). We score the LLM-drafted underwriting summary on faithfulness + answer-relevance against the source documents."
+            helpAnchor="ragas"
+            underline
+          >
+            UW summary groundedness
+          </Tooltip>{" "}
+          <span className="text-[var(--color-text-tertiary)]">(RAGAS)</span>
         </SectionLabel>
         <span className="flex items-center gap-2 text-[11px] text-[var(--color-text-tertiary)]">
           <Tooltip

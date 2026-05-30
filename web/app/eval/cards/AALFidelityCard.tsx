@@ -27,6 +27,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { IconShieldCheck } from "@tabler/icons-react";
 import { api, type AALFidelityDetails, type TaskDetail } from "@/lib/api";
+import { EmptyState } from "@/app/components/EmptyState";
 import { Pill } from "@/app/components/Pill";
 import { SectionLabel } from "@/app/components/SectionLabel";
 import { Skeleton } from "@/app/components/Skeleton";
@@ -133,17 +134,43 @@ export function AALFidelityCard() {
       </div>
     );
   }
+  if (query.isError) {
+    return (
+      <div className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-4 py-3">
+        <SectionLabel Icon={IconShieldCheck}>
+          AAL fidelity (CFPB / ECOA)
+        </SectionLabel>
+        <EmptyState
+          size="compact"
+          variant="chart"
+          title="Couldn't load AAL fidelity"
+          description={
+            <>
+              {query.error?.message || "Backend request failed."}{" "}
+              Retrying every minute.
+            </>
+          }
+        />
+      </div>
+    );
+  }
   if (!query.data?.found || !query.data.details) {
     return (
       <div className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-4 py-3">
         <SectionLabel Icon={IconShieldCheck}>
           AAL fidelity (CFPB / ECOA)
         </SectionLabel>
-        <p className="mt-2 text-[12px] text-[var(--color-text-tertiary)]">
-          No run yet. Run{" "}
-          <code>cd api && uv run python -m evals.runner</code> or wait
-          for the 4 AM UTC sweep.
-        </p>
+        <EmptyState
+          size="compact"
+          variant="chart"
+          title="No run yet"
+          description={
+            <>
+              Run <code className="font-mono text-[11px]">cd api && uv run python -m evals.runner</code> or
+              wait for the 4 AM UTC sweep.
+            </>
+          }
+        />
       </div>
     );
   }
@@ -158,7 +185,16 @@ export function AALFidelityCard() {
     <div className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-4 py-3">
       <div className="mb-2.5 flex items-center justify-between gap-2">
         <SectionLabel Icon={IconShieldCheck} dense>
-          AAL fidelity (CFPB / ECOA)
+          <Tooltip
+            content="AAL = Adverse Action Letter. Required by ECOA / Reg B + CFPB Bulletin 2022-03 whenever credit is declined or counter-offered. We grade the LLM-drafted AAL against four AND-ed criteria (reasons, contact info, ECOA notice, plain language)."
+            helpAnchor="aal"
+            underline
+          >
+            AAL fidelity
+          </Tooltip>{" "}
+          <span className="text-[var(--color-text-tertiary)]">
+            (CFPB / ECOA)
+          </span>
         </SectionLabel>
         <span className="flex items-center gap-2 text-[11px] text-[var(--color-text-tertiary)]">
           <Tooltip

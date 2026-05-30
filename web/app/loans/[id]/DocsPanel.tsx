@@ -16,6 +16,7 @@ import { DocumentViewer } from "@/app/components/DocumentViewer";
 import { EmptyState } from "@/app/components/EmptyState";
 import { Pill } from "@/app/components/Pill";
 import { SectionLabel } from "@/app/components/SectionLabel";
+import { Skeleton } from "@/app/components/Skeleton";
 
 interface Props {
   loanId: string;
@@ -284,7 +285,21 @@ export function DocsPanel({ loanId }: Props) {
         Documents
       </SectionLabel>
 
-      {docs.length === 0 ? (
+      {docsQuery.isLoading ? (
+        // Skeleton rows so the panel doesn't briefly read as "No
+        // documents uploaded yet" while the first fetch is in flight.
+        <div className="mb-3 flex flex-col gap-2">
+          <Skeleton className="h-9" />
+          <Skeleton className="h-9" />
+        </div>
+      ) : docsQuery.isError ? (
+        <EmptyState
+          variant="documents"
+          size="compact"
+          title="Couldn't load documents"
+          description={docsQuery.error?.message || "Backend request failed. Retrying."}
+        />
+      ) : docs.length === 0 ? (
         <EmptyState
           variant="documents"
           size="compact"

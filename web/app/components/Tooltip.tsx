@@ -56,6 +56,11 @@ interface Props {
    *  large clickable areas (whole cards) where the underline would
    *  read as noise. */
   underline?: boolean;
+  /** Optional anchor id on /help. If provided, the tooltip footer
+   *  gets a "More on /help" link that deep-links to ``/help#<id>``.
+   *  Tooltips are short by design — this gives readers a one-click
+   *  path to the full definition without bloating the bubble. */
+  helpAnchor?: string;
 }
 
 const OPEN_DELAY_MS = 200;
@@ -66,6 +71,7 @@ export function Tooltip({
   maxWidth = 280,
   placement = "auto",
   underline = false,
+  helpAnchor,
 }: Props) {
   const [open, setOpen] = useState(false);
   const [actualPlacement, setActualPlacement] = useState<"top" | "bottom">(
@@ -170,8 +176,11 @@ export function Tooltip({
           // ``handleOpen``. ``center`` is the default (most cases);
           // ``left``/``right`` only triggered near viewport edges so
           // the tooltip doesn't clip inside drawers or off-screen.
+          // ``pointer-events-auto`` ONLY when there's a help link,
+          // so the bubble doesn't intercept clicks elsewhere.
           className={
-            "pointer-events-none absolute z-50 rounded-md px-2.5 py-1.5 text-[11.5px] leading-relaxed shadow-md " +
+            "absolute z-50 rounded-md px-2.5 py-1.5 text-[11.5px] leading-relaxed shadow-md " +
+            (helpAnchor ? "pointer-events-auto " : "pointer-events-none ") +
             (hAnchor === "center"
               ? "left-1/2 -translate-x-1/2"
               : hAnchor === "left"
@@ -193,6 +202,25 @@ export function Tooltip({
           }}
         >
           {content}
+          {helpAnchor && (
+            <>
+              <span
+                className="my-1 block"
+                style={{
+                  borderTop:
+                    "0.5px solid var(--color-border-inverse, rgba(255,255,255,0.18))",
+                }}
+              />
+              <a
+                href={`/help#${helpAnchor}`}
+                className="inline-flex items-center gap-0.5 text-[10.5px] font-medium underline decoration-dotted underline-offset-2"
+                style={{ color: "var(--color-text-inverse, #fafafa)" }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                More on /help →
+              </a>
+            </>
+          )}
         </span>
       )}
     </span>

@@ -73,18 +73,23 @@ export function InjectionDrawer({ detectionId, onClose }: Props) {
             <Skeleton className="h-[400px]" />
           ) : (
             <div className="flex flex-col gap-4">
-              {/* Pills row — at-a-glance verdict */}
+              {/* Pills row — at-a-glance verdict. Pill color carries
+                  the semantics (severity → red/amber/green, decision →
+                  red/amber/green) so the redundant "severity:" /
+                  "decision:" prefixes were noise. */}
               <div className="flex flex-wrap items-center gap-2">
-                <Pill variant={severityVariant(detail.severity)}>
-                  severity: {detail.severity}
+                <Pill variant={severityVariant(detail.severity)} title="Severity">
+                  {detail.severity}
                 </Pill>
-                <Pill variant={decisionVariant(detail.decision)}>
-                  decision: {detail.decision}
+                <Pill variant={decisionVariant(detail.decision)} title="Decision">
+                  {detail.decision}
                 </Pill>
-                <Pill variant="info">{detail.source_kind.replace(/_/g, " ")}</Pill>
+                <Pill variant="info" title="Source kind">
+                  {detail.source_kind.replace(/_/g, " ")}
+                </Pill>
                 {detail.llm_judge_called && (
-                  <Pill variant="info">
-                    haiku: {detail.llm_judge_severity ?? "—"}
+                  <Pill variant="info" title="Haiku judge verdict">
+                    Haiku: {detail.llm_judge_severity ?? "—"}
                   </Pill>
                 )}
               </div>
