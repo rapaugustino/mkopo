@@ -116,8 +116,12 @@ $$\text{Brier} = \frac{1}{n} \sum_i (c_i - y_i)^2$$
 
 ### MMD — Maximum Mean Discrepancy
 Distribution-shift test for high-dimensional data (Gretton et al.
-2012). We compute MMD² between current and reference embeddings
-of system prompts to detect prompt-template drift.
+2012). We compute MMD² between current vs reference **inbound
+borrower-message embeddings** to detect borrower-corpus drift —
+i.e. applicants suddenly asking us about something the prompt
+wasn't tuned for. It does NOT detect system-prompt template
+changes (those are versioned in the `prompts` table and diffed
+separately).
 - **Where**: `api/mkopo/services/prompt_drift.py`. Computation
   only — no UI card yet (flagged in `SCOPE.md`).
 
@@ -178,11 +182,13 @@ chunks and `text-embedding-3-large` for the prompt-drift monitor.
 ### p50 / p95 / p99 latency
 The 50th / 95th / 99th percentile of a latency distribution. p95
 is the standard "tail" metric for user-facing latency. **Note**:
-this codebase has two p95 implementations — nearest-rank in
-`api/mkopo/routers/evals.py` and linear-interpolation in
-`api/mkopo/services/agent_economics.py`. Numbers can differ on
-small n. Both conventions are valid; standardising is a
-follow-up.
+this codebase has three p95 implementations — nearest-rank in
+`api/mkopo/routers/evals/_shared.py` (used by the /eval summary
+tile) and `api/mkopo/routers/observability.py` (used by the
+observability surface), plus linear-interpolation in
+`api/mkopo/services/agent_economics.py` (used by the per-agent
+cost card). Numbers can differ on small n. All three conventions
+are valid; standardising is a follow-up.
 
 ---
 
@@ -226,6 +232,18 @@ human review.
 When in doubt, deny. The injection detector and the stage machine
 are both fail-closed: an unrecognised input or invalid transition
 is blocked rather than passed through.
+
+### requires_reauth (chat tool flag)
+A tool-registry flag (`Tool.requires_reauth: bool`) on irreversible
+borrower-side actions (`withdraw_application`, `request_erasure`).
+When set, the chat loop demands a fresh password-challenge token on
+the `tool_resume` payload — same threat model as the REST endpoints'
+`_require_challenge` gate. A stolen session cookie alone is not
+sufficient to walk an account off the platform via the chat path.
+- **Where**: `api/mkopo/agents/tools/__init__.py` (the flag),
+  `api/mkopo/agents/tool_chat_loop.py` (the enforcement),
+  `web/app/apply/[id]/BorrowerChat.tsx` (the inline password
+  prompt in the confirmation modal).
 
 ### Red teaming
 Structured adversarial testing. The

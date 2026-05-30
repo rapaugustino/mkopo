@@ -173,10 +173,13 @@ To save someone reading the code a frustrating discovery:
 - **Embedding-distribution prompt drift (MMD)** — the
   computation in `api/mkopo/services/prompt_drift.py` is real
   (Gretton et al. 2012 formulation) but currently has **no UI
-  card**. Results are persisted to `task_runs` with prefix
-  `prompt_drift.` and excluded from the trend chart by
-  `_DERIVED_METRIC_PREFIXES` in `routers/evals.py`. You can
-  see them via the API but not on the dashboard.
+  card**. It measures distribution drift on inbound borrower
+  messages (NOT on system-prompt embeddings — that wording in
+  earlier docs was wrong; corrected May 2026). Results are
+  persisted to `task_runs` with prefix `prompt_drift.` and
+  excluded from the trend chart by `_DERIVED_METRIC_PREFIXES`
+  in `routers/evals/_shared.py`. You can see them via the API
+  but not on the dashboard.
 - **Scenarios catalog "verified by" links** — each card in
   `/safety` claims it is verified by a specific pytest, but
   the manifest is static. A test failure does NOT actually
@@ -190,10 +193,11 @@ To save someone reading the code a frustrating discovery:
   from real cost columns.
 - **AIR synthetic class** — already disclosed in the card UI
   itself.
-- **Two p95 implementations** — `routers/evals.py` uses
-  nearest-rank, `services/agent_economics.py` uses
-  linear-interpolation. Both are valid p95 conventions; the
-  numbers can differ on small n.
+- **Three p95 implementations** — `routers/evals/_shared.py`
+  and `routers/observability.py` both use nearest-rank;
+  `services/agent_economics.py` uses linear-interpolation. All
+  three are valid p95 conventions; the numbers can differ on
+  small n.
 
 ---
 
@@ -228,17 +232,22 @@ order to walk through it is:
 3. **What's the data source?** Almost always a Postgres table:
    `task_runs`, `llm_calls`, `agent_steps`, `agent_runs`, or
    the per-loan tables. Inspect rows directly via psql.
-4. **What window?** Production cards almost all use 7-day
-   current vs 28-day baseline; the LLM tiles cascade 24h → 7d
-   → all-time depending on data availability.
+4. **What window?** Window is per-monitor, not a global default.
+   Calibration 30d, PSI 30d current vs ~90d reference, Fairness
+   90d, Refusal 7d current (z-tested against baseline),
+   Prompt-drift 7d vs 30d reference (with 7d gap). LLM tiles
+   cascade 24h → 7d → all-time depending on data availability.
+   Constants live alongside each monitor in
+   `services/<name>.py` — search for `_WINDOW_DAYS` /
+   `_CURRENT_DAYS`.
 5. **What threshold or band?** Documented in the corresponding
    card source and in METRICS.md.
 
 If a number ever looks wrong, the answer is almost always one of:
 - The window is empty (fresh DB, just-ran-once)
 - The eval task hasn't been added to `_DERIVED_METRIC_PREFIXES`
-  in `routers/evals.py` and is being averaged into headline
-  accuracy when it shouldn't be
+  in `routers/evals/_shared.py` and is being averaged into
+  headline accuracy when it shouldn't be
 - The cron sweep hasn't run yet (drift monitor at 3 AM UTC,
   golden eval at 4 AM UTC)
 

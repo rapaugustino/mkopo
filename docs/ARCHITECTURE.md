@@ -411,8 +411,8 @@ command + task list stay in one place.
 | Storage | Local FS or S3 (selected by ``STORAGE_BACKEND``) |
 | Frontend | Next.js 16 (App Router), React 19, Tailwind v4 |
 | Frontend data | TanStack Query, framer-motion |
-| Auth (borrower) | JWT + bcrypt + magic links (Redis-backed jti revocation) |
-| Auth (staff) | Dev bearer token — see [Production gaps](#production-gaps) |
+| Auth (borrower) | JWT + bcrypt + magic links + re-auth challenge (Redis-backed `jti` revocation; chat-tool path also gated for irreversible actions) |
+| Auth (staff) | JWT + bcrypt cookies (`mkopo_staff_session`, audience `mkopo-staff`, 12h TTL, per-`jti` Redis blacklist on logout) |
 
 ---
 
@@ -511,8 +511,9 @@ caught with zero round-trip cost; the loop-back fires immediately.
 This is a portfolio system. The following are not present and would
 be table stakes for actual deployment at a lender:
 
-- **SSO / SAML** for staff auth (today: dev bearer token in dev,
-  borrower JWT for borrowers).
+- **SSO / SAML** for staff auth (today: cookie + JWT with
+  bcrypt-hashed passwords; production wants federation +
+  per-role audit of permission grants).
 - **Real credit-bureau integration** (today: extracted from text via
   the LLM).
 - **HMDA Reg C field capture** + annual LAR filing.

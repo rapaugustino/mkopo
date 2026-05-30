@@ -27,10 +27,11 @@ Cross-reference:
   where `paired_keys = latest_prod.keys() ∩ latest_gold.keys()`.
   Per-field accuracy = `accepted / (accepted + overridden)`.
 - **Source**:
-  - Aggregation: `api/mkopo/routers/evals.py::get_eval_summary`
+  - Aggregation: `api/mkopo/routers/evals/summary.py::get_eval_summary`
+  - Pure aggregator helper: `api/mkopo/routers/evals/_shared.py::compute_summary_aggregates`
   - Per-field write: `api/mkopo/services/drift.py::run_drift_monitor`
   - Denylist of non-accuracy prefixes:
-    `_DERIVED_METRIC_PREFIXES` in `routers/evals.py`.
+    `_DERIVED_METRIC_PREFIXES` in `routers/evals/_shared.py`.
 - **Data**: `task_runs` rows with `source='production'`.
 - **Window**: Latest run per field.
 - **Why paired-only**: Pre-cleanup, this averaged the full
@@ -72,22 +73,25 @@ Cross-reference:
 - **What**: 95th percentile of LLM call elapsed seconds.
 - **Formula**: Nearest-rank — sort latencies ascending,
   return value at index `ceil(0.95 · n) − 1`.
-- **Source**: `api/mkopo/routers/evals.py::_percentile`
-  (line ~168) and `_llm_health_window` (line ~257).
+- **Source**: `api/mkopo/routers/evals/_shared.py::_percentile`
+  and `api/mkopo/routers/evals/summary.py::_llm_calls_with_fallback`.
 - **Data**: `llm_calls.elapsed_seconds` where `status='ok'`.
 - **Window**: Cascade — last 24h, falls back to last 7d, then
-  all-time, whichever has data. The tile shows the actual
-  window used.
-- **Limitation**: A separate p95 implementation (linear-
-  interpolation) lives in `agent_economics.py`. Numbers can
-  differ on small samples.
+  all-time, whichever has data. The tile + tooltip both name
+  the actual window used.
+- **Limitation**: Three p95 implementations exist in the
+  codebase. Nearest-rank in `routers/evals/_shared._percentile`
+  (this tile) and `routers/observability._percentile` (the
+  observability surface); linear-interpolation in
+  `services/agent_economics._percentile` (the per-agent cost
+  card). All three are valid; numbers can differ on small samples.
 
 ### LLM error rate
 
 - **What**: Fraction of LLM calls that ended in a non-ok
   status.
 - **Formula**: `count(status != 'ok') / count(*)`.
-- **Source**: `api/mkopo/routers/evals.py::_llm_health_window`.
+- **Source**: `api/mkopo/routers/evals/summary.py::get_eval_summary` (rolls up the same `_llm_calls_with_fallback` cascade above).
 - **Data**: `llm_calls.status`.
 - **Window**: Same 24h → 7d → all-time cascade as p95.
 
@@ -103,8 +107,8 @@ Cross-reference:
   - `production_accuracy = accepted / (accepted + overridden)`
   - `delta = production_accuracy − golden_accuracy`
 - **Source**:
-  - Endpoint: `api/mkopo/routers/evals.py::GET /eval/fields`
-  - Computation: `_latest_per_field` (line ~289)
+  - Endpoint: `api/mkopo/routers/evals/summary.py::get_eval_fields`
+  - Computation: `_latest_per_field` in `routers/evals/_shared.py`
 - **Data**: `task_runs` filtered by `task_name LIKE
   'extraction.%'`.
 - **Drift threshold**: `delta ≤ −0.03` flips the row to
@@ -313,16 +317,26 @@ Cross-reference:
 ### Embedding-distribution drift (MMD) — backend only
 
 - **What**: Maximum Mean Discrepancy between current and
-  reference embeddings of system prompts. Detects
-  prompt-template drift.
-- **Formula**: MMD² with Gaussian kernel; threshold from
-  Gretton et al. 2012.
-- **Source**: `api/mkopo/services/prompt_drift.py`.
+  reference embeddings of **inbound borrower messages** —
+  i.e. has the borrower corpus shifted in topic / language
+  vs the recent baseline. Catches the semantic drift PSI
+  (which works on tabular features) cannot.
+- **Formula**: Unbiased MMD²_u with RBF kernel; bandwidth via
+  the median heuristic. Gretton et al. 2012. Bands stable /
+  minor / major calibrated on the production embedder
+  (`text-embedding-3-small`, 1024-d Matryoshka truncation).
+- **Source**: `api/mkopo/services/prompt_drift.py`. Math is
+  unit-tested in `api/tests/test_prompt_drift_math.py` (15
+  cases mirroring `test_psi_math.py`).
+- **Important — what it does NOT detect**: System-prompt
+  template changes. Those are versioned in the `prompts`
+  table and diffed separately; this monitor's name is
+  historical and slightly misleading.
 - **Note**: Computation is real but currently has **no UI
   card**. Results persist to `task_runs` with prefix
   `prompt_drift.` and are excluded from the trend chart by
-  `_DERIVED_METRIC_PREFIXES`. Surfacing this in the UI is a
-  follow-up.
+  `_DERIVED_METRIC_PREFIXES` in `routers/evals/_shared.py`.
+  Surfacing this in the UI is a follow-up.
 
 ---
 
@@ -356,7 +370,7 @@ Cross-reference:
 - **Formula**: For each confidence band (`≥0.95`,
   `0.85–0.95`, `0.70–0.85`, `0.50–0.70`, `<0.50`):
   `accept_rate = accepted / (accepted + overridden)`
-- **Source**: `api/mkopo/routers/evals.py` (lines 777–841).
+- **Source**: `api/mkopo/routers/evals/diagnostics.py::_confidence_buckets`.
 - **Interpretation**: Well-calibrated = top band accept-rate
   close to 1.0. A well-calibrated 0.50–0.70 band should
   accept ~60% of the time.
@@ -364,7 +378,7 @@ Cross-reference:
 ### Review queue throughput
 
 - **What**: Three counters — Open / Resolved-7d / Median-age.
-- **Source**: `api/mkopo/routers/evals.py::_review_queue_stats`.
+- **Source**: `api/mkopo/routers/evals/diagnostics.py::_review_queue_stats`.
 - **Data**: `review_tasks` table.
 
 ### Agent reliability (last 7 days)
@@ -374,7 +388,7 @@ Cross-reference:
 - **Formula**: "Worst-step-wins" — `agent_steps.status`
   rolled up so a single failed step marks the whole run
   failed.
-- **Source**: `api/mkopo/routers/evals.py` (lines 669–685).
+- **Source**: `api/mkopo/routers/evals/diagnostics.py::_agent_reliability`.
 - **Note**: `interrupted` counts HITL pauses (LangGraph
   interrupts), not failures.
 
@@ -382,7 +396,7 @@ Cross-reference:
 
 - **What**: List view of recent `llm_calls` with
   `status != 'ok'` and `agent_steps` with `status='failed'`.
-- **Source**: `api/mkopo/routers/evals.py` (lines 687–699).
+- **Source**: `api/mkopo/routers/evals/diagnostics.py::_recent_failures`.
 
 ---
 
@@ -478,13 +492,15 @@ fixtures, and re-averaging across runs would over-weight
 periods when the cron ran more frequently. The chart on the
 same page DOES show all runs over time so you can see drift.
 
-### Why two p95 implementations exist
+### Why three p95 implementations exist
 
-The overview tile uses nearest-rank (no interpolation
-ambiguity). The per-agent economics card uses linear-
-interpolation (matches NumPy default and is more stable on
-small samples). Both are valid p95 conventions — the
-discrepancy on small `n` is real. Standardising on one is a
+Two surfaces use nearest-rank (no interpolation ambiguity) —
+the `/eval` summary tile (`routers/evals/_shared._percentile`)
+and the observability rollup (`routers/observability._percentile`).
+The per-agent economics card uses linear-interpolation
+(`services/agent_economics._percentile` — matches NumPy default,
+more stable on small samples). All three conventions are valid;
+the discrepancy on small `n` is real. Standardising on one is a
 follow-up.
 
 ### Why golden ≠ production almost always
