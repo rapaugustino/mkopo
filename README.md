@@ -551,9 +551,3 @@ mkopo/
 ## License
 
 MIT. See [LICENSE](LICENSE).
-
-## Acknowledgments
-
-Inspired by [Applied Business Software / The Mortgage Office](https://themortgageoffice.com),
-which has served the private lending industry since 1978. This project
-is independent and not affiliated with ABS.
