@@ -1,9 +1,4 @@
-"""Staff auth resolver — accepts staff JWT (cookie or bearer) and,
-in development, the legacy ``dev_api_token`` shortcut.
-
-Production hardening: in any non-development environment, only the
-JWT path is accepted. The dev bearer is rejected with 401 so a
-forgotten env var on production never leaves a backdoor open.
+"""Staff auth resolver — accepts staff JWT via cookie or bearer header.
 
 Two ways to authenticate a staff request, in priority order:
 
@@ -13,9 +8,16 @@ Two ways to authenticate a staff request, in priority order:
    for CLI scripts and integration tests. Useful for headless tools
    that can't carry a cookie jar.
 
-The legacy ``dev_api_token`` is checked LAST and only in
-``environment="development"``. The CLI / eval tooling can keep
-using it during local dev; production deployments don't.
+History note: an earlier ``dev_api_token`` bearer shortcut existed
+for local-dev curl convenience. It was removed (May 2026) because
+both surfaces are fully cookie-based now, no caller in the codebase
+used it, and the placeholder default was a credible attack surface
+on any exposed dev instance. To poke the API from a script, mint a
+real JWT via the login flow:
+
+    curl -X POST $API/api/v1/staff/auth/login \\
+      -H 'content-type: application/json' \\
+      -d '{"email": "j.davis@mkopo.dev", "password": "password123"}'
 """
 
 from __future__ import annotations
@@ -28,7 +30,6 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from mkopo.config import get_settings
 from mkopo.db import get_db
 from mkopo.models import User
 from mkopo.services.auth_service import (
@@ -106,42 +107,23 @@ async def require_user(
 
     1. Staff session cookie (``mkopo_staff_session``) — the SPA path.
     2. ``Authorization: Bearer <jwt>`` where the token is a staff JWT.
-    3. (Development only) ``Authorization: Bearer <dev_api_token>``
-       — the legacy shortcut. In production this branch is skipped
-       and the request gets a 401.
 
     The 401 message is intentionally generic — no "expired" vs
     "wrong secret" vs "no such user" differentiation that an
     attacker could probe.
     """
-    settings = get_settings()
-
     # 1. Cookie path (preferred — set by /staff/auth/login).
     if session_cookie:
         user = await _resolve_from_jwt(db, session_cookie)
         if user is not None:
             return user
 
-    # 2. Bearer-header path. May be a JWT (production-grade) or the
-    # legacy dev token (dev only). Try JWT first since it carries
-    # real identity; the dev token is a single fixed string.
+    # 2. Bearer-header path. Same JWT, different transport — for CLI
+    # scripts and integration tests that can't carry a cookie jar.
     if creds and creds.credentials:
         user = await _resolve_from_jwt(db, creds.credentials)
         if user is not None:
             return user
-
-        # 3. Dev shortcut. Only honoured in development environments
-        # so a misconfigured prod can't have it linger as a backdoor.
-        if (
-            settings.environment == "development"
-            and creds.credentials == settings.dev_api_token
-        ):
-            return CurrentUser(
-                user_id="dev-user",
-                workspace_id="dev-workspace",
-                role="admin",
-                is_admin=True,
-            )
 
     raise HTTPException(
         status.HTTP_401_UNAUTHORIZED, "Authentication required"

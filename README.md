@@ -206,10 +206,16 @@ into each other.
   lifetime so a stolen token stops working immediately.
 - **Rate limits**: 10 login attempts / 5 min per email. After 6
   failures the account locks for 30 minutes (Redis flag).
-- **Dev shortcut**: the legacy ``dev_api_token`` bearer is honoured
-  only in ``environment="development"`` (the default in local
-  ``.env``). In production it's rejected with 401 — there is no
-  backdoor in any other environment.
+- **CLI / script access**: there is no dev-bearer backdoor — every
+  caller mints a real JWT via the login endpoint. For curl access
+  during development:
+  ```bash
+  curl -X POST http://localhost:8000/api/v1/staff/auth/login \
+       -H 'content-type: application/json' \
+       -d '{"email":"j.davis@mkopo.dev","password":"password123"}'
+  ```
+  The response carries a JWT you can pass as `Authorization: Bearer <jwt>`
+  on subsequent calls.
 
 ### Borrower portal
 

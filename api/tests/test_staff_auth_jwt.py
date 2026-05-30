@@ -120,52 +120,28 @@ class TestStaffJWTHelpers:
 
 class TestRequireUserResolver:
     """The auth.py:require_user resolver is the gate every staff API
-    request flows through. These tests cover its three input paths."""
+    request flows through. These tests cover its two input paths
+    (cookie + bearer JWT). The legacy dev_api_token bearer shortcut
+    was removed (#186, May 2026); see git log for the rationale."""
 
     @pytest.mark.asyncio
-    async def test_dev_bearer_works_in_development(self):
-        """The legacy ``dev_api_token`` must still authenticate in
-        development so existing tests + CLI scripts don't break.
-        Settings default ``environment="development"``."""
-        from fastapi.security import HTTPAuthorizationCredentials
-
-        from mkopo.config import get_settings
-        from mkopo.routers.auth import require_user
-
-        settings = get_settings()
-        # Should default to dev in tests.
-        assert settings.environment == "development"
-
-        creds = HTTPAuthorizationCredentials(
-            scheme="Bearer", credentials=settings.dev_api_token
-        )
-        result = await require_user(
-            creds=creds, db=AsyncMock(), session_cookie=None
-        )
-        assert result.role == "admin"
-        assert result.user_id == "dev-user"
-
-    @pytest.mark.asyncio
-    async def test_dev_bearer_rejected_in_production(self):
-        """In production the dev bearer is dead — only JWT works.
-        This is the whole 'kill the dev bearer in prod' invariant
-        for #186."""
+    async def test_unknown_bearer_token_returns_401(self):
+        """Any bearer token that doesn't decode as a staff JWT must
+        be rejected. Guards against a future regression that adds a
+        new shortcut path without auth review."""
         from fastapi import HTTPException
         from fastapi.security import HTTPAuthorizationCredentials
 
-        from mkopo.config import get_settings
         from mkopo.routers.auth import require_user
 
-        settings = get_settings()
         creds = HTTPAuthorizationCredentials(
-            scheme="Bearer", credentials=settings.dev_api_token
+            scheme="Bearer", credentials="not-a-real-jwt"
         )
-        with patch.object(settings, "environment", "production"):
-            with pytest.raises(HTTPException) as exc_info:
-                await require_user(
-                    creds=creds, db=AsyncMock(), session_cookie=None
-                )
-            assert exc_info.value.status_code == 401
+        with pytest.raises(HTTPException) as exc_info:
+            await require_user(
+                creds=creds, db=AsyncMock(), session_cookie=None
+            )
+        assert exc_info.value.status_code == 401
 
     @pytest.mark.asyncio
     async def test_missing_credentials_returns_401(self):

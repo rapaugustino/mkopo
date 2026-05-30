@@ -8,10 +8,9 @@
  *
  *   - **endpoint URL** — ``/borrower-auth/me/chat/stream`` vs
  *     ``/staff/chat/stream``
- *   - **auth mode**    — borrower side rides on the session
- *     cookie (``credentials: include``); staff side rides on the
- *     bearer-token from ``NEXT_PUBLIC_DEV_TOKEN`` until real auth
- *     replaces it.
+ *   - **cookie name** — borrower side carries ``mkopo_session``,
+ *     staff side carries ``mkopo_staff_session``. Same JWT signing
+ *     key, different audience. Both ride on ``credentials: include``.
  *
  * Everything else is identical: same event protocol, same client-
  * owned history (the server is stateless across turns + across
@@ -124,8 +123,11 @@ interface BaseArgs {
 export interface StreamArgs extends BaseArgs {
   /** API path (without the ``/api/v1`` prefix). */
   path: string;
-  /** ``"cookie"`` rides ``credentials: include``; ``"bearer"`` adds
-   *  ``Authorization: Bearer NEXT_PUBLIC_DEV_TOKEN``. */
+  /** Kept on the signature for back-compat with existing call sites
+   *  (borrower vs staff). Both surfaces are cookie-based now —
+   *  whichever cookie the browser holds is sent automatically via
+   *  ``credentials: include``. The string here no longer drives any
+   *  behaviour. Safe to drop on next call-site sweep. */
   auth: "cookie" | "bearer";
 }
 

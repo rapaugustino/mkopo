@@ -130,44 +130,11 @@ def _check_storage(settings: Settings) -> CheckResult:
     )
 
 
-def _check_auth(settings: Settings) -> CheckResult:
-    """Staff bearer token. The dev default (`dev-token-replace-me`)
-    is a placeholder, not a "no-op" — anyone who can reach the API
-    with it has full admin. We always surface it as ``degraded`` (not
-    ``ok``) so the deployer sees the warning on every boot, regardless
-    of ``ENVIRONMENT`` value. Silent "ok" in dev was lulling people
-    into shipping the placeholder.
-    """
-    if settings.dev_api_token == "dev-token-replace-me":
-        return CheckResult(
-            name="Auth (staff bearer)",
-            status="degraded",
-            message="DEV_API_TOKEN is the placeholder default — anyone with it has admin",
-            hint=(
-                "Set DEV_API_TOKEN in api/.env to a random ≥32-char value. "
-                "Generate one with: python -c 'import secrets; print(secrets.token_urlsafe(32))'. "
-                "Also update NEXT_PUBLIC_DEV_TOKEN in web/.env.local to match. "
-                "Production deploys must change this; see task #186 (kill the dev bearer)."
-            ),
-        )
-    if len(settings.dev_api_token) < 24:
-        return CheckResult(
-            name="Auth (staff bearer)",
-            status="degraded",
-            message=f"DEV_API_TOKEN is only {len(settings.dev_api_token)} chars",
-            hint="Use a random secret of at least 24 characters.",
-        )
-    return CheckResult(
-        name="Auth (staff bearer)",
-        status="ok",
-        message=f"DEV_API_TOKEN configured ({len(settings.dev_api_token)} chars)",
-    )
-
-
 def _check_jwt(settings: Settings) -> CheckResult:
-    """Borrower-session JWT secret. The default is a placeholder
-    that mints forgeable tokens — every deployment that leaves it
-    in place shares the same signing key. We always report this as
+    """JWT signing secret — used for BOTH the staff and borrower
+    session cookies. The default is a placeholder that mints
+    forgeable tokens; every deployment that leaves it in place
+    shares the same signing key. We always report this as
     ``degraded`` (not ``ok``), regardless of ``ENVIRONMENT``, so the
     warning shows on every boot. Silent "ok" in dev was lulling
     people into shipping the placeholder.
@@ -175,25 +142,25 @@ def _check_jwt(settings: Settings) -> CheckResult:
     default = "dev-jwt-secret-replace-me-min-32-chars"
     if settings.jwt_secret == default:
         return CheckResult(
-            name="Auth (borrower JWT)",
+            name="Auth (JWT signing key)",
             status="degraded",
             message="JWT_SECRET is the placeholder default — session tokens are forgeable",
             hint=(
                 "Set JWT_SECRET in api/.env to a unique random ≥32-char value. "
                 "Generate one with: python -c 'import secrets; print(secrets.token_urlsafe(48))'. "
                 "Production deploys MUST change this — otherwise every deployment "
-                "shares the same signing key and any borrower session can be forged."
+                "shares the same signing key and any staff or borrower session can be forged."
             ),
         )
     if len(settings.jwt_secret) < 32:
         return CheckResult(
-            name="Auth (borrower JWT)",
+            name="Auth (JWT signing key)",
             status="degraded",
             message=f"JWT_SECRET is only {len(settings.jwt_secret)} chars",
             hint="Use a random secret of at least 32 characters (256 bits).",
         )
     return CheckResult(
-        name="Auth (borrower JWT)",
+        name="Auth (JWT signing key)",
         status="ok",
         message=f"JWT signing secret configured ({len(settings.jwt_secret)} chars)",
     )
@@ -211,7 +178,6 @@ def run_startup_checks(settings: Settings) -> list[CheckResult]:
         _check_openai(settings),
         _check_resend(settings),
         _check_storage(settings),
-        _check_auth(settings),
         _check_jwt(settings),
     ]
     ok = [r for r in results if r.status == "ok"]

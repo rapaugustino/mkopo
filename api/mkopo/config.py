@@ -119,11 +119,11 @@ class Settings(BaseSettings):
     # than 3 is noise.
     drift_min_samples_per_field: int = 5
 
-    # Auth — staff bearer (dev) + borrower JWT signing secret.
-    dev_api_token: str = "dev-token-replace-me"
-    # Used to sign borrower session JWTs. MUST be overridden in
+    # JWT signing secret — used for BOTH the staff session cookie
+    # and the borrower session cookie. MUST be overridden in
     # production; the default is intentionally insecure so dev works
-    # out of the box but a missing env var in prod is obvious.
+    # out of the box but a missing env var in prod is obvious (the
+    # startup banner emits ``degraded`` until it's changed).
     jwt_secret: str = "dev-jwt-secret-replace-me-min-32-chars"
     # How long a borrower's session cookie lives (seconds). Short by
     # default — re-login via password or magic-link is fast.

@@ -100,25 +100,29 @@ cd web && npm run dev
 
 ### 0.3 Accounts you'll use
 
-There are **two separate auth systems** in this codebase today —
-read this carefully so you know what to expect:
+Both staff and borrower auth are real JWT cookie sessions now.
+Same `JWT_SECRET`, different audience (`mkopo-staff` vs
+`mkopo-borrower`), different cookie name (`mkopo_staff_session`
+vs `mkopo_session`), per-`jti` Redis revocation on logout, rate
+limits on login.
 
-**Staff (the underwriter / loan-officer side)** uses a bearer
-token (`NEXT_PUBLIC_DEV_TOKEN` env var, default
-`dev-token-replace-me`) that the frontend ships automatically on
-every staff API call. **There is no staff login screen.** Open
-`http://localhost:3000` and you're already operating as the seeded
-underwriter Jordan Davis (`j.davis@mkopo.dev`, `role=admin`). This
-is a dev-mode shortcut — production staff auth should land on the
-same JWT system the borrower side uses (tracked separately; see the
-"Auth dual-system" note at the bottom of Part 0).
+**Staff** signs in at <http://localhost:3000/staff/login>. The
+seed creates two staff users with the same password
+(`password123`) — surfaced on the login page in dev mode:
 
-**Borrowers (anyone using `/apply`, `/account`, the chat panel)**
-use real password + JWT auth. They have to sign up first.
+| Persona | Email | Password | Role |
+|---|---|---|---|
+| Underwriter (seeded) | `j.davis@mkopo.dev` | `password123` | underwriter |
+| Admin (seeded) | `admin@mkopo.dev` | `password123` | admin |
+
+**Borrowers** sign up at <http://localhost:3000/apply> (the
+borrower-portal wizard creates the account atomically with the
+loan) or at <http://localhost:3000/signup>. There are no seeded
+borrower passwords — whatever password you set at signup is what
+you sign in with.
 
 | Persona | Email | How to sign in |
 |---|---|---|
-| Underwriter (seeded) | `j.davis@mkopo.dev` | **No sign-in.** Open `localhost:3000` — you're already staff. |
 | Borrower — Riverbend | `elena@riverbendholdings.example` | `/signup` first (pick any 8+ char password), then `/login` |
 | Borrower — Maria | `maria.aguilar@example.com` | `/signup` then `/login` |
 | Borrower — Summit | `damian@summithospitality.example` | `/signup` then `/login` |
@@ -126,50 +130,37 @@ use real password + JWT auth. They have to sign up first.
 | Borrower — Trevor | `trevor.stratus@example.com` | `/signup` then `/login` |
 | Borrower — Aspen (real email) | your real email | created by staff invite — uses magic link, no password |
 
-**There are no seeded borrower passwords.** Whatever password you
-type at `/signup` is what you'll use at `/login`. The borrower
-portal sends magic-link emails for password reset + initial
-invites; the dev environment skips real email send unless
+The borrower portal sends magic-link emails for password reset +
+initial invites; the dev environment skips real email send unless
 `RESEND_API_KEY` is configured (you'll see the link in the API
 logs).
 
-> **Why the split?** The borrower-portal auth (signup / login /
-> JWT cookies / magic links / revocation / re-auth gates) is
-> production-ready. The staff bearer token is a deferred
-> placeholder from early development — see the "Auth dual-system"
-> note below before you ship anything based on this code.
+### 0.4 Auth invariants (current state, May 2026)
 
-### 0.4 Auth dual-system — known gap
-
-The current state of staff vs borrower auth is, honestly, a mess:
-
-| Surface | Mechanism | Production-ready? |
+| Surface | Mechanism | Notes |
 |---|---|---|
-| Staff (`/`, `/loans/*`, `/eval`, `/observability`, `/prompts`, `/review-queue`) | Shared bearer token `Authorization: Bearer ${DEV_TOKEN}` resolved by `routers/auth.py:resolve_current_user`. Same identity (`dev-user`, `role=admin`) for every staff call. | **No.** It's a dev-mode shortcut. No per-user identity, no revocation, no expiry. |
-| Borrower (`/apply/*`, `/account/*`, `/api/v1/borrower-auth/*`, `/api/v1/borrower-portal/*`) | Real JWT auth in an HttpOnly cookie. Sign-up, password hashing (argon2), JWT-with-jti revocation via Redis blacklist, per-purpose magic links, rate limiting, sensitive-op re-auth. | **Yes.** |
+| Staff (`/`, `/loans/*`, `/eval`, `/observability`, `/prompts`, `/review-queue`, `/safety`, `/help`) | JWT in `mkopo_staff_session` cookie. Login at `/staff/login` posts email + password to `POST /api/v1/staff/auth/login`, server bcrypt-verifies + sets the cookie. Same JWT can ride as `Authorization: Bearer <jwt>` for CLI scripts. | Audience `mkopo-staff`. 12h TTL. Per-`jti` Redis blacklist on logout. 10 login attempts / 5min per email; account locks for 30min after 6 failures. |
+| Borrower (`/apply/*`, `/account/*`, `/api/v1/borrower-auth/*`, `/api/v1/borrower-portal/*`) | JWT in `mkopo_session` cookie. Sign-up, password hashing (bcrypt), JWT-with-`jti` revocation via Redis blacklist, per-purpose magic links, rate limiting, sensitive-op re-auth challenge (`/me/challenge`) for withdraw + erasure. | Audience `mkopo-borrower`. Cookie + audience isolation: a borrower token presented at a staff endpoint fails to decode and vice versa, even on the same domain. Tested in `test_staff_auth_jwt.py`. |
 
-**Why both still exist.** Borrower auth was built out properly
-(tasks #158, #167, #168, #169). Staff auth was deferred (task
-#155 — RBAC roles for internal users). The two systems were
-never reconciled, so today staff calls bypass everything the
-borrower side enforces.
+**No dev-bearer backdoor** as of May 2026 (task #186 closed).
+The `DEV_API_TOKEN` shortcut was removed because both surfaces
+are fully cookie-based, no caller in the codebase used it, and
+the placeholder default was a credible attack surface on any
+exposed dev instance. To poke the API from a script:
 
-**What "fixed" looks like.** Staff should authenticate through
-the same JWT system the borrower side uses, with the user's
-`role` (admin / underwriter / loan_officer) driving the
-tool-registry filter (already wired in `agents/tools/staff.py`)
-and any other RBAC check. Staff login UI would mirror the
-borrower's, posting to a `/api/v1/auth/login` endpoint that
-issues a JWT cookie. The current dev-token shortcut would
-either be removed or kept only behind an `environment=dev` flag.
+```bash
+curl -X POST http://localhost:8000/api/v1/staff/auth/login \
+     -H 'content-type: application/json' \
+     -d '{"email":"j.davis@mkopo.dev","password":"password123"}'
+# response carries a JWT — pass as Authorization: Bearer <jwt>
+```
 
-This is the next thing to do if you intend to deploy. Until
-then, treat anything you're testing on the staff side as
-running in "trust everyone with the token" mode.
-
-The same `/login` route exists for borrowers, but **don't try to
-use it for staff** — it's not wired to anything that grants
-`role=admin`.
+**Sensitive ops on the borrower chat path** also enforce
+re-auth: `withdraw_application` and `request_erasure` carry
+`requires_reauth=True` on their `Tool` definition, and the chat
+loop demands a fresh challenge token alongside the confirmation.
+Same threat model as the REST endpoints — stolen session cookie
+alone is not sufficient to walk an account off the platform.
 
 ---
 
