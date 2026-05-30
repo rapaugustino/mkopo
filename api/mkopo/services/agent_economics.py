@@ -68,9 +68,14 @@ class AgentEconRow:
 def _percentile(values: list[float], p: float) -> float | None:
     """Linear-interpolation percentile. Returns None for empty input.
 
-    We roll our own rather than depend on numpy — this is the only
-    percentile in the codebase and adding numpy to the runtime
-    dependency tree for one operation is overkill.
+    We roll our own rather than depend on numpy. Two other p95
+    implementations exist (``routers/evals._percentile``,
+    ``routers/observability._percentile``) — both nearest-rank. This
+    one differs because linear interpolation is the more standard
+    p95 convention for cost analytics; the other two power tail-
+    latency tiles where nearest-rank is the convention. Numbers can
+    differ on small n; the help-page "Common confusions" entry
+    documents this for operators.
     """
     if not values:
         return None

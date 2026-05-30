@@ -256,7 +256,7 @@ const GLOSSARY: GlossarySection[] = [
         id: "p95",
         term: "p50 / p95 / p99 latency",
         blurb:
-          "50th / 95th / 99th percentile of a latency distribution. p95 is the standard tail metric for user-facing latency. NOTE: two implementations live here — nearest-rank in routers/evals.py and linear-interpolation in services/agent_economics.py. Numbers can differ on small n.",
+          "50th / 95th / 99th percentile of a latency distribution. p95 is the standard tail metric for user-facing latency. NOTE: three implementations live here — nearest-rank in routers/evals.py and routers/observability.py, linear-interpolation in services/agent_economics.py. Numbers can differ on small n.",
       },
     ],
   },
@@ -499,8 +499,8 @@ const SCOPE_LIMITS: ScopeBlock = {
       body: "Embedding-distribution drift is computed in services/prompt_drift.py but has no card. Results go to task_runs with prefix prompt_drift. — visible via API, not via the dashboard.",
     },
     {
-      label: "Two p95 implementations",
-      body: "routers/evals.py uses nearest-rank; services/agent_economics.py uses linear-interpolation. Numbers can differ on small n. Both are valid p95 conventions.",
+      label: "Three p95 implementations",
+      body: "routers/evals.py and routers/observability.py use nearest-rank; services/agent_economics.py uses linear-interpolation. Numbers can differ on small n. All three are valid p95 conventions.",
     },
     {
       label: "Scenarios catalog 'verified by' is static",
@@ -530,7 +530,7 @@ const READING_STEPS: { n: number; title: string; body: string }[] = [
   {
     n: 4,
     title: "What window?",
-    body: "Production cards mostly use 7-day current vs 28-day baseline. LLM tiles cascade 24h → 7d → all-time depending on data availability — the tile shows which.",
+    body: "Window is per-monitor, not a global default. Calibration 30d, PSI 30d current vs ~90d reference, Fairness 90d, Refusal 7d current (z-tested against baseline), Prompt-drift 7d vs 30d reference (with 7d gap). LLM tiles cascade 24h → 7d → all-time depending on data availability; the tile shows which. Constants live alongside each monitor in services/<name>.py — search for _WINDOW_DAYS / _CURRENT_DAYS.",
   },
   {
     n: 5,

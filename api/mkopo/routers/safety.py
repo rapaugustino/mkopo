@@ -439,9 +439,12 @@ async def list_scenarios(user: CurrentUserDep) -> ScenariosResponse:
 
     Static manifest from ``mkopo.safety.scenarios.SCENARIOS`` — each
     entry is a (threat, defense, test_id, severity) tuple describing
-    one robustness property the system pins. Backed by the tests in
-    ``tests/test_safety_scenarios.py`` (CI failure on a test → the
-    scenario card on the UI flips to a regression banner).
+    one robustness property the system pins. The status field is set
+    statically per entry; this endpoint does NOT cross-check live
+    CI results, so a test that regresses without anyone updating
+    SCENARIOS will still read as ``protected`` here. The UI surfaces
+    the static nature explicitly (see ScenarioCatalogCard) — wiring
+    a live test-result feed in is on the post-demo backlog.
     """
     rows = [ScenarioRow(**s.to_dict()) for s in SCENARIOS]
     return ScenariosResponse(

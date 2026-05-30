@@ -158,7 +158,10 @@ export function IntakeEmailCard() {
           >
             overall
           </Tooltip>
-          <Pill variant={overallAcc >= 0.85 ? "success" : "warn"}>
+          {/* Threshold matches the eval gate at
+              api/evals/tasks/intake_email.py:205. Pill color now
+              mirrors gate verdict. */}
+          <Pill variant={overallAcc >= 0.80 ? "success" : "warn"}>
             {PCT(overallAcc, 1)}
           </Pill>
           <span>·</span>

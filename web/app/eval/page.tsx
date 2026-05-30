@@ -68,10 +68,11 @@ const EVAL_TOOLTIP: Record<string, string> = {
     "Same denominator as Production accuracy — the intersection of (latest golden, latest production) by task_name. Comparing the full golden suite against a production set that only covers extraction would produce a misleading delta; see the Full eval suite tile below for the broader picture.",
   "Full eval suite":
     "Mean accuracy across ALL latest golden eval rows (extraction + decision verdict + AAL fidelity + intake email + adversarial injection + UW groundedness + tool-call accuracy). Answers 'how is the eval suite doing overall'. Separate from Golden baseline above because that one is restricted to the production-paired subset.",
-  "LLM p95 latency":
-    "95th percentile of LLM call duration in the last 24h. p95 (not p50) because tail latency is what users feel — a fast median with a slow p95 is still a bad experience.",
-  "LLM error rate":
-    "Fraction of llm_calls rows with status != 'ok' in the last 24h (schema validation failures, provider errors, timeouts). >5% trips the trend pill to red.",
+  // ``LLM p95 latency`` / ``LLM error rate`` tooltips are built
+  // inline below — copy depends on which window the backend actually
+  // carried the data from (24h → 7d → all-time cascade in
+  // routers/evals._llm_calls_with_fallback). Hardcoding "24h" here
+  // misled operators on fresh demo installs.
   Open:
     "Review-queue items in 'open' status. Created when an extraction's confidence falls below its per-field threshold (see services/extractor.threshold_for).",
   "Resolved 7d":
@@ -578,7 +579,10 @@ export default function EvalDashboardPage() {
         <div className="rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)]">
           <StatTile
             label={
-              <Tooltip content={EVAL_TOOLTIP["LLM p95 latency"]} underline>
+              <Tooltip
+                content={`95th percentile of LLM call duration in the ${windowReadable}. p95 (not p50) because tail latency is what users feel — a fast median with a slow p95 is still a bad experience. Window is the result of a 24h → 7d → all-time cascade; the trend line below names the window actually used.`}
+                underline
+              >
                 LLM p95 latency
               </Tooltip>
             }
@@ -593,7 +597,10 @@ export default function EvalDashboardPage() {
         <div className="rounded-md border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)]">
           <StatTile
             label={
-              <Tooltip content={EVAL_TOOLTIP["LLM error rate"]} underline>
+              <Tooltip
+                content={`Fraction of llm_calls rows with status != 'ok' in the ${windowReadable} (schema validation failures, provider errors, timeouts). >5% trips the trend pill to red.`}
+                underline
+              >
                 LLM error rate
               </Tooltip>
             }

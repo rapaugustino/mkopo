@@ -167,7 +167,11 @@ export function AALFidelityCard() {
           >
             overall
           </Tooltip>
-          <Pill variant={overallAcc >= 0.85 ? "success" : "warn"}>
+          {/* Threshold matches the eval gate at
+              api/evals/tasks/aal_fidelity.py:103. Showing "warn" while
+              the gate says "pass" (the previous 0.85 vs 0.75 split)
+              was an unexplained divergence. */}
+          <Pill variant={overallAcc >= 0.75 ? "success" : "warn"}>
             {PCT(overallAcc, 1)}
           </Pill>
           <span>·</span>
