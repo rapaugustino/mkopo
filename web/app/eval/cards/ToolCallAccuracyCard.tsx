@@ -38,6 +38,7 @@ import {
   type TaskDetail,
   type ToolCallAccuracyDetails,
 } from "@/lib/api";
+import { EmptyState } from "@/app/components/EmptyState";
 import { Pill } from "@/app/components/Pill";
 import { SectionLabel } from "@/app/components/SectionLabel";
 import { Skeleton } from "@/app/components/Skeleton";
@@ -136,11 +137,17 @@ export function ToolCallAccuracyCard() {
         <SectionLabel Icon={IconRoute}>
           Tool-call accuracy (borrower chat)
         </SectionLabel>
-        <p className="mt-2 text-[12px] text-[var(--color-text-tertiary)]">
-          No run yet. Run{" "}
-          <code>cd api && uv run python -m evals.runner</code> or
-          wait for the 4 AM UTC sweep.
-        </p>
+        <EmptyState
+          size="compact"
+          variant="chart"
+          title="No run yet"
+          description={
+            <>
+              Run <code className="font-mono text-[11px]">cd api && uv run python -m evals.runner</code> or
+              wait for the 4 AM UTC sweep.
+            </>
+          }
+        />
       </div>
     );
   }

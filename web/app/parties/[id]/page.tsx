@@ -88,7 +88,7 @@ function ConcentrationGraph({
               y1={H / 2}
               x2={loanX}
               y2={y}
-              stroke="#888780"
+              stroke="var(--color-text-tertiary)"
               strokeWidth={1}
             />
             <line
@@ -96,7 +96,7 @@ function ConcentrationGraph({
               y1={y}
               x2={propX}
               y2={y}
-              stroke="#888780"
+              stroke="var(--color-text-tertiary)"
               strokeWidth={1}
             />
           </g>

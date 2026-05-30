@@ -89,8 +89,11 @@ export function UserMenu() {
         title={`${user.name || user.email} (${user.role})`}
       >
         <span
-          className="flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-semibold text-white"
-          style={{ background: "var(--color-brand)" }}
+          className="flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-semibold"
+          style={{
+            background: "var(--color-brand)",
+            color: "var(--color-brand-light)",
+          }}
         >
           {initials}
         </span>

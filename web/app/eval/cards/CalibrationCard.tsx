@@ -83,7 +83,7 @@ function ReliabilityDiagram({ bins }: ReliabilityDiagramProps) {
             y1={yFor(y)}
             x2={W - PAD_R}
             y2={yFor(y)}
-            stroke="#888780"
+            stroke="var(--color-text-tertiary)"
             strokeOpacity={0.18}
             strokeWidth={0.5}
           />

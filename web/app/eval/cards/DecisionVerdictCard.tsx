@@ -20,6 +20,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { api, type DecisionVerdictDetails, type TaskDetail } from "@/lib/api";
+import { EmptyState } from "@/app/components/EmptyState";
 import { Pill } from "@/app/components/Pill";
 import { SectionLabel } from "@/app/components/SectionLabel";
 import { Skeleton } from "@/app/components/Skeleton";
@@ -81,11 +82,17 @@ export function DecisionVerdictCard() {
     return (
       <div className="rounded-lg border-[0.5px] border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] px-4 py-3">
         <SectionLabel>Decision verdict</SectionLabel>
-        <p className="mt-2 text-[12px] text-[var(--color-text-tertiary)]">
-          No run yet. Run{" "}
-          <code>cd api && uv run python -m evals.runner</code> or wait
-          for the 4 AM UTC sweep.
-        </p>
+        <EmptyState
+          size="compact"
+          variant="chart"
+          title="No run yet"
+          description={
+            <>
+              Run <code className="font-mono text-[11px]">cd api && uv run python -m evals.runner</code> or
+              wait for the 4 AM UTC sweep.
+            </>
+          }
+        />
       </div>
     );
   }

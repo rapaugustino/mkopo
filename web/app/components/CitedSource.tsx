@@ -13,6 +13,7 @@ import { AnimatePresence, motion } from "motion/react";
 
 import { api, type Citation } from "@/lib/api";
 import { humanizeField } from "@/lib/humanize";
+import { IconButton } from "@/app/components/IconButton";
 
 /**
  * Grounded-AI citation chip + side drawer.
@@ -191,14 +192,12 @@ function CitationDrawer({
               {humanizeField(field)}
             </p>
           </div>
-          <button
-            type="button"
+          <IconButton
+            label="Close"
+            Icon={IconX}
             onClick={onClose}
-            aria-label="Close"
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-background-secondary)]"
-          >
-            <IconX size={14} />
-          </button>
+            size="sm"
+          />
         </div>
 
         {/* Body */}

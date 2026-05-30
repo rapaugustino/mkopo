@@ -6,6 +6,7 @@ import { IconAlertTriangle, IconLockSquare, IconX } from "@tabler/icons-react";
 import { motion } from "motion/react";
 
 import { borrowerAuthApi, type ApiError } from "@/lib/borrowerApi";
+import { IconButton } from "@/app/components/IconButton";
 import { PrimaryButton } from "@/app/components/PrimaryButton";
 import { SecondaryButton } from "@/app/components/SecondaryButton";
 
@@ -115,14 +116,12 @@ export function ReauthPromptModal({
             </span>
             <h2 className="text-[14px] font-semibold">{title}</h2>
           </div>
-          <button
-            type="button"
+          <IconButton
+            label="Cancel"
+            Icon={IconX}
             onClick={onClose}
-            className="inline-flex h-6 w-6 items-center justify-center rounded text-[var(--color-text-secondary)] hover:bg-[var(--color-background-secondary)]"
-            title="Cancel"
-          >
-            <IconX size={12} />
-          </button>
+            size="xs"
+          />
         </div>
 
         <p className="mb-4 text-[12.5px] leading-relaxed text-[var(--color-text-secondary)]">

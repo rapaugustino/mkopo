@@ -330,7 +330,7 @@ function ConfirmReason({
           type="button"
           onClick={onConfirm}
           disabled={busy || reason.trim().length === 0}
-          className="rounded-md bg-[var(--color-brand)] px-2 py-1 text-[11px] font-medium text-white disabled:opacity-45"
+          className="rounded-md bg-[var(--color-brand)] px-2 py-1 text-[11px] font-medium text-[var(--color-brand-light)] disabled:opacity-45"
         >
           {busy ? "Saving…" : "Reassign"}
         </button>

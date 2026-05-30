@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { IconExternalLink, IconLoader2, IconX } from "@tabler/icons-react";
 import { motion } from "motion/react";
 
+import { IconButton } from "@/app/components/IconButton";
+
 /**
  * In-app document viewer.
  *
@@ -118,14 +120,12 @@ export function DocumentViewer({
                 <IconExternalLink size={14} />
               </a>
             )}
-            <button
-              type="button"
+            <IconButton
+              label="Close (Esc)"
+              Icon={IconX}
               onClick={onClose}
-              title="Close (Esc)"
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-background-secondary)]"
-            >
-              <IconX size={14} />
-            </button>
+              size="sm"
+            />
           </div>
         </div>
 

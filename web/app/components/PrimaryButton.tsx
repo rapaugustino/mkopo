@@ -3,8 +3,11 @@ import type { ButtonHTMLAttributes, ReactNode } from "react";
 interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
   /** Optional Tabler icon component, rendered left of the label. */
   Icon?: React.ComponentType<{ size?: number }>;
-  /** Tighter padding for inline buttons (e.g. AskTheFile send). */
-  size?: "sm" | "md";
+  /** Tighter padding for inline buttons (sm = AskTheFile send),
+   *  default md (toolbar buttons), lg for primary CTAs in wizards and
+   *  full-page empty states where the button is the page's primary
+   *  affordance (apply wizard "Continue", annotation submit, etc.). */
+  size?: "sm" | "md" | "lg";
   children: ReactNode;
 }
 
@@ -18,6 +21,7 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
  *
  * Usage:
  *     <PrimaryButton Icon={IconSparkles} onClick={...}>Run intake</PrimaryButton>
+ *     <PrimaryButton size="lg" type="submit">Continue</PrimaryButton>
  */
 export function PrimaryButton({
   Icon,
@@ -26,18 +30,21 @@ export function PrimaryButton({
   className = "",
   ...rest
 }: Props) {
-  const padding = size === "sm" ? "px-2.5 py-1" : "px-3 py-1.5";
+  const padding =
+    size === "sm" ? "px-2.5 py-1" : size === "lg" ? "px-4 py-2" : "px-3 py-1.5";
+  const text = size === "lg" ? "text-[13px]" : "text-xs";
+  const iconSize = size === "lg" ? 16 : 14;
   return (
     <button
       {...rest}
-      className={`flex items-center gap-1.5 rounded-md text-xs font-medium disabled:opacity-50 ${padding} ${className}`}
+      className={`flex items-center gap-1.5 rounded-md ${text} font-medium disabled:opacity-50 ${padding} ${className}`}
       style={{
         background: "var(--color-brand)",
         color: "var(--color-brand-light)",
         ...rest.style,
       }}
     >
-      {Icon && <Icon size={14} />}
+      {Icon && <Icon size={iconSize} />}
       {children}
     </button>
   );
