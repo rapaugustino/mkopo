@@ -422,6 +422,7 @@ Being explicit so the gaps are easy to find:
 | Constitutional judge on intake + underwriting outputs | ✅ | ``INTAKE_DOC_REQUEST_CONSTITUTION`` + ``UNDERWRITING_SUMMARY_CONSTITUTION``, wired via the shared builders |
 | Output classifier ahead of borrower-facing send | ✅ | Drafts go to underwriter for approval (the underwriter is the classifier) AND the constitutional judge runs on the draft pre-persist |
 | Safety dashboard for visibility | ✅ | Dedicated ``/safety`` page + Safety tab inside ``/observability`` + per-loan ``SafetyChip`` on the case-file header |
+| Auth secrets handled outside source control | ✅ | The JWT signing key (``JWT_SECRET``) is `.env`-only, never committed; startup banner reports ``degraded`` until you set it. Generate + setup + rotation procedure in [README § Auth + security](../README.md#auth--security). For production deploys, put it in a secrets manager (Vault / AWS Secrets Manager / Doppler), not `.env`. The legacy dev-bearer shortcut was removed in May 2026 (task #186) |
 | Active-learning feedback | Partial | Review-queue overrides feed drift_monitor; nothing yet adjusts prompts automatically |
 | Bias / fair-lending output testing | ❌ | The eval harness has no fair-lending test suite. Real lender deployment needs disparate-impact monitoring. Out of scope for the demo |
 | Differential privacy on the embedding corpus | ❌ | Comparable-loans corpus is anonymised at seed time but no formal DP |

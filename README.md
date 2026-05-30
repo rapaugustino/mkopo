@@ -120,7 +120,7 @@ uv run python scripts/seed_eval_baseline.py    # optional, populates the eval da
 uv run uvicorn mkopo.main:app --reload
 ```
 
-**Six env vars matter.** The startup banner reports which ones are
+**Seven env vars matter.** The startup banner reports which ones are
 wired vs degraded:
 
 | Var | What it unlocks | If unset |
@@ -131,9 +131,22 @@ wired vs degraded:
 | ``RESEND_FROM_ADDRESS`` | Mailbox on a Resend-verified domain | Resend rejects send |
 | ``RESEND_WEBHOOK_SECRET`` | Authenticates inbound borrower replies | Inbound accepts unauth (dev only) |
 | ``STORAGE_BACKEND`` | ``local`` (default) or ``s3`` | Defaults to local under ``./var/storage`` |
+| ``JWT_SECRET`` | Signs **both** staff + borrower session cookies (different audience, same key) | Startup banner reports `degraded`; placeholder default makes every install share signing keys, so any session can be forged |
 
 For S3 also set ``AWS_ACCESS_KEY_ID``, ``AWS_SECRET_ACCESS_KEY``,
 ``AWS_REGION``, and ``S3_BUCKET``.
+
+**Set `JWT_SECRET` before first boot.** Generate a strong value:
+
+```bash
+python -c 'import secrets; print(secrets.token_urlsafe(48))'
+# append the result to api/.env as: JWT_SECRET=<value>
+```
+
+Rotate by overwriting — all active sessions invalidate immediately,
+which is the only way rotation can work for a stateless JWT. For
+production deploys, put it in your secrets manager (Vault / AWS
+Secrets Manager / Doppler) rather than `.env`.
 
 ### 3. Worker (optional — only needed for background intake jobs)
 
@@ -236,6 +249,31 @@ into each other.
 - Distinct JWT audiences — a borrower token presented at a staff
   endpoint fails to decode (and vice versa) even if both cookies
   coexist on the same domain. Tested in ``test_staff_auth_jwt.py``.
+- **Shared signing key (``JWT_SECRET``)** — both audiences are
+  signed by the same secret. Different audience claim prevents
+  cross-surface reuse; same key keeps key-management simple
+  (rotate once, both audiences re-issue). See [§ Quick start /
+  env vars](#2-backend) for how to generate it.
+
+### Key rotation
+
+The JWT signing key (`JWT_SECRET`) is the only auth secret you'll
+rotate during normal operation. Rotating is a one-liner:
+
+```bash
+# 1. Generate a new value
+python -c 'import secrets; print(secrets.token_urlsafe(48))'
+# 2. Overwrite JWT_SECRET in api/.env (or your secrets manager) with the new value
+# 3. Restart the API
+```
+
+Every active session — staff and borrower — invalidates immediately
+because their existing JWTs were signed with the old key. That's the
+only way rotation can work for a stateless JWT: there's no
+session-table to update, so the previous key has to stop verifying.
+Plan accordingly (rotate during a low-traffic window, or pre-warn
+active users). The Redis `jti` blacklist is independent — it survives
+rotation and continues to block individually-revoked tokens.
 
 ### Other security work
 
