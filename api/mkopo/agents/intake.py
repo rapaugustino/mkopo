@@ -31,7 +31,7 @@ from mkopo.agents.guardrails import (
 from mkopo.config import get_settings
 from mkopo.db import get_session
 from mkopo.llm_gateway import get_gateway
-from mkopo.models import Document, Extraction, ExtractionStatus, Loan, ReviewTask
+from mkopo.models import AgentName, Document, Extraction, ExtractionStatus, Loan, ReviewTask
 from mkopo.services.audit import Actor, record
 from mkopo.tools.comms import OutboundEmail, get_comms
 from mkopo.tools.extractor import (
@@ -191,7 +191,7 @@ async def extract_all_documents(state: IntakeState) -> IntakeState:
             await record(
                 session,
                 loan_id=loan_id,
-                actor=Actor.agent("intake"),
+                actor=Actor.agent(AgentName.INTAKE),
                 action="intake_skipped",
                 payload={"reason": "no_documents", "loan_class": loan_class_str},
             )
@@ -266,7 +266,7 @@ async def extract_all_documents(state: IntakeState) -> IntakeState:
         await record(
             session,
             loan_id=loan_id,
-            actor=Actor.agent("intake"),
+            actor=Actor.agent(AgentName.INTAKE),
             action="extraction_complete",
             payload={
                 "n_extracted": len(extracted),
@@ -565,7 +565,7 @@ async def send_email(state: IntakeState) -> IntakeState:
         await record(
             session,
             loan_id=loan_id,
-            actor=Actor.agent("intake"),
+            actor=Actor.agent(AgentName.INTAKE),
             action="send_email",
             payload={
                 "subject": final["subject"],

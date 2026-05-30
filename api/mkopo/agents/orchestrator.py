@@ -31,7 +31,7 @@ import structlog
 
 from mkopo.agents import build_decision_graph, build_underwriting_graph
 from mkopo.db import get_session
-from mkopo.models import AutonomyLevel, Loan, LoanStage
+from mkopo.models import AgentName, AutonomyLevel, Loan, LoanStage
 from mkopo.services.audit import Actor, record
 from mkopo.services.loans import (
     IllegalStageTransitionError,
@@ -66,7 +66,7 @@ async def maybe_chain_after_intake(loan_id: uuid.UUID, completed_with: str) -> N
     # 1. Advance the stage. _try_advance is a no-op if the loan is
     #    not autonomous, so this is safe to call unconditionally.
     advanced = await _try_advance(
-        loan_id, LoanStage.UNDERWRITING, after="intake"
+        loan_id, LoanStage.UNDERWRITING, after=AgentName.INTAKE
     )
     if not advanced:
         return
@@ -119,7 +119,7 @@ async def maybe_chain_after_underwriting(loan_id: uuid.UUID) -> None:
             )
             return
 
-    await _try_advance(loan_id, LoanStage.DECISION, after="underwriting")
+    await _try_advance(loan_id, LoanStage.DECISION, after=AgentName.UNDERWRITING)
     await _run_decision_agent(loan_id)
 
 
@@ -307,7 +307,7 @@ async def _run_decision_agent(loan_id: uuid.UUID) -> None:
     """
     thread_id = f"decision-{loan_id}"
     config = {"configurable": {"thread_id": thread_id}}
-    agent_run_id = await _create_running_agent_run(loan_id, "decision", thread_id)
+    agent_run_id = await _create_running_agent_run(loan_id, AgentName.DECISION, thread_id)
     state: dict[str, Any] = {"loan_id": str(loan_id)}
     if agent_run_id is not None:
         state["agent_run_id"] = str(agent_run_id)
@@ -338,7 +338,7 @@ async def _run_underwriting_agent(loan_id: uuid.UUID) -> None:
     thread_id = f"underwriting-{loan_id}"
     config = {"configurable": {"thread_id": thread_id}}
     agent_run_id = await _create_running_agent_run(
-        loan_id, "underwriting", thread_id
+        loan_id, AgentName.UNDERWRITING, thread_id
     )
     state: dict[str, Any] = {"loan_id": str(loan_id)}
     if agent_run_id is not None:

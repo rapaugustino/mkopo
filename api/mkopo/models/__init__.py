@@ -33,7 +33,9 @@ from mkopo.models.injection import (
 from mkopo.models.institution import SINGLETON_ID as INSTITUTION_SINGLETON_ID
 from mkopo.models.institution import InstitutionSettings
 from mkopo.models.loan import (
+    PIPELINE_ORDER,
     VALID_TRANSITIONS,
+    AgentName,
     AgentRun,
     AgentStep,
     AutonomyLevel,
@@ -49,6 +51,7 @@ from mkopo.models.user import User
 
 __all__ = [
     "ActorType",
+    "AgentName",
     "AgentRun",
     "AgentStep",
     "Annotation",
@@ -78,6 +81,7 @@ __all__ = [
     "LoanStage",
     "LoanType",
     "MagicLink",
+    "PIPELINE_ORDER",
     "Message",
     "MessageDirection",
     "Party",

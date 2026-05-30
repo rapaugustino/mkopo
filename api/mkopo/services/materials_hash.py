@@ -242,14 +242,14 @@ async def latest_decision_materials_hash(
     case as "no protection yet" rather than as a mismatch, because
     the protection only matters once a decision exists.
     """
-    from mkopo.models import AgentRun
+    from mkopo.models import AgentName, AgentRun
 
     row = (
         await session.execute(
             select(AgentRun.payload)
             .where(
                 AgentRun.loan_id == loan_id,
-                AgentRun.agent_name == "decision",
+                AgentRun.agent_name == AgentName.DECISION,
                 AgentRun.status == "complete",
             )
             .order_by(AgentRun.created_at.desc())

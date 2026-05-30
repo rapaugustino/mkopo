@@ -38,6 +38,7 @@ from mkopo.agents.streaming import (
     stream_graph_run,
 )
 from mkopo.deps import CurrentUserDep, DbSessionDep
+from mkopo.models import AgentName
 from mkopo.schemas import ApproveEmailIn
 from mkopo.services import loans as loan_service
 from mkopo.services.loan_locks import raise_if_locked_for_agent
@@ -89,7 +90,7 @@ async def run_intake(
     loan = await loan_service.get_loan(db, loan_id)
     if loan is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Loan not found")
-    raise_if_locked_for_agent(loan.stage, "intake")
+    raise_if_locked_for_agent(loan.stage, AgentName.INTAKE)
 
     # Distinct thread id for replays so the LangGraph checkpoint
     # store doesn't collide with the original run. Manual reruns
@@ -115,7 +116,7 @@ async def run_intake(
             config=config,
             thread_id=thread_id,
             loan_id=loan_id,
-            agent_name="intake",
+            agent_name=AgentName.INTAKE,
             # Intake's "result" the frontend cares about is the interrupt
             # payload; the full state contains lots of internal scratch
             # we don't want to serialise.
@@ -155,7 +156,7 @@ async def resume_intake(
             config=config,
             thread_id=thread_id,
             loan_id=loan_id,
-            agent_name="intake",
+            agent_name=AgentName.INTAKE,
             extract_result=lambda s: {"status": s.get("status")},
         )
     )
@@ -196,7 +197,7 @@ async def run_underwriting(
     loan = await loan_service.get_loan(db, loan_id)
     if loan is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Loan not found")
-    raise_if_locked_for_agent(loan.stage, "underwriting")
+    raise_if_locked_for_agent(loan.stage, AgentName.UNDERWRITING)
 
     # Replay needs a unique thread id so it doesn't resume the
     # original's checkpoint. Manual reruns keep the legacy id.
@@ -217,7 +218,7 @@ async def run_underwriting(
             config=config,
             thread_id=thread_id,
             loan_id=loan_id,
-            agent_name="underwriting",
+            agent_name=AgentName.UNDERWRITING,
             extract_result=_extract_underwriting_result,
             on_complete=_after,
             replays_run_id=replays_run_id,
@@ -260,7 +261,7 @@ async def run_decision(
     # the conditions list (persist deletes prior AI-drafted rows and
     # reinserts) AND write a new ``decision_complete`` audit event
     # that contradicts the verdict the borrower already saw. Reject.
-    raise_if_locked_for_agent(loan.stage, "decision")
+    raise_if_locked_for_agent(loan.stage, AgentName.DECISION)
 
     if replays_run_id is not None:
         thread_id = f"decision-{loan_id}-replay-{uuid.uuid4().hex[:8]}"
@@ -279,7 +280,7 @@ async def run_decision(
             config=config,
             thread_id=thread_id,
             loan_id=loan_id,
-            agent_name="decision",
+            agent_name=AgentName.DECISION,
             extract_result=_extract_decision_result,
             on_complete=_after,
             replays_run_id=replays_run_id,

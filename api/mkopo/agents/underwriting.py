@@ -45,7 +45,7 @@ from mkopo.agents.guardrails import (
 from mkopo.config import get_settings
 from mkopo.db import get_session
 from mkopo.llm_gateway import get_gateway
-from mkopo.models import AgentRun, Loan
+from mkopo.models import AgentName, AgentRun, Loan
 from mkopo.rules.policy import (
     DSCR_FLOORS,
     POLICY_MAX_DTI_PERSONAL,
@@ -199,7 +199,7 @@ async def fetch_and_evaluate(state: UnderwritingState) -> UnderwritingState:
             await record(
                 session,
                 loan_id=loan_id,
-                actor=Actor.agent("underwriting"),
+                actor=Actor.agent(AgentName.UNDERWRITING),
                 action="underwriting_skipped",
                 payload={"reason": "needs_extractions"},
             )
@@ -625,7 +625,7 @@ async def persist(state: UnderwritingState) -> UnderwritingState:
         await record(
             session,
             loan_id=loan_id,
-            actor=Actor.agent("underwriting"),
+            actor=Actor.agent(AgentName.UNDERWRITING),
             action="underwriting_complete",
             payload={
                 "recommendation": summary.recommendation,

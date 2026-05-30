@@ -46,6 +46,42 @@ class LoanType(enum.StrEnum):
     REFINANCE = "refinance"
 
 
+class AgentName(enum.StrEnum):
+    """The three agents in the loan-origination pipeline.
+
+    Centralised here so route handlers, observability filters, eval
+    task names, and audit payloads can share a single constant rather
+    than each site spelling ``"intake"`` / ``"underwriting"`` /
+    ``"decision"`` as a string literal. A typo in any of those
+    silently routes to the wrong agent / drops a metric / lands an
+    unrouted observability row; an unknown-enum-member raises.
+
+    Each member's ``.value`` matches the agent's identifier
+    everywhere downstream — ``agent_runs.agent_name``, the eval
+    task-name prefix (``intake.email``, ``underwriting.summary``,
+    ``decision.verdict``), the SSE event ``agent`` field, the
+    orchestrator's chain-routing decisions. StrEnum so existing
+    string-comparison sites keep working without migration.
+
+    Pipeline order is set by ``PIPELINE_ORDER`` below — single source
+    of truth for the orchestrator's chain + the UI's stepper.
+    """
+
+    INTAKE = "intake"
+    UNDERWRITING = "underwriting"
+    DECISION = "decision"
+
+
+# Canonical pipeline order. The orchestrator + the loan-detail UI's
+# stepper both consume this so adding a stage (e.g. "verification" pre-
+# decision) is a one-place edit instead of a grep-and-pray.
+PIPELINE_ORDER: tuple[AgentName, ...] = (
+    AgentName.INTAKE,
+    AgentName.UNDERWRITING,
+    AgentName.DECISION,
+)
+
+
 class LoanClass(enum.StrEnum):
     """Top-level lending product class.
 

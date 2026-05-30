@@ -11,6 +11,7 @@ from sqlalchemy import select
 from mkopo.config import get_settings
 from mkopo.deps import CurrentUserDep, DbSessionDep
 from mkopo.models import (
+    AgentName,
     AgentRun,
     AuditEvent,
     Condition,
@@ -746,7 +747,7 @@ async def get_latest_underwriting_result(
     """
     if not await loan_service.get_loan(db, loan_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Loan not found")
-    return await _latest_agent_result(db, loan_id, "underwriting")
+    return await _latest_agent_result(db, loan_id, AgentName.UNDERWRITING)
 
 
 @router.get("/{loan_id}/decision/latest")
@@ -760,7 +761,7 @@ async def get_latest_decision_result(
     """
     if not await loan_service.get_loan(db, loan_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Loan not found")
-    return await _latest_agent_result(db, loan_id, "decision")
+    return await _latest_agent_result(db, loan_id, AgentName.DECISION)
 
 
 @router.post("/{loan_id}/notes", response_model=AuditEventOut, status_code=status.HTTP_201_CREATED)

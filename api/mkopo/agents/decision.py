@@ -51,7 +51,7 @@ from mkopo.agents.guardrails import (
 from mkopo.config import get_settings
 from mkopo.db import get_session
 from mkopo.llm_gateway import get_gateway
-from mkopo.models import AgentRun, Condition, ConditionStatus, Loan
+from mkopo.models import AgentName, AgentRun, Condition, ConditionStatus, Loan
 from mkopo.schemas import (
     AdverseActionLetter,
     ConditionDraft,
@@ -170,7 +170,7 @@ async def fetch_and_evaluate(state: DecisionState) -> DecisionState:
             await record(
                 session,
                 loan_id=loan_id,
-                actor=Actor.agent("decision"),
+                actor=Actor.agent(AgentName.DECISION),
                 action="decision_skipped",
                 payload={"reason": "needs_underwriting"},
             )
@@ -578,7 +578,7 @@ async def persist(state: DecisionState) -> DecisionState:
         await record(
             session,
             loan_id=loan_id,
-            actor=Actor.agent("decision"),
+            actor=Actor.agent(AgentName.DECISION),
             action="decision_complete",
             payload={
                 "path": decision.path,
