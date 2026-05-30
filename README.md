@@ -11,8 +11,14 @@ engine, structured outputs, and a cryptographic decision-integrity
 hash keep the system honest.
 
 This is a portfolio project. Synthetic data, scoped feature set,
-designed for clarity. Production gaps are documented honestly in
-[ARCHITECTURE.md](docs/ARCHITECTURE.md) and [SAFETY.md](docs/SAFETY.md).
+designed for clarity. **Everything that looks production-ready but
+isn't** is called out explicitly in [SCOPE.md](docs/SCOPE.md);
+production gaps are documented in
+[ARCHITECTURE.md](docs/ARCHITECTURE.md) and
+[SAFETY.md](docs/SAFETY.md); every dashboard metric's formula +
+source file is in [METRICS.md](docs/METRICS.md). The in-app `/help`
+page surfaces the same glossary + scope content so a reader can
+resolve any acronym they see on the dashboard with one click.
 
 ---
 
@@ -48,10 +54,18 @@ designed for clarity. Production gaps are documented honestly in
 
 For the full design + reasoning, see
 [**ARCHITECTURE.md**](docs/ARCHITECTURE.md).
+For what the demo does and does NOT cover, see
+[**SCOPE.md**](docs/SCOPE.md).
+For every metric on every dashboard with its formula + source,
+see [**METRICS.md**](docs/METRICS.md).
 For the hallucination-mitigation story, see
 [**SAFETY.md**](docs/SAFETY.md).
 For sample workflows with sequence diagrams, see
 [**WORKFLOWS.md**](docs/WORKFLOWS.md).
+For acronym definitions, see [**GLOSSARY.md**](docs/GLOSSARY.md)
+(or the in-app `/help` page).
+For interview talking points (project owner reference), see
+[**INTERVIEW.md**](docs/INTERVIEW.md).
 
 ---
 
@@ -406,7 +420,7 @@ mkopo/
 │   │   ├── llm_gateway.py          single Anthropic SDK choke point
 │   │   ├── models/                 SQLAlchemy ORM (one file per domain)
 │   │   ├── schemas/                Pydantic request/response models
-│   │   ├── routers/                REST endpoints (loans, agents, settings, ...)
+│   │   ├── routers/                REST endpoints (loans, agents, settings, evals/ package, ...)
 │   │   ├── services/               business logic (loans, locks, materials_hash, ...)
 │   │   ├── agents/
 │   │   │   ├── intake.py           extract → identify_missing → draft_request → HITL → send
@@ -419,13 +433,16 @@ mkopo/
 │   │   └── workers/tasks.py        arq background jobs
 │   ├── evals/                      golden-set eval harness
 │   ├── alembic/versions/           migrations (0001 — 0020)
-│   ├── scripts/seed.py             clean-DB seed with generated PDFs
+│   ├── scripts/seed.py             seed runner (orchestration)
+│   ├── scripts/seed_fixtures/      per-domain SeedLoan fixtures
+│   ├── tests/                      286 tests — math, trajectories, gates
 │   └── pyproject.toml
 ├── web/                            Next.js 16 frontend (App Router, React 19)
 │   ├── app/
 │   │   ├── loans/[id]/             case-file workspace
-│   │   ├── apply/                  5-step borrower wizard
+│   │   ├── apply/                  5-step borrower wizard (per-step files under steps/)
 │   │   ├── account/                borrower portal
+│   │   ├── help/                   in-app glossary + scope + how-to-read
 │   │   ├── settings/               institution settings (lender contact + ECOA disclosures)
 │   │   ├── observability/          LLM calls + agent runs + errors + safety tab
 │   │   ├── safety/                 input-side injection detections + constitutional judge rollup
@@ -433,12 +450,18 @@ mkopo/
 │   │   ├── prompts/                versioned prompt registry editor
 │   │   ├── review-queue/           low-confidence extractions for human review
 │   │   └── components/             CommandPalette (⌘K), CitedSource drawer, MaterialsFlow, ...
-│   ├── lib/api.ts                  typed API client
+│   ├── lib/api.ts                  typed API client (runtime + helpers)
+│   ├── lib/api-types.ts            type definitions (re-exported via lib/api.ts)
 │   └── lib/formatting.ts, humanize.ts
 ├── docs/
 │   ├── ARCHITECTURE.md             system design + mermaid diagrams
+│   ├── SCOPE.md                    in / out of scope (read this first)
+│   ├── METRICS.md                  every metric's formula + source file
+│   ├── GLOSSARY.md                 acronym definitions (mirrors /help)
 │   ├── SAFETY.md                   hallucination-mitigation audit
-│   └── WORKFLOWS.md                sample workflows + sequence diagrams
+│   ├── WORKFLOWS.md                sample workflows + sequence diagrams
+│   ├── EVAL_PLAN.md                eval surface state + roadmap
+│   └── INTERVIEW.md                interview talking points
 ├── samples/                        labeled sample loan packets
 ├── TESTING_GUIDE.md                end-to-end click-through scripts
 └── README.md
@@ -470,8 +493,13 @@ mkopo/
 ## Further reading
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — system architecture, agent design, state machine, materials hash, scalability + production gaps
-- [docs/SAFETY.md](docs/SAFETY.md) — every hallucination-mitigation technique in the codebase + what's not present
-- [docs/WORKFLOWS.md](docs/WORKFLOWS.md) — eight sample workflows with sequence diagrams
+- [docs/SCOPE.md](docs/SCOPE.md) — what the demo does and explicitly does NOT cover
+- [docs/METRICS.md](docs/METRICS.md) — every dashboard metric with its formula, source file, data table, window, and academic / regulatory reference
+- [docs/GLOSSARY.md](docs/GLOSSARY.md) — acronym definitions (same content as the in-app `/help` page)
+- [docs/SAFETY.md](docs/SAFETY.md) — hallucination-mitigation audit
+- [docs/WORKFLOWS.md](docs/WORKFLOWS.md) — sample workflows with sequence diagrams
+- [docs/EVAL_PLAN.md](docs/EVAL_PLAN.md) — current eval surface + phased plan to lender-grade
+- [docs/INTERVIEW.md](docs/INTERVIEW.md) — interview talking points (project owner reference)
 - [TESTING_GUIDE.md](TESTING_GUIDE.md) — clickable end-to-end scripts for every flow
 
 ---
