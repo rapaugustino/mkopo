@@ -120,42 +120,5 @@ async def persist_uncaught_exception(
     )
 
 
-# Convenience for tests that want to assert "this error landed in the
-# table" without monkeypatching the handler.
-async def record_error(
-    *,
-    path: str,
-    method: str,
-    status_code: int,
-    error_class: str,
-    error_message: str,
-    traceback_text: str | None,
-    user_id: uuid.UUID | None = None,
-    request_id: str | None = None,
-) -> None:
-    """Persist one error row programmatically.
-
-    Used by:
-
-    - The exception handler (above).
-    - Future targeted error paths (worker failures, scheduled-job
-      crashes) that want to surface in the same UI.
-    """
-    async with get_session() as session:
-        session.add(
-            InfrastructureError(
-                path=path[:512],
-                method=method[:16],
-                status_code=status_code,
-                error_class=error_class[:128],
-                error_message=error_message[:1024],
-                traceback=traceback_text,
-                user_id=user_id,
-                request_id=request_id[:64] if request_id else None,
-            )
-        )
-        await session.commit()
-
-
 # Mypy hint shim — the handler signature FastAPI expects.
 HandlerType = Any

@@ -38,10 +38,13 @@ import uuid
 from contextvars import ContextVar
 from dataclasses import dataclass
 
+import structlog
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from mkopo.models.prompt import Prompt
+
+logger = structlog.get_logger()
 
 # ContextVar that ``LLMGateway._record_call`` reads to stamp each
 # call's ``prompt_version_id``. Set as a side-effect of :func:`get`
@@ -425,8 +428,8 @@ def list_definitions() -> list[PromptDef]:
 
 
 # Process-level cache keyed by identifier. Warmed at app startup from
-# the DB (see :func:`refresh_cache`), refreshed after each edit via
-# :func:`invalidate_cache` + the router's commit hook.
+# the DB (see :func:`refresh_cache`) and re-bulk-loaded after each
+# edit via the router's commit hook.
 #
 # Reason for a cache rather than a DB read per call: agents call into
 # this on every node. The active prompt set is small (low tens) and
@@ -484,19 +487,6 @@ def get(identifier: str) -> str:
     return default.default_body
 
 
-def invalidate_cache(identifier: str | None = None) -> None:
-    """Drop one or all cached entries.
-
-    Tests call this with no argument to reset state between cases.
-    The router calls :func:`refresh_cache` after a write instead;
-    invalidation is only the fallback path.
-    """
-    if identifier is None:
-        _CACHE.clear()
-    else:
-        _CACHE.pop(identifier, None)
-
-
 async def refresh_cache(session: AsyncSession) -> None:
     """Bulk-read every active prompt row into the process cache.
 
@@ -516,9 +506,16 @@ async def refresh_cache(session: AsyncSession) -> None:
                 )
             )
         ).all()
-    except Exception:
+    except Exception as exc:  # noqa: BLE001 — refresh must not raise
         # Don't take down the app on a transient DB error during
-        # refresh. The next mutation or restart will retry.
+        # refresh. Log it so operators can see the refresh failure
+        # instead of silently serving stale prompts forever, then
+        # bail. The next mutation or restart will retry.
+        logger.warning(
+            "prompt_cache_refresh_failed",
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
         return
     new_cache = {ident: body for _pid, ident, body in rows}
     new_ids = {ident: pid for pid, ident, _body in rows}
