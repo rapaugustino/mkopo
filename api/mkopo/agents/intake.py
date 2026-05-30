@@ -119,7 +119,13 @@ class IntakeState(TypedDict, total=False):
     missing_fields: list[str]
     draft_email: dict[str, str] | None  # subject + body
     final_email: dict[str, str] | None  # after HITL approval
-    status: Literal["running", "awaiting_approval", "complete", "failed"]
+    # ``needs_documents`` is set by ``extract_all_documents`` when
+    # the pre-flight gate trips (no docs uploaded). Kept distinct
+    # from ``failed`` so the UI can show "upload docs to continue"
+    # rather than a generic error.
+    status: Literal[
+        "running", "awaiting_approval", "complete", "failed", "needs_documents"
+    ]
     # Self-Refine loop bookkeeping (see :mod:`agents.guardrails`).
     # ``validation_attempts`` is incremented inside ``draft_doc_request``
     # so the router can bound retries. ``last_critique`` is the prior

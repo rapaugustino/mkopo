@@ -394,6 +394,20 @@ async def draft_decision(state: DecisionState) -> DecisionState:
         )
         aal = dec.adverse_action_letter
 
+    # See underwriting.py:_persist for the rationale on the missing-
+    # agent_run_id branch — same pattern: log loudly rather than
+    # silently fabricate, so the orphan row is detectable in
+    # observability instead of disappearing into the void.
+    raw_run_id = state.get("agent_run_id")
+    if raw_run_id:
+        result_run_id = uuid.UUID(raw_run_id)
+    else:
+        result_run_id = uuid.uuid4()
+        logger.warning(
+            "decision_persist_missing_agent_run_id",
+            loan_id=state.get("loan_id"),
+            fabricated_id=str(result_run_id),
+        )
     decision = DecisionResult(
         path=drafted.path,
         confidence=drafted.confidence,
@@ -403,7 +417,7 @@ async def draft_decision(state: DecisionState) -> DecisionState:
         conditions=conditions,
         adverse_action_letter=aal,
         generated_at=datetime.now(UTC),
-        agent_run_id=uuid.UUID(state.get("agent_run_id", str(uuid.uuid4()))),
+        agent_run_id=result_run_id,
     )
     # Bump the attempt counter. The validator reads this to decide
     # when to stop retrying (max set by MAX_VALIDATION_ATTEMPTS).

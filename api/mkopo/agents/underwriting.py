@@ -389,6 +389,23 @@ async def draft_summary(state: UnderwritingState) -> UnderwritingState:
 
     # Bump the attempt counter so the validator router can bound retries.
     attempts = state.get("validation_attempts", 0) + 1
+    # ``agent_run_id`` should be stamped into state by whichever caller
+    # invoked the graph (SSE path: ``agents/streaming.py``; autonomous
+    # path: ``agents/orchestrator._run_underwriting_agent``). If it's
+    # missing, the AgentRun insert most likely failed earlier — we
+    # still build the result (the graph contract requires a non-Optional
+    # UUID) but mint an unrooted id and log loudly so the orphan row
+    # shows up in observability rather than silently disappearing.
+    raw_run_id = state.get("agent_run_id")
+    if raw_run_id:
+        result_run_id = uuid.UUID(raw_run_id)
+    else:
+        result_run_id = uuid.uuid4()
+        logger.warning(
+            "underwriting_persist_missing_agent_run_id",
+            loan_id=state.get("loan_id"),
+            fabricated_id=str(result_run_id),
+        )
     return {
         **state,
         "summary": UnderwritingResult(
@@ -398,7 +415,7 @@ async def draft_summary(state: UnderwritingState) -> UnderwritingState:
             recommendation=drafted.recommendation,
             rationale=drafted.rationale,
             generated_at=datetime.now(UTC),
-            agent_run_id=uuid.UUID(state.get("agent_run_id", str(uuid.uuid4()))),
+            agent_run_id=result_run_id,
         ),
         "validation_attempts": attempts,
     }

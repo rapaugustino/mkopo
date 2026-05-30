@@ -675,20 +675,33 @@ export function CreditDecisionPanel({ loanId }: Props) {
         <PrimaryButton
           Icon={IconSparkles}
           onClick={runDecision}
-          disabled={agentRun.isRunning || agentsLocked}
+          // Underwriting must have run first — the decision agent
+          // depends on its rule outcomes + summary. Without this guard
+          // the button starts a graph run that immediately fails the
+          // pre-flight check, which reads as "broken UI" not "missing
+          // prereq". Disabling with a tooltip explains why.
+          disabled={
+            agentRun.isRunning ||
+            agentsLocked ||
+            !underwritingQuery.data
+          }
           title={
             agentsLocked
               ? "Loan is past the decision stage — agents are locked."
-              : undefined
+              : !underwritingQuery.data
+                ? "Run underwriting first — the decision agent reads its rule outcomes and summary."
+                : undefined
           }
         >
           {agentRun.isRunning
             ? "Running…"
             : agentsLocked
               ? "Locked"
-              : result
-                ? "Re-generate decision draft"
-                : "Generate decision draft"}
+              : !underwritingQuery.data
+                ? "Underwriting required"
+                : result
+                  ? "Re-generate decision draft"
+                  : "Generate decision draft"}
         </PrimaryButton>
       </div>
 
@@ -705,8 +718,9 @@ export function CreditDecisionPanel({ loanId }: Props) {
       {!result && !agentRun.isRunning && agentRun.nodes.length === 0 && (
         <div className="rounded-lg border-[0.5px] border-dashed border-[var(--color-border-tertiary)] bg-[var(--color-background-primary)] p-8 text-center">
           <p className="text-sm text-[var(--color-text-secondary)]">
-            No decision draft yet. Click <strong>Generate decision draft</strong>.
-            (Best run after Underwriting has produced rule outcomes.)
+            {underwritingQuery.data
+              ? <>No decision draft yet. Click <strong>Generate decision draft</strong>.</>
+              : <>No decision draft yet. Run <strong>Underwriting</strong> first — its rule outcomes feed this stage.</>}
           </p>
         </div>
       )}

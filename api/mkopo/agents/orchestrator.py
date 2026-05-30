@@ -214,6 +214,44 @@ async def _try_advance(
     return True
 
 
+async def _finalize_failed_agent_run(
+    agent_run_id: uuid.UUID | None,
+) -> None:
+    """Flip a ``running`` AgentRun to ``failed`` after the orchestrator
+    caught an exception out of ``graph.ainvoke``.
+
+    Mirrors what the SSE path does at
+    ``agents/streaming._finalize_agent_run``. Without this, the
+    orchestrator's auto-fired runs left the row stuck at ``running``
+    forever on failure — observability would report perpetual
+    "in-flight" runs that actually crashed minutes ago. Only updates
+    if the row is still ``running`` (don't clobber a richer status
+    the persist node may have written).
+    """
+    from sqlalchemy import update
+
+    from mkopo.models import AgentRun
+
+    if agent_run_id is None:
+        return
+    try:
+        async with get_session() as session:
+            await session.execute(
+                update(AgentRun)
+                .where(
+                    AgentRun.id == agent_run_id,
+                    AgentRun.status == "running",
+                )
+                .values(status="failed")
+            )
+            await session.commit()
+    except Exception:
+        logger.exception(
+            "orchestrator_agent_run_finalize_failed",
+            agent_run_id=str(agent_run_id),
+        )
+
+
 async def _create_running_agent_run(
     loan_id: uuid.UUID, agent_name: str, thread_id: str
 ) -> uuid.UUID | None:
@@ -278,6 +316,10 @@ async def _run_decision_agent(loan_id: uuid.UUID) -> None:
             await graph.ainvoke(state, config=config)
     except Exception:
         logger.exception("orchestrator_decision_agent_failed", loan_id=str(loan_id))
+        # Flip the row from 'running' → 'failed' so the observability
+        # page doesn't show a phantom in-flight run. Mirrors the SSE
+        # path's failure-finalization at agents/streaming.py:548.
+        await _finalize_failed_agent_run(agent_run_id)
 
 
 async def _run_underwriting_agent(loan_id: uuid.UUID) -> None:
@@ -308,6 +350,9 @@ async def _run_underwriting_agent(loan_id: uuid.UUID) -> None:
         logger.exception(
             "orchestrator_underwriting_agent_failed", loan_id=str(loan_id)
         )
+        # Same finalization the decision path does — leaving the row
+        # at 'running' confuses operators reading observability.
+        await _finalize_failed_agent_run(agent_run_id)
         return
     # Continue the chain: if the recommendation is
     # ``proceed_to_decision``, this advances to decision and runs the
