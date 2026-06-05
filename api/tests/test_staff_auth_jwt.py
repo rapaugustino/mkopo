@@ -134,13 +134,9 @@ class TestRequireUserResolver:
 
         from mkopo.routers.auth import require_user
 
-        creds = HTTPAuthorizationCredentials(
-            scheme="Bearer", credentials="not-a-real-jwt"
-        )
+        creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="not-a-real-jwt")
         with pytest.raises(HTTPException) as exc_info:
-            await require_user(
-                creds=creds, db=AsyncMock(), session_cookie=None
-            )
+            await require_user(creds=creds, db=AsyncMock(), session_cookie=None)
         assert exc_info.value.status_code == 401
 
     @pytest.mark.asyncio
@@ -151,9 +147,7 @@ class TestRequireUserResolver:
         from mkopo.routers.auth import require_user
 
         with pytest.raises(HTTPException) as exc_info:
-            await require_user(
-                creds=None, db=AsyncMock(), session_cookie=None
-            )
+            await require_user(creds=None, db=AsyncMock(), session_cookie=None)
         assert exc_info.value.status_code == 401
 
     @pytest.mark.asyncio

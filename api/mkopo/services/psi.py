@@ -264,10 +264,7 @@ async def _load_loans_in_window(
     """Pull every loan whose ``created_at`` falls in [start, end).
     Status / stage doesn't matter for input drift — we're scoring
     what arrived, not what got decisioned."""
-    stmt = (
-        select(Loan)
-        .where(Loan.created_at >= start, Loan.created_at < end)
-    )
+    stmt = select(Loan).where(Loan.created_at >= start, Loan.created_at < end)
     rows = (await session.execute(stmt)).scalars().all()
     return list(rows)
 
@@ -417,9 +414,6 @@ async def run_psi_monitor(session: AsyncSession) -> PSIResult:
     await session.flush()
     logger.info(
         "psi_monitor_ran",
-        features=[
-            {"feature": f.feature, "psi": f.psi, "flag": f.flag}
-            for f in result.features
-        ],
+        features=[{"feature": f.feature, "psi": f.psi, "flag": f.flag} for f in result.features],
     )
     return result

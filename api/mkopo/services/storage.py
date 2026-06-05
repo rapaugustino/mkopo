@@ -111,9 +111,7 @@ def _enforce_loan_match(
             actual_loan_id=str(actual_loan_id) if actual_loan_id else None,
             expected_loan_id=str(expected_loan_id),
         )
-        raise StorageAuthzError(
-            f"document URI does not belong to loan {expected_loan_id}"
-        )
+        raise StorageAuthzError(f"document URI does not belong to loan {expected_loan_id}")
 
 
 class LocalStorage:
@@ -324,9 +322,7 @@ async def mint_download_url(
     operational reads from review-side reads later.
     """
     storage = get_storage()
-    url = await storage.presigned_url(
-        storage_uri, expected_loan_id=loan_id, expires_in=expires_in
-    )
+    url = await storage.presigned_url(storage_uri, expected_loan_id=loan_id, expires_in=expires_in)
     await record(
         session,
         loan_id=loan_id,

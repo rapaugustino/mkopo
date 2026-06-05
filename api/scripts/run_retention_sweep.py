@@ -74,9 +74,7 @@ async def sweep(dry_run: bool) -> int:
         await session.commit()  # flush the pass-1 deletes so pass-2 sees the truth
 
         candidates = (
-            await session.execute(
-                select(User.id, User.email).where(User.deleted_at.is_not(None))
-            )
+            await session.execute(select(User.id, User.email).where(User.deleted_at.is_not(None)))
         ).all()
 
         purgeable: list[tuple] = []

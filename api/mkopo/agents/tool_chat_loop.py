@@ -117,11 +117,7 @@ async def run_chat_turn(
                 "error",
                 {
                     "reason": "message_blocked_injection",
-                    "detection_id": (
-                        str(scan.detection_id)
-                        if scan.detection_id
-                        else None
-                    ),
+                    "detection_id": (str(scan.detection_id) if scan.detection_id else None),
                     "message": (
                         "That message was blocked by the safety "
                         "filter. Try rephrasing without instruction-"
@@ -189,17 +185,14 @@ async def run_chat_turn(
                         },
                     )
                     return
-                ok = await consume_challenge(
-                    user_id=user_id, plain_token=str(challenge_token)
-                )
+                ok = await consume_challenge(user_id=user_id, plain_token=str(challenge_token))
                 if not ok:
                     yield _sse(
                         "error",
                         {
                             "reason": "reauth_invalid",
                             "detail": (
-                                "Password challenge was invalid or expired. "
-                                "Please confirm again."
+                                "Password challenge was invalid or expired. Please confirm again."
                             ),
                         },
                     )
@@ -268,9 +261,7 @@ async def run_chat_turn(
                 tools=anthropic_tools,
             )
         except Exception as e:  # noqa: BLE001
-            logger.exception(
-                "chat_llm_failed", user_role=user_role, loan_id=str(loan_id)
-            )
+            logger.exception("chat_llm_failed", user_role=user_role, loan_id=str(loan_id))
             yield _sse(
                 "error",
                 {

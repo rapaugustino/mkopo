@@ -72,16 +72,12 @@ def _latest_per_field(
     return out
 
 
-def _latest_accuracy_rows(
-    rows: list[TaskRun], source: str
-) -> dict[str, TaskRun]:
+def _latest_accuracy_rows(rows: list[TaskRun], source: str) -> dict[str, TaskRun]:
     """Same as ``_latest_per_field`` but filtered to accuracy-shaped
     tasks only. Used by the headline KPI + drift count where the math
     only makes sense across like-shaped metrics."""
     return {
-        name: r
-        for name, r in _latest_per_field(rows, source).items()
-        if _is_accuracy_metric(name)
+        name: r for name, r in _latest_per_field(rows, source).items() if _is_accuracy_metric(name)
     }
 
 
@@ -130,31 +126,11 @@ def compute_summary_aggregates(
       denominator as the three headline values).
     """
     paired = set(prod_by_task) & set(gold_by_task)
-    prod_acc = (
-        sum(prod_by_task[k] for k in paired) / len(paired)
-        if paired
-        else None
-    )
-    gold_acc = (
-        sum(gold_by_task[k] for k in paired) / len(paired)
-        if paired
-        else None
-    )
-    delta = (
-        prod_acc - gold_acc
-        if prod_acc is not None and gold_acc is not None
-        else None
-    )
-    suite_acc = (
-        sum(gold_by_task.values()) / len(gold_by_task)
-        if gold_by_task
-        else None
-    )
-    drifting = sum(
-        1
-        for k in paired
-        if prod_by_task[k] - gold_by_task[k] <= -drift_threshold
-    )
+    prod_acc = sum(prod_by_task[k] for k in paired) / len(paired) if paired else None
+    gold_acc = sum(gold_by_task[k] for k in paired) / len(paired) if paired else None
+    delta = prod_acc - gold_acc if prod_acc is not None and gold_acc is not None else None
+    suite_acc = sum(gold_by_task.values()) / len(gold_by_task) if gold_by_task else None
+    drifting = sum(1 for k in paired if prod_by_task[k] - gold_by_task[k] <= -drift_threshold)
     return _SummaryAggregates(
         prod_acc=prod_acc,
         gold_acc=gold_acc,

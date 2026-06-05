@@ -62,9 +62,7 @@ async def require_borrower(
     if await is_jti_revoked(claims.jti):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Session invalid")
 
-    user = (
-        await db.execute(select(User).where(User.id == claims.user_id))
-    ).scalar_one_or_none()
+    user = (await db.execute(select(User).where(User.id == claims.user_id))).scalar_one_or_none()
     if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Session invalid")
 
@@ -80,9 +78,7 @@ async def require_borrower(
         # A staff member's JWT (if we ever issue one for the same
         # cookie name) shouldn't auth a borrower endpoint. The two
         # surfaces will live behind separate dependencies regardless.
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN, "Borrower endpoint requires borrower role"
-        )
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Borrower endpoint requires borrower role")
 
     return user
 
@@ -116,9 +112,7 @@ async def optional_borrower(
         return None
     if await is_jti_revoked(claims.jti):
         return None
-    user = (
-        await db.execute(select(User).where(User.id == claims.user_id))
-    ).scalar_one_or_none()
+    user = (await db.execute(select(User).where(User.id == claims.user_id))).scalar_one_or_none()
     if user is None or user.deleted_at is not None or user.role != "borrower":
         return None
     return user

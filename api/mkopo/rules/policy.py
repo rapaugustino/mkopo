@@ -400,11 +400,7 @@ def rule_dti_under_cap(ctx: RuleContext) -> RuleOutcome:
     portal collects it.
     """
     cap = POLICY_MAX_DTI_PERSONAL
-    if (
-        ctx.annual_income is None
-        or ctx.annual_income == 0
-        or ctx.monthly_debt_payments is None
-    ):
+    if ctx.annual_income is None or ctx.annual_income == 0 or ctx.monthly_debt_payments is None:
         return RuleOutcome(
             rule_id="dti_under_cap",
             severity="warn",
@@ -572,9 +568,7 @@ RULE_PACKS: dict[str, list[Callable[[RuleContext], RuleOutcome]]] = {
 }
 
 
-def register_rule_pack(
-    name: str, rules: list[Callable[[RuleContext], RuleOutcome]]
-) -> None:
+def register_rule_pack(name: str, rules: list[Callable[[RuleContext], RuleOutcome]]) -> None:
     """Add a new rule pack to the registry.
 
     Tests + future loan classes should use this rather than mutating

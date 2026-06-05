@@ -68,14 +68,10 @@ def _to_out(row: Annotation) -> AnnotationOut:
         target_id=str(row.target_id),
         verdict=row.verdict,
         note=row.note,
-        created_by_user_id=(
-            str(row.created_by_user_id) if row.created_by_user_id else None
-        ),
+        created_by_user_id=(str(row.created_by_user_id) if row.created_by_user_id else None),
         created_at=row.created_at,
         spawned_review_task_id=(
-            str(row.spawned_review_task_id)
-            if row.spawned_review_task_id
-            else None
+            str(row.spawned_review_task_id) if row.spawned_review_task_id else None
         ),
     )
 
@@ -144,9 +140,7 @@ async def create_annotation(
             ),
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
-        ) from exc
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     await db.commit()
     return _to_out(row)
 

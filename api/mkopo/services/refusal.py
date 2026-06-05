@@ -138,12 +138,7 @@ def compute_z_score(
     in a test without confusion — the production thresholds are
     the module constants.
     """
-    if (
-        n_cur < min_current
-        or n_base < min_baseline
-        or base_rate == 0.0
-        or base_rate == 1.0
-    ):
+    if n_cur < min_current or n_base < min_baseline or base_rate == 0.0 or base_rate == 1.0:
         return None
     std_err = math.sqrt(base_rate * (1.0 - base_rate) / n_cur)
     if std_err <= 0:

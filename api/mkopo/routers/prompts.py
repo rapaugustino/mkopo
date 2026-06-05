@@ -122,9 +122,7 @@ def _row_to_version_out(row: Prompt) -> PromptVersionOut:
         change_note=row.change_note,
         is_active=row.is_active,
         created_at=row.created_at,
-        created_by_user_id=(
-            str(row.created_by_user_id) if row.created_by_user_id else None
-        ),
+        created_by_user_id=(str(row.created_by_user_id) if row.created_by_user_id else None),
     )
 
 
@@ -152,9 +150,7 @@ async def list_prompts(
 
     counts_rows = (
         await db.execute(
-            select(Prompt.identifier, func.count(Prompt.id)).group_by(
-                Prompt.identifier
-            )
+            select(Prompt.identifier, func.count(Prompt.id)).group_by(Prompt.identifier)
         )
     ).all()
     counts = {ident: int(n) for ident, n in counts_rows}
@@ -251,10 +247,7 @@ async def create_version(
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=(
-                "Couldn't save: a concurrent edit may have happened. "
-                "Reload and try again."
-            ),
+            detail=("Couldn't save: a concurrent edit may have happened. Reload and try again."),
         ) from exc
 
     return _row_to_version_out(row)
@@ -276,9 +269,7 @@ async def activate_version(
     active row is a noop and returns the row unchanged.
     """
     try:
-        row = await prompts_service.activate_version(
-            db, identifier=identifier, version=version
-        )
+        row = await prompts_service.activate_version(db, identifier=identifier, version=version)
         await db.commit()
     except ValueError as exc:
         raise HTTPException(

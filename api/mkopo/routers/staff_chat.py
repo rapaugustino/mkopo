@@ -76,9 +76,7 @@ def _get_staff_system_prompt() -> str:
 
 
 @router.post("/chat/stream")
-async def staff_chat_stream(
-    payload: StaffChatRequest, user: CurrentUserDep
-) -> StreamingResponse:
+async def staff_chat_stream(payload: StaffChatRequest, user: CurrentUserDep) -> StreamingResponse:
     """Run one staff chat turn; stream the result as SSE.
 
     Same protocol as ``/borrower-auth/me/chat/stream`` — clients

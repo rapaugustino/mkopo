@@ -111,9 +111,7 @@ async def get_institution(session: AsyncSession) -> InstitutionContext:
     )
 
 
-async def update_institution(
-    session: AsyncSession, **fields: str | None
-) -> InstitutionContext:
+async def update_institution(session: AsyncSession, **fields: str | None) -> InstitutionContext:
     """Patch the singleton row. Unknown keys are ignored (defensive
     against frontend drift); known keys land directly. Strings are
     trimmed; empty strings become ``None`` so the prompt logic's

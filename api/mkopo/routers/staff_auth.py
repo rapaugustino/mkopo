@@ -157,9 +157,7 @@ def _set_session_cookie(response: Response, token: str) -> None:
     )
 
 
-async def _resolve_staff_from_token(
-    db: AsyncSession, token: str
-) -> User | None:
+async def _resolve_staff_from_token(db: AsyncSession, token: str) -> User | None:
     """Decode + load the staff user for ``token``.
 
     Returns ``None`` on any failure — caller decides whether that's
@@ -170,9 +168,7 @@ async def _resolve_staff_from_token(
         return None
     if await is_jti_revoked(claims.jti):
         return None
-    user = (
-        await db.execute(select(User).where(User.id == claims.user_id))
-    ).scalar_one_or_none()
+    user = (await db.execute(select(User).where(User.id == claims.user_id))).scalar_one_or_none()
     if user is None or user.deleted_at is not None:
         return None
     if user.role not in _STAFF_ROLES:
@@ -205,9 +201,7 @@ async def login(
     # rate-limit budget either.
     if await is_account_locked(email=email):
         logger.info("staff_login_locked", email=email)
-        raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED, "Invalid email or password."
-        )
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password.")
 
     # Per-email rate limit. Combined with the lockout below, this
     # makes a brute-force attack take meaningfully longer than the
@@ -224,9 +218,7 @@ async def login(
             "Too many login attempts. Wait a few minutes and try again.",
         )
 
-    user = (
-        await db.execute(select(User).where(User.email == email))
-    ).scalar_one_or_none()
+    user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
 
     # Constant-time-shaped failure: we always run verify_password
     # even when the user doesn't exist so the timing doesn't leak
@@ -249,15 +241,9 @@ async def login(
             window_seconds=_LOGIN_LOCKOUT_SECONDS,
         )
         if attempts >= _LOGIN_LOCKOUT_THRESHOLD:
-            await lock_account(
-                email=email, ttl_seconds=_LOGIN_LOCKOUT_SECONDS
-            )
-        logger.info(
-            "staff_login_failed", email=email, ip=_client_ip(request)
-        )
-        raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED, "Invalid email or password."
-        )
+            await lock_account(email=email, ttl_seconds=_LOGIN_LOCKOUT_SECONDS)
+        logger.info("staff_login_failed", email=email, ip=_client_ip(request))
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password.")
 
     # Clear both the rate-limit + failure counters on success so a
     # user who fat-fingered a few passwords doesn't lose access.
@@ -289,9 +275,7 @@ async def login(
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(
     response: Response,
-    session_cookie: Annotated[
-        str | None, Cookie(alias=STAFF_SESSION_COOKIE)
-    ] = None,
+    session_cookie: Annotated[str | None, Cookie(alias=STAFF_SESSION_COOKIE)] = None,
 ) -> None:
     """Invalidate the current session.
 
@@ -308,9 +292,7 @@ async def logout(
     claims = decode_staff_jwt(session_cookie)
     if claims is None:
         return None
-    remaining = int(
-        (claims.expires_at - datetime.now(UTC)).total_seconds()
-    )
+    remaining = int((claims.expires_at - datetime.now(UTC)).total_seconds())
     if remaining > 0:
         await revoke_jti(claims.jti, ttl_seconds=remaining)
     return None
@@ -319,9 +301,7 @@ async def logout(
 @router.get("/me", response_model=StaffMe)
 async def me(
     db: Annotated[AsyncSession, Depends(get_db)],
-    session_cookie: Annotated[
-        str | None, Cookie(alias=STAFF_SESSION_COOKIE)
-    ] = None,
+    session_cookie: Annotated[str | None, Cookie(alias=STAFF_SESSION_COOKIE)] = None,
 ) -> StaffMe:
     """Return the currently-signed-in staff user.
 

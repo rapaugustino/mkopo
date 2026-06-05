@@ -77,17 +77,13 @@ class CalibrationResult:
     window_days: int
 
 
-async def _load_resolved_extractions(
-    session: AsyncSession, window_days: int
-) -> list[Extraction]:
+async def _load_resolved_extractions(session: AsyncSession, window_days: int) -> list[Extraction]:
     """Pull every resolved extraction within the window. Same
     boundary the drift_monitor uses so the two metrics derive from
     identical populations."""
     cutoff = datetime.now(UTC) - timedelta(days=window_days)
     stmt = select(Extraction).where(
-        Extraction.status.in_(
-            (ExtractionStatus.ACCEPTED, ExtractionStatus.OVERRIDDEN)
-        ),
+        Extraction.status.in_((ExtractionStatus.ACCEPTED, ExtractionStatus.OVERRIDDEN)),
         Extraction.created_at >= cutoff,
     )
     rows = (await session.execute(stmt)).scalars().all()
@@ -170,10 +166,7 @@ def compute_brier(confidences: list[float], correct: list[int]) -> float:
     have similar ECE but different sharpness."""
     if not confidences:
         return 0.0
-    return sum(
-        (c - y) ** 2
-        for c, y in zip(confidences, correct, strict=True)
-    ) / len(confidences)
+    return sum((c - y) ** 2 for c, y in zip(confidences, correct, strict=True)) / len(confidences)
 
 
 async def compute_calibration(
@@ -187,15 +180,9 @@ async def compute_calibration(
     renders that as "no data yet" rather than a misleading 0% ECE.
     """
     rows = await _load_resolved_extractions(session, window_days)
-    pairs = [
-        (ext.confidence, _binarise(ext))
-        for ext in rows
-        if ext.confidence is not None
-    ]
+    pairs = [(ext.confidence, _binarise(ext)) for ext in rows if ext.confidence is not None]
     if not pairs:
-        return CalibrationResult(
-            n=0, ece=0.0, brier=0.0, bins=[], window_days=window_days
-        )
+        return CalibrationResult(n=0, ece=0.0, brier=0.0, bins=[], window_days=window_days)
     confidences = [p[0] for p in pairs]
     correct = [p[1] for p in pairs]
     ece, bins = compute_ece(confidences, correct)

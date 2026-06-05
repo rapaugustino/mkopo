@@ -194,11 +194,7 @@ def test_no_unbounded_while_loops_in_agents():
     ]
     offenders: list[tuple[str, int]] = []
     for target in targets:
-        files = (
-            [target]
-            if target.is_file()
-            else sorted(target.rglob("*.py"))
-        )
+        files = [target] if target.is_file() else sorted(target.rglob("*.py"))
         for path in files:
             # Skip the lint/test files themselves.
             if "test_" in path.name:
@@ -211,10 +207,7 @@ def test_no_unbounded_while_loops_in_agents():
                 if isinstance(node, ast.While):
                     # Detect ``while True`` and ``while 1``. Both
                     # parse as a Constant node in the test position.
-                    if (
-                        isinstance(node.test, ast.Constant)
-                        and bool(node.test.value)
-                    ):
+                    if isinstance(node.test, ast.Constant) and bool(node.test.value):
                         offenders.append((str(path), node.lineno))
     assert not offenders, (
         f"Unbounded while loops found (each must be a bounded "

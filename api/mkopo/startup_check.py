@@ -54,8 +54,7 @@ def _check_anthropic(settings: Settings) -> CheckResult:
         name="Anthropic (LLM)",
         status="ok",
         message=(
-            f"using {settings.llm_default_model} (default) / "
-            f"{settings.llm_heavy_model} (heavy)"
+            f"using {settings.llm_default_model} (default) / {settings.llm_heavy_model} (heavy)"
         ),
     )
 

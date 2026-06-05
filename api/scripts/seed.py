@@ -283,9 +283,7 @@ async def seed(reset: bool = False) -> None:
         # Admin seed — only created if absent, never mutated. The role
         # check on /staff/auth/login admits both 'underwriter' and
         # 'admin', so having both makes role-gated demos easier.
-        admin_existing = await session.execute(
-            select(User).where(User.email == "admin@mkopo.dev")
-        )
+        admin_existing = await session.execute(select(User).where(User.email == "admin@mkopo.dev"))
         if admin_existing.scalar_one_or_none() is None:
             from mkopo.services.auth_service import hash_password
 

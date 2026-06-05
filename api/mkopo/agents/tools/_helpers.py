@@ -36,8 +36,7 @@ async def resolve_loan(
     require_owner_email_match: bool = True,
     not_found_msg: str = "Loan not found.",
     no_scope_msg: str = (
-        "No loan in scope. Either open the chat on a specific loan "
-        "or pass a loan_id explicitly."
+        "No loan in scope. Either open the chat on a specific loan or pass a loan_id explicitly."
     ),
     not_owned_msg: str = "That loan isn't on your account.",
 ) -> Loan:
@@ -67,9 +66,7 @@ async def resolve_loan(
         raise ToolError(no_scope_msg)
 
     loan = (
-        await ctx.session.execute(
-            select(Loan).where(Loan.id == target, Loan.deleted_at.is_(None))
-        )
+        await ctx.session.execute(select(Loan).where(Loan.id == target, Loan.deleted_at.is_(None)))
     ).scalar_one_or_none()
     if loan is None:
         raise ToolError(not_found_msg)

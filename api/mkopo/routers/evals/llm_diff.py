@@ -70,11 +70,7 @@ async def diff_llm_calls(
     one row per compared field plus a one-line summary; the
     frontend renders rows in a side-by-side table.
     """
-    rows = (
-        await db.execute(
-            select(LLMCall).where(LLMCall.id.in_([a, b]))
-        )
-    ).scalars().all()
+    rows = (await db.execute(select(LLMCall).where(LLMCall.id.in_([a, b])))).scalars().all()
     by_id = {r.id: r for r in rows}
     row_a = by_id.get(a)
     row_b = by_id.get(b)
@@ -116,8 +112,10 @@ async def diff_llm_calls(
     flag_status = (
         "match"
         if same_status
-        else "regression" if row_b.status != "ok" and row_a.status == "ok"
-        else "improvement" if row_a.status != "ok" and row_b.status == "ok"
+        else "regression"
+        if row_b.status != "ok" and row_a.status == "ok"
+        else "improvement"
+        if row_a.status != "ok" and row_b.status == "ok"
         else "different"
     )
     fields.append(
@@ -138,11 +136,7 @@ async def diff_llm_calls(
             a=f"{row_a.elapsed_seconds:.2f}s",
             b=f"{row_b.elapsed_seconds:.2f}s",
             delta=f"{dt_lat:+.2f}s",
-            flag=(
-                "match" if abs(dt_lat) < 0.05
-                else "regression" if dt_lat > 0
-                else "improvement"
-            ),
+            flag=("match" if abs(dt_lat) < 0.05 else "regression" if dt_lat > 0 else "improvement"),
         )
     )
 
@@ -176,11 +170,7 @@ async def diff_llm_calls(
                 a=f"${cost_a:.6f}",
                 b=f"${cost_b:.6f}",
                 delta=f"{'+' if dc >= 0 else ''}${dc:.6f}",
-                flag=(
-                    "match" if abs(dc) < 0.000005
-                    else "regression" if dc > 0
-                    else "improvement"
-                ),
+                flag=("match" if abs(dc) < 0.000005 else "regression" if dc > 0 else "improvement"),
             )
         )
 
@@ -195,25 +185,23 @@ async def diff_llm_calls(
             b=str(row_b.attempt),
             delta="matches" if same_att else f"{row_a.attempt} → {row_b.attempt}",
             flag=(
-                "match" if same_att
-                else "regression" if row_b.attempt > row_a.attempt
+                "match"
+                if same_att
+                else "regression"
+                if row_b.attempt > row_a.attempt
                 else "improvement"
             ),
         )
     )
 
     summary = _diff_summary(fields)
-    return LLMDiffResponse(
-        a_id=str(a), b_id=str(b), fields=fields, summary=summary
-    )
+    return LLMDiffResponse(a_id=str(a), b_id=str(b), fields=fields, summary=summary)
 
 
 # ----- helpers ------------------------------------------------------------
 
 
-def _token_field(
-    label: str, a_val: int | None, b_val: int | None
-) -> LLMDiffField:
+def _token_field(label: str, a_val: int | None, b_val: int | None) -> LLMDiffField:
     """Format a token-count delta row. Handles nulls (some legacy
     rows have ``None``) by rendering "—" without flagging."""
     if a_val is None or b_val is None:
@@ -230,11 +218,7 @@ def _token_field(
         a=str(a_val),
         b=str(b_val),
         delta=f"{d:+d}",
-        flag=(
-            "match" if d == 0
-            else "regression" if d > 0
-            else "improvement"
-        ),
+        flag=("match" if d == 0 else "regression" if d > 0 else "improvement"),
     )
 
 

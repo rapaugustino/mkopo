@@ -174,9 +174,7 @@ _PATTERN_CATALOG: tuple[InjectionPattern, ...] = (
     ),
     InjectionPattern(
         pattern_id="forget_instructions",
-        description=(
-            "Variant of instruction override — 'forget what you were told'."
-        ),
+        description=("Variant of instruction override — 'forget what you were told'."),
         regex=re.compile(
             r"\b(?:forget|disregard|discard)\s+(?:all\s+|every\s+)?(?:your\s+)?(?:previous|prior|above)?\s*(?:instructions?|rules?|prompts?|directives?)",
             re.IGNORECASE,
@@ -272,9 +270,7 @@ _PATTERN_CATALOG: tuple[InjectionPattern, ...] = (
     ),
     InjectionPattern(
         pattern_id="developer_mode",
-        description=(
-            "'Developer mode' / 'unrestricted mode' jailbreak pattern."
-        ),
+        description=("'Developer mode' / 'unrestricted mode' jailbreak pattern."),
         regex=re.compile(
             r"\b(?:developer|admin|root|god|unrestricted|jailbreak)\s+mode\b",
             re.IGNORECASE,
@@ -436,8 +432,7 @@ async def _haiku_second_pass(
     settings = get_settings()
     gateway = get_gateway()
     pattern_summary = "\n".join(
-        f"- {m['pattern_id']}: matched {m['matched_text']!r}"
-        for m in matches
+        f"- {m['pattern_id']}: matched {m['matched_text']!r}" for m in matches
     )
     user = (
         f"Pattern hits triggering this escalation:\n{pattern_summary}\n\n"
@@ -540,12 +535,8 @@ async def detect_injection(
             decision=decision.value,
             matched_patterns=matches,
             llm_judge_called=judgment is not None,
-            llm_judge_severity=(
-                judgment.severity if judgment is not None else None
-            ),
-            llm_judge_critique=(
-                judgment.reason if judgment is not None else None
-            ),
+            llm_judge_severity=(judgment.severity if judgment is not None else None),
+            llm_judge_critique=(judgment.reason if judgment is not None else None),
             raw_text_excerpt=_excerpt(text),
             actor_kind=actor_kind,
             actor_id=actor_id,
@@ -570,10 +561,6 @@ async def detect_injection(
         decision=decision,
         matched_patterns=matches,
         llm_judge_called=judgment is not None,
-        llm_judge_severity=(
-            InjectionSeverity(judgment.severity)
-            if judgment is not None
-            else None
-        ),
+        llm_judge_severity=(InjectionSeverity(judgment.severity) if judgment is not None else None),
         llm_judge_critique=judgment.reason if judgment is not None else None,
     )

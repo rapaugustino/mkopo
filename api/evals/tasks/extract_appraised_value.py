@@ -55,9 +55,7 @@ class ExtractAppraisedValueTask:
             "source_quote": result.source_quote,
         }
 
-    def score(
-        self, prediction: dict[str, Any], expected: dict[str, Any]
-    ) -> TaskScore:
+    def score(self, prediction: dict[str, Any], expected: dict[str, Any]) -> TaskScore:
         pred = float(prediction["appraised_value"])
         gold = float(expected["appraised_value"])
         if gold == 0:

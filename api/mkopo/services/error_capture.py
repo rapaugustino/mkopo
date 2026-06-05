@@ -43,9 +43,7 @@ logger = structlog.get_logger()
 _MAX_TRACEBACK_CHARS = 8000
 
 
-async def persist_uncaught_exception(
-    request: Request, exc: Exception
-) -> JSONResponse:
+async def persist_uncaught_exception(request: Request, exc: Exception) -> JSONResponse:
     """FastAPI exception handler. Records the error, returns a 500.
 
     Wired into the app in ``main.py``. Anything not handled by an
@@ -55,14 +53,9 @@ async def persist_uncaught_exception(
     error_class = type(exc).__name__
     error_message = str(exc) or "(no message)"
 
-    tb_text = "".join(
-        traceback.format_exception(type(exc), exc, exc.__traceback__)
-    )
+    tb_text = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
     if len(tb_text) > _MAX_TRACEBACK_CHARS:
-        tb_text = (
-            tb_text[:_MAX_TRACEBACK_CHARS]
-            + f"\n... (truncated, full {len(tb_text)} chars)"
-        )
+        tb_text = tb_text[:_MAX_TRACEBACK_CHARS] + f"\n... (truncated, full {len(tb_text)} chars)"
 
     # Try to pull user id off request state. The auth dependency
     # writes it on success; for requests that died before auth ran

@@ -187,9 +187,7 @@ async def safety_summary(
     recent_limit = max(5, min(recent_limit, 200))
     cutoff = datetime.now(UTC) - timedelta(hours=hours)
 
-    stmt = select(InjectionDetection).where(
-        InjectionDetection.created_at >= cutoff
-    )
+    stmt = select(InjectionDetection).where(InjectionDetection.created_at >= cutoff)
     rows = (await db.execute(stmt)).scalars().all()
 
     by_decision = _summarize(rows)
@@ -210,9 +208,7 @@ async def safety_summary(
                 continue
             pattern_counter[pid] += 1
             pattern_descriptions.setdefault(pid, m.get("description", ""))
-            pattern_severities.setdefault(
-                pid, m.get("severity_floor", "low")
-            )
+            pattern_severities.setdefault(pid, m.get("severity_floor", "low"))
 
     pattern_top = [
         PatternHitCount(
@@ -265,9 +261,7 @@ async def list_detections(
     limit = max(10, min(limit, 500))
     cutoff = datetime.now(UTC) - timedelta(hours=hours)
 
-    stmt = select(InjectionDetection).where(
-        InjectionDetection.created_at >= cutoff
-    )
+    stmt = select(InjectionDetection).where(InjectionDetection.created_at >= cutoff)
     if severity:
         stmt = stmt.where(InjectionDetection.severity == severity)
     if decision:
@@ -292,16 +286,10 @@ async def detection_detail(
     """Drawer payload — full matched-patterns list + Haiku critique +
     raw excerpt."""
     row = (
-        await db.execute(
-            select(InjectionDetection).where(
-                InjectionDetection.id == detection_id
-            )
-        )
+        await db.execute(select(InjectionDetection).where(InjectionDetection.id == detection_id))
     ).scalar_one_or_none()
     if row is None:
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND, "detection not found"
-        )
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "detection not found")
 
     base = _to_row(row)
     return InjectionDetectionDetail(
@@ -387,9 +375,7 @@ async def judgment_summary(
                 started_at=run.created_at,
                 severity=severity,
                 attempts=attempts,
-                failed_principles=judgment.get(
-                    "failed_principles", []
-                ),
+                failed_principles=judgment.get("failed_principles", []),
                 failed_red_lines=judgment.get("failed_red_lines", []),
                 critique=judgment.get("critique"),
                 constitution_hint=_constitution_hint_for(run.agent_name),

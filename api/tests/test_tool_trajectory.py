@@ -61,9 +61,7 @@ def test_borrower_catalog_is_non_empty_and_well_formed():
             "selects tools by description; an empty one is dead"
         )
         assert tool.schema, f"Tool {tool.name!r} missing .schema"
-        assert callable(tool.handler), (
-            f"Tool {tool.name!r} handler is not callable"
-        )
+        assert callable(tool.handler), f"Tool {tool.name!r} handler is not callable"
         assert tool.roles, f"Tool {tool.name!r} has no roles"
         assert "borrower" in tool.roles, (
             f"Tool {tool.name!r} returned for borrower but does "
@@ -90,9 +88,7 @@ def test_staff_catalog_is_non_empty_and_well_formed():
         assert tool.name, "Tool missing .name"
         assert tool.description, f"Tool {tool.name!r} missing .description"
         assert tool.schema, f"Tool {tool.name!r} missing .schema"
-        assert callable(tool.handler), (
-            f"Tool {tool.name!r} handler is not callable"
-        )
+        assert callable(tool.handler), f"Tool {tool.name!r} handler is not callable"
 
 
 # ----- security-boundary invariants ----------------------------------------
@@ -187,22 +183,15 @@ def test_tool_names_are_snake_case_and_short():
     import re
 
     snake_case = re.compile(r"^[a-z][a-z0-9_]*$")
-    all_tools = (
-        tools_for_role("borrower")
-        + tools_for_role("underwriter")
-        + tools_for_role("admin")
-    )
+    all_tools = tools_for_role("borrower") + tools_for_role("underwriter") + tools_for_role("admin")
     seen: set[str] = set()
     for tool in all_tools:
         if tool.name in seen:
             continue
         seen.add(tool.name)
-        assert snake_case.match(tool.name), (
-            f"Tool name {tool.name!r} is not snake_case"
-        )
+        assert snake_case.match(tool.name), f"Tool name {tool.name!r} is not snake_case"
         assert len(tool.name) <= 64, (
-            f"Tool name {tool.name!r} exceeds 64 chars — won't fit "
-            "the tool_uses.tool_name column"
+            f"Tool name {tool.name!r} exceeds 64 chars — won't fit the tool_uses.tool_name column"
         )
 
 
@@ -275,6 +264,4 @@ def test_tool_use_carries_status_input_and_output():
     columns = {c.name for c in ToolUse.__table__.columns}
     required = {"tool_name", "input", "output", "status", "elapsed_ms"}
     missing = required - columns
-    assert not missing, (
-        f"tool_uses is missing trajectory-essential columns: {missing}"
-    )
+    assert not missing, f"tool_uses is missing trajectory-essential columns: {missing}"

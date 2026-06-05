@@ -170,9 +170,7 @@ class UWGroundednessTask:
             "claims": [c.model_dump() for c in result.claims],
         }
 
-    def score(
-        self, prediction: dict[str, Any], expected: dict[str, Any]
-    ) -> TaskScore:
+    def score(self, prediction: dict[str, Any], expected: dict[str, Any]) -> TaskScore:
         """Per-example score.
 
         The eval measures *judge accuracy* — does the judge land each
@@ -256,28 +254,20 @@ class UWGroundednessTask:
         n = len(scores)
         passed = sum(1 for s in scores if s.passed)
         total_claims = sum(int(s.details.get("total_claims") or 0) for s in scores)
-        supported_claims = sum(
-            int(s.details.get("supported_claims") or 0) for s in scores
-        )
+        supported_claims = sum(int(s.details.get("supported_claims") or 0) for s in scores)
 
         # Split corpus stats by expected band so the dashboard can
         # show clean-fixture grounding (the "headline" number) without
         # the planted-hallucination examples dragging the mean down.
-        clean_scores = [
-            s for s in scores
-            if (s.details.get("expected_band") or "high") == "high"
-        ]
+        clean_scores = [s for s in scores if (s.details.get("expected_band") or "high") == "high"]
         hallucinated_scores = [
-            s for s in scores
-            if (s.details.get("expected_band") or "high") == "low"
+            s for s in scores if (s.details.get("expected_band") or "high") == "low"
         ]
-        avg_clean = (
-            sum(s.score for s in clean_scores) / len(clean_scores)
-            if clean_scores else 0.0
-        )
+        avg_clean = sum(s.score for s in clean_scores) / len(clean_scores) if clean_scores else 0.0
         avg_hallucinated = (
             sum(s.score for s in hallucinated_scores) / len(hallucinated_scores)
-            if hallucinated_scores else 0.0
+            if hallucinated_scores
+            else 0.0
         )
 
         per_example = [

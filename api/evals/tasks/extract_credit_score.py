@@ -58,9 +58,7 @@ class ExtractCreditScoreTask:
             "source_quote": result.source_quote,
         }
 
-    def score(
-        self, prediction: dict[str, Any], expected: dict[str, Any]
-    ) -> TaskScore:
+    def score(self, prediction: dict[str, Any], expected: dict[str, Any]) -> TaskScore:
         pred = int(prediction["credit_score"])
         gold = int(expected["credit_score"])
         passed = pred == gold

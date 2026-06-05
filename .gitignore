@@ -48,3 +48,6 @@ api/var/
 
 # Owner-private notes (interview prep, blog drafts, etc.)
 .private/
+
+# Claude Code local config (launch.json, session state, etc.)
+.claude/

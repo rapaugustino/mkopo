@@ -73,8 +73,7 @@ class _DraftedAAL(BaseModel):
     body_text: str = Field(max_length=2400)
     principal_reasons: list[str] = Field(
         description=(
-            "Machine-readable list of the rule_id tokens that were "
-            "the principal basis for decline."
+            "Machine-readable list of the rule_id tokens that were the principal basis for decline."
         )
     )
 
@@ -116,34 +115,24 @@ class AALFidelityTask:
             "principal_reasons": result.principal_reasons,
         }
 
-    def score(
-        self, prediction: dict[str, Any], expected: dict[str, Any]
-    ) -> TaskScore:
+    def score(self, prediction: dict[str, Any], expected: dict[str, Any]) -> TaskScore:
         body = (prediction.get("body_text") or "").lower()
-        principal_reasons = [
-            (r or "").lower() for r in prediction.get("principal_reasons") or []
-        ]
+        principal_reasons = [(r or "").lower() for r in prediction.get("principal_reasons") or []]
 
-        expected_rule_ids = [
-            (r or "").lower() for r in expected.get("blocking_rule_ids", [])
-        ]
+        expected_rule_ids = [(r or "").lower() for r in expected.get("blocking_rule_ids", [])]
         expected_labels = [
-            (lbl or "").lower()
-            for lbl in expected.get("friendly_labels_in_body", [])
+            (lbl or "").lower() for lbl in expected.get("friendly_labels_in_body", [])
         ]
 
         # Criterion 1: every expected blocking rule_id appears in
         # principal_reasons (machine-readable list).
         principal_reasons_complete = all(
-            any(rid in pr for pr in principal_reasons)
-            for rid in expected_rule_ids
+            any(rid in pr for pr in principal_reasons) for rid in expected_rule_ids
         )
 
         # Criterion 2: every expected friendly label appears in the
         # body prose.
-        friendly_label_in_body = all(
-            label in body for label in expected_labels
-        )
+        friendly_label_in_body = all(label in body for label in expected_labels)
 
         # Criterion 3: NONE of the raw rule_id tokens appears as a
         # word in the body. We bracket-match on word boundaries so
@@ -151,14 +140,11 @@ class AALFidelityTask:
         # "ltv" in prose are NOT flagged unless they're identical to
         # the rule_id form.
         no_rule_id_in_body = not any(
-            re.search(rf"\b{re.escape(rid)}\b", body)
-            for rid in expected_rule_ids
+            re.search(rf"\b{re.escape(rid)}\b", body) for rid in expected_rule_ids
         )
 
         # Criterion 4: ECOA "right to know" disclosure appears.
-        right_to_know_disclosure = any(
-            marker in body for marker in _RIGHT_TO_KNOW_MARKERS
-        )
+        right_to_know_disclosure = any(marker in body for marker in _RIGHT_TO_KNOW_MARKERS)
 
         passed = (
             principal_reasons_complete

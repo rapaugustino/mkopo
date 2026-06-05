@@ -72,8 +72,7 @@ async def create(
         )
     if verdict not in {v.value for v in AnnotationVerdict}:
         raise ValueError(
-            f"verdict must be one of "
-            f"{sorted(v.value for v in AnnotationVerdict)}, got {verdict!r}."
+            f"verdict must be one of {sorted(v.value for v in AnnotationVerdict)}, got {verdict!r}."
         )
 
     row = Annotation(
@@ -115,21 +114,23 @@ async def list_for_target(
     annotations).
     """
     rows = (
-        await session.execute(
-            select(Annotation)
-            .where(
-                Annotation.target_kind == target_kind,
-                Annotation.target_id == target_id,
+        (
+            await session.execute(
+                select(Annotation)
+                .where(
+                    Annotation.target_kind == target_kind,
+                    Annotation.target_id == target_id,
+                )
+                .order_by(desc(Annotation.created_at))
             )
-            .order_by(desc(Annotation.created_at))
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return list(rows)
 
 
-async def delete(
-    session: AsyncSession, *, annotation_id: uuid.UUID
-) -> bool:
+async def delete(session: AsyncSession, *, annotation_id: uuid.UUID) -> bool:
     """Hard-delete one annotation. Returns True if a row was removed.
 
     Doesn't try to roll back the spawned review_task — those have
@@ -138,9 +139,7 @@ async def delete(
     the "verdict tally" rolls back; the review queue stays intact.
     """
     row = (
-        await session.execute(
-            select(Annotation).where(Annotation.id == annotation_id)
-        )
+        await session.execute(select(Annotation).where(Annotation.id == annotation_id))
     ).scalar_one_or_none()
     if row is None:
         return False
@@ -164,32 +163,24 @@ async def _loan_id_for_target(
     """
     if target_kind == AnnotationTargetKind.AGENT_RUN.value:
         run = (
-            await session.execute(
-                select(AgentRun).where(AgentRun.id == target_id)
-            )
+            await session.execute(select(AgentRun).where(AgentRun.id == target_id))
         ).scalar_one_or_none()
         return run.loan_id if run else None
 
     if target_kind == AnnotationTargetKind.AGENT_STEP.value:
         step = (
-            await session.execute(
-                select(AgentStep).where(AgentStep.id == target_id)
-            )
+            await session.execute(select(AgentStep).where(AgentStep.id == target_id))
         ).scalar_one_or_none()
         if step is None:
             return None
         run = (
-            await session.execute(
-                select(AgentRun).where(AgentRun.id == step.agent_run_id)
-            )
+            await session.execute(select(AgentRun).where(AgentRun.id == step.agent_run_id))
         ).scalar_one_or_none()
         return run.loan_id if run else None
 
     if target_kind == AnnotationTargetKind.LLM_CALL.value:
         call = (
-            await session.execute(
-                select(LLMCall).where(LLMCall.id == target_id)
-            )
+            await session.execute(select(LLMCall).where(LLMCall.id == target_id))
         ).scalar_one_or_none()
         if call is None or call.thread_id is None:
             return None
@@ -197,9 +188,7 @@ async def _loan_id_for_target(
         # the streaming layer when the call happens inside an agent
         # run — see ContextVar plumbing in mkopo.agents.context).
         run = (
-            await session.execute(
-                select(AgentRun).where(AgentRun.thread_id == call.thread_id)
-            )
+            await session.execute(select(AgentRun).where(AgentRun.thread_id == call.thread_id))
         ).scalar_one_or_none()
         return run.loan_id if run else None
 
@@ -247,9 +236,7 @@ async def _pick_extraction_to_route(
         from mkopo.models import Document
 
         doc = (
-            await session.execute(
-                select(Document).where(Document.id == queued.document_id)
-            )
+            await session.execute(select(Document).where(Document.id == queued.document_id))
         ).scalar_one_or_none()
         if doc is not None and doc.loan_id == loan_id:
             return queued
@@ -270,9 +257,7 @@ async def _spawn_review_task_for(
     Failure here is non-fatal — see module docstring. The annotation
     still persists; the spawn is best-effort.
     """
-    loan_id = await _loan_id_for_target(
-        session, target_kind=target_kind, target_id=target_id
-    )
+    loan_id = await _loan_id_for_target(session, target_kind=target_kind, target_id=target_id)
     if loan_id is None:
         return None
 
@@ -280,9 +265,7 @@ async def _spawn_review_task_for(
     if target is None:
         return None
 
-    reason_parts = [
-        f"Annotated as {verdict} on a {target_kind.replace('_', ' ')}."
-    ]
+    reason_parts = [f"Annotated as {verdict} on a {target_kind.replace('_', ' ')}."]
     if note:
         reason_parts.append(note.strip()[:200])
     review_task = ReviewTask(

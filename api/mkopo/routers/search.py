@@ -131,20 +131,20 @@ async def search(
     # /parties/[id] handles both. ``party_type`` distinguishes them
     # on the chip-row.
     party_rows = (
-        await db.execute(
-            select(Party)
-            .where(Party.name.ilike(pattern))
-            .order_by(Party.name.asc())
-            .limit(_PER_KIND_LIMIT)
+        (
+            await db.execute(
+                select(Party)
+                .where(Party.name.ilike(pattern))
+                .order_by(Party.name.asc())
+                .limit(_PER_KIND_LIMIT)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     parties: list[SearchHit] = []
     for party in party_rows:
-        ptype = (
-            party.party_type
-            if isinstance(party.party_type, str)
-            else party.party_type.value
-        )
+        ptype = party.party_type if isinstance(party.party_type, str) else party.party_type.value
         parties.append(
             SearchHit(
                 kind="party",

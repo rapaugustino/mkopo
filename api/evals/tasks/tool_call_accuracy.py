@@ -132,9 +132,7 @@ SYSTEM = (
 
 
 class _PlannedToolCall(BaseModel):
-    tool_name: str = Field(
-        description="Name of the tool to call. Must match the catalog exactly."
-    )
+    tool_name: str = Field(description="Name of the tool to call. Must match the catalog exactly.")
     args: dict[str, Any] = Field(
         default_factory=dict,
         description="Arguments for the call. Use ``{{loan_id}}`` for the loan id placeholder.",
@@ -160,9 +158,7 @@ def _format_catalog() -> str:
     lines = []
     for t in _TOOL_CATALOG:
         args = ", ".join(t["args"])
-        lines.append(
-            f"- {t['name']}({args}): {t['description']}"
-        )
+        lines.append(f"- {t['name']}({args}): {t['description']}")
     return "\n".join(lines)
 
 
@@ -178,7 +174,7 @@ class ToolCallAccuracyTask:
         user_msg = example.inputs["user_message"]
         user = (
             f"Available tools:\n{_format_catalog()}\n\n"
-            f"Borrower message:\n\"\"\"\n{user_msg}\n\"\"\"\n\n"
+            f'Borrower message:\n"""\n{user_msg}\n"""\n\n'
             "Return the tool calls you would make. Single turn, no "
             "follow-up. Empty list if no tool is appropriate."
         )
@@ -189,40 +185,26 @@ class ToolCallAccuracyTask:
             schema=_PlannedResponse,
         )
         return {
-            "tool_calls": [
-                {"tool_name": c.tool_name, "args": c.args}
-                for c in result.tool_calls
-            ],
+            "tool_calls": [{"tool_name": c.tool_name, "args": c.args} for c in result.tool_calls],
         }
 
-    def score(
-        self, prediction: dict[str, Any], expected: dict[str, Any]
-    ) -> TaskScore:
-        predicted_calls: list[dict[str, Any]] = prediction.get(
-            "tool_calls", []
-        )
+    def score(self, prediction: dict[str, Any], expected: dict[str, Any]) -> TaskScore:
+        predicted_calls: list[dict[str, Any]] = prediction.get("tool_calls", [])
         predicted_names = [c.get("tool_name") for c in predicted_calls]
 
-        expected_tools: list[dict[str, Any]] = expected.get(
-            "expected_tools", []
-        )
+        expected_tools: list[dict[str, Any]] = expected.get("expected_tools", [])
         forbidden_tools: list[str] = expected.get("forbidden_tools", [])
 
         # Criterion 1: trajectory inclusion — every expected tool
         # name appears at least once in predicted.
-        missing = [
-            t["name"] for t in expected_tools
-            if t["name"] not in predicted_names
-        ]
+        missing = [t["name"] for t in expected_tools if t["name"] not in predicted_names]
         trajectory_inclusion = len(missing) == 0
 
         # Criterion 1b (negative): the model didn't call any
         # forbidden tool. Forbidden lists catch the mutating-tool
         # mis-selection class (e.g. a "what's my status" question
         # that produced ``withdraw_application``).
-        wrong = [
-            t for t in predicted_names if t in forbidden_tools
-        ]
+        wrong = [t for t in predicted_names if t in forbidden_tools]
         no_forbidden = len(wrong) == 0
 
         # Criterion 2: argument correctness — for each expected
@@ -295,9 +277,7 @@ class ToolCallAccuracyTask:
         for s, ex in zip(scores, examples, strict=True):
             for exp in ex.expected.get("expected_tools", []):
                 name = exp["name"]
-                bucket = per_tool.setdefault(
-                    name, {"n": 0, "selected": 0}
-                )
+                bucket = per_tool.setdefault(name, {"n": 0, "selected": 0})
                 bucket["n"] += 1
                 if name in (s.details.get("predicted_tools") or []):
                     bucket["selected"] += 1

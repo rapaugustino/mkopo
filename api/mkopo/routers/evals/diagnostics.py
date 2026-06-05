@@ -169,9 +169,7 @@ async def _extractions_total(db: AsyncSession) -> int:
     of data but no recent activity".
     """
     stmt = select(func.count(Extraction.id)).where(
-        Extraction.status.in_(
-            (ExtractionStatus.ACCEPTED, ExtractionStatus.OVERRIDDEN)
-        )
+        Extraction.status.in_((ExtractionStatus.ACCEPTED, ExtractionStatus.OVERRIDDEN))
     )
     return int((await db.execute(stmt)).scalar() or 0)
 
@@ -200,8 +198,7 @@ async def _confidence_buckets(db: AsyncSession) -> list[ConfidenceBucket]:
             func.sum(
                 case(
                     (
-                        when
-                        & (Extraction.status == ExtractionStatus.ACCEPTED),
+                        when & (Extraction.status == ExtractionStatus.ACCEPTED),
                         1,
                     ),
                     else_=0,
@@ -212,8 +209,7 @@ async def _confidence_buckets(db: AsyncSession) -> list[ConfidenceBucket]:
             func.sum(
                 case(
                     (
-                        when
-                        & (Extraction.status == ExtractionStatus.OVERRIDDEN),
+                        when & (Extraction.status == ExtractionStatus.OVERRIDDEN),
                         1,
                     ),
                     else_=0,
@@ -222,9 +218,7 @@ async def _confidence_buckets(db: AsyncSession) -> list[ConfidenceBucket]:
         )
 
     stmt = select(*cols).where(
-        Extraction.status.in_(
-            (ExtractionStatus.ACCEPTED, ExtractionStatus.OVERRIDDEN)
-        )
+        Extraction.status.in_((ExtractionStatus.ACCEPTED, ExtractionStatus.OVERRIDDEN))
     )
     row = (await db.execute(stmt)).one()
 
@@ -254,9 +248,7 @@ async def _review_queue_stats(db: AsyncSession) -> ReviewQueueStats:
     cutoff = datetime.now(UTC) - timedelta(days=7)
     open_count = int(
         (
-            await db.execute(
-                select(func.count(ReviewTask.id)).where(ReviewTask.status == "open")
-            )
+            await db.execute(select(func.count(ReviewTask.id)).where(ReviewTask.status == "open"))
         ).scalar()
         or 0
     )
@@ -275,14 +267,9 @@ async def _review_queue_stats(db: AsyncSession) -> ReviewQueueStats:
     # Median open-age: pull created_at for open rows, compute in
     # Python. The queue is small enough (≤ thousands at most) that
     # this beats writing a percentile_cont() expression.
-    ages_q = await db.execute(
-        select(ReviewTask.created_at).where(ReviewTask.status == "open")
-    )
+    ages_q = await db.execute(select(ReviewTask.created_at).where(ReviewTask.status == "open"))
     now = datetime.now(UTC)
-    ages_hours = sorted(
-        (now - ts).total_seconds() / 3600.0
-        for ts in ages_q.scalars().all()
-    )
+    ages_hours = sorted((now - ts).total_seconds() / 3600.0 for ts in ages_q.scalars().all())
     median: float | None
     if not ages_hours:
         median = None
@@ -353,9 +340,7 @@ async def _agent_reliability(db: AsyncSession) -> list[AgentReliabilityRow]:
     ]
 
 
-async def _recent_failures(
-    db: AsyncSession, limit: int = 8
-) -> list[FailureRow]:
+async def _recent_failures(db: AsyncSession, limit: int = 8) -> list[FailureRow]:
     """Most recent failures across LLM calls and agent steps, merged.
 
     Order is plain ``created_at`` desc across both sources. Frontend

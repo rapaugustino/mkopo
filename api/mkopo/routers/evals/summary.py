@@ -153,9 +153,7 @@ async def get_eval_summary(
     the dashboard's job is to surface per-field drift, not to optimise
     portfolio-wide volume.
     """
-    rows = (
-        await db.execute(select(TaskRun).order_by(desc(TaskRun.created_at)))
-    ).scalars().all()
+    rows = (await db.execute(select(TaskRun).order_by(desc(TaskRun.created_at)))).scalars().all()
 
     # Accuracy headline uses ONLY accuracy-shaped tasks — see
     # ``_is_accuracy_metric``. Derived monitors (fairness AIR,
@@ -221,9 +219,7 @@ async def get_eval_fields(
     surface at the top of the table. Fields without both sides sort to
     the bottom — they can't drift if there's no baseline.
     """
-    rows = (
-        await db.execute(select(TaskRun).order_by(desc(TaskRun.created_at)))
-    ).scalars().all()
+    rows = (await db.execute(select(TaskRun).order_by(desc(TaskRun.created_at)))).scalars().all()
     # Same accuracy-only filter as ``/summary`` — the per-field table
     # is for accuracy drift, not for surfacing the derived monitors
     # (those have dedicated cards under /eval).
@@ -269,11 +265,7 @@ async def get_eval_trend(
     days = max(1, min(days, 365))
     cutoff = datetime.now(UTC) - timedelta(days=days)
 
-    stmt = (
-        select(TaskRun)
-        .where(TaskRun.created_at >= cutoff)
-        .order_by(TaskRun.created_at.asc())
-    )
+    stmt = select(TaskRun).where(TaskRun.created_at >= cutoff).order_by(TaskRun.created_at.asc())
     rows = (await db.execute(stmt)).scalars().all()
     # Same accuracy-only filter as ``/summary`` — the chart's y-axis
     # is a 0–1 accuracy scale, so plotting fairness AIR (also 0–1

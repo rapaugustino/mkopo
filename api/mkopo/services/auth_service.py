@@ -59,9 +59,7 @@ logger = structlog.get_logger()
 # consume semantics as ``login`` (sets a session cookie) but a
 # longer default TTL because borrowers may not check email for a
 # day or two.
-MagicLinkPurpose = Literal[
-    "login", "set_password", "password_reset", "email_verify", "loan_invite"
-]
+MagicLinkPurpose = Literal["login", "set_password", "password_reset", "email_verify", "loan_invite"]
 
 
 # ---- password hashing --------------------------------------------------
@@ -83,9 +81,9 @@ def hash_password(plaintext: str) -> str:
     """
     if not plaintext:
         raise ValueError("password must be non-empty")
-    return bcrypt.hashpw(
-        plaintext.encode("utf-8"), bcrypt.gensalt(rounds=_BCRYPT_COST)
-    ).decode("ascii")
+    return bcrypt.hashpw(plaintext.encode("utf-8"), bcrypt.gensalt(rounds=_BCRYPT_COST)).decode(
+        "ascii"
+    )
 
 
 def verify_password(plaintext: str, hashed: str | None) -> bool:
@@ -154,11 +152,7 @@ async def mint_magic_link(
     # link without escaping.
     plain_token = secrets.token_urlsafe(32)
     token_hash = _hash_token(plain_token)
-    ttl = (
-        expires_in_seconds
-        if expires_in_seconds is not None
-        else settings.magic_link_ttl_seconds
-    )
+    ttl = expires_in_seconds if expires_in_seconds is not None else settings.magic_link_ttl_seconds
     expires_at = datetime.now(UTC) + timedelta(seconds=ttl)
     row = MagicLink(
         user_id=user.id,
@@ -201,9 +195,7 @@ async def consume_magic_link(
     """
     token_hash = _hash_token(plain_token)
     row = (
-        await session.execute(
-            select(MagicLink).where(MagicLink.token_hash == token_hash)
-        )
+        await session.execute(select(MagicLink).where(MagicLink.token_hash == token_hash))
     ).scalar_one_or_none()
 
     if row is None:
@@ -230,9 +222,7 @@ async def consume_magic_link(
 
     row.consumed_at = datetime.now(UTC)
     await session.flush()
-    user = (
-        await session.execute(select(User).where(User.id == row.user_id))
-    ).scalar_one_or_none()
+    user = (await session.execute(select(User).where(User.id == row.user_id))).scalar_one_or_none()
     if user is None:
         # Foreign key would normally prevent this, but the user could
         # have been deleted between mint and consume. Treat as invalid.

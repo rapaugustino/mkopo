@@ -123,9 +123,7 @@ class IntakeState(TypedDict, total=False):
     # the pre-flight gate trips (no docs uploaded). Kept distinct
     # from ``failed`` so the UI can show "upload docs to continue"
     # rather than a generic error.
-    status: Literal[
-        "running", "awaiting_approval", "complete", "failed", "needs_documents"
-    ]
+    status: Literal["running", "awaiting_approval", "complete", "failed", "needs_documents"]
     # Self-Refine loop bookkeeping (see :mod:`agents.guardrails`).
     # ``validation_attempts`` is incremented inside ``draft_doc_request``
     # so the router can bound retries. ``last_critique`` is the prior
@@ -179,9 +177,7 @@ async def extract_all_documents(state: IntakeState) -> IntakeState:
             # existed.
             loan_class_str = "business"
         else:
-            loan_class_str = (
-                "personal" if loan.loan_class.value == "personal" else "business"
-            )
+            loan_class_str = "personal" if loan.loan_class.value == "personal" else "business"
         required_fields = required_fields_for(loan_class_str)
 
         docs_stmt = select(Document).where(Document.loan_id == loan_id)
@@ -292,9 +288,7 @@ async def identify_missing(state: IntakeState) -> IntakeState:
     extracted = state.get("extracted_fields", {})
     required = required_fields_for(state.get("loan_class"))
     # Treat low-confidence and missing the same way for messaging — both need follow-up
-    missing = [
-        f for f in required if f not in extracted or extracted[f].confidence < 0.7
-    ]
+    missing = [f for f in required if f not in extracted or extracted[f].confidence < 0.7]
     return {**state, "missing_fields": missing}
 
 
@@ -378,15 +372,11 @@ async def draft_doc_request(state: IntakeState) -> IntakeState:
         borrower_party = loan.borrower
         owner_user = loan.owner
 
-    borrower_name = (
-        borrower_party.name if borrower_party else "the borrower"
-    )
+    borrower_name = borrower_party.name if borrower_party else "the borrower"
     loan_reference = loan.reference or "this application"
     settings = get_settings()
     officer_name = (owner_user.name if owner_user else "") or "Your loan officer"
-    officer_email = (
-        (owner_user.email if owner_user else None) or settings.resend_from_address
-    )
+    officer_email = (owner_user.email if owner_user else None) or settings.resend_from_address
     officer_title = "Loan Officer"
     institution = settings.resend_from_name or "Mkopo Lens"
 
@@ -578,9 +568,7 @@ async def send_email(state: IntakeState) -> IntakeState:
                 # page + the per-loan trace can render whether the
                 # draft was clean on first try or required Self-Refine.
                 "guardrail_judgment": state.get("last_judgment"),
-                "validation_attempts": state.get(
-                    "validation_attempts", 0
-                ),
+                "validation_attempts": state.get("validation_attempts", 0),
             },
         )
 

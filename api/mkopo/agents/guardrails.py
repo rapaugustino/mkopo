@@ -109,8 +109,7 @@ class _Judgment(BaseModel):
     failed_red_lines: list[str] = Field(
         default_factory=list,
         description=(
-            "Exact strings from the constitution's red_lines list "
-            "that the output crossed."
+            "Exact strings from the constitution's red_lines list that the output crossed."
         ),
     )
     critique: str = Field(
@@ -236,9 +235,7 @@ async def judge_against_constitution(
                 constitution=constitution.name,
                 forbidden=forbidden,
             )
-            return JudgmentResult.auto_block(
-                f"output contains forbidden substring: {forbidden!r}"
-            )
+            return JudgmentResult.auto_block(f"output contains forbidden substring: {forbidden!r}")
 
     settings = get_settings()
     gateway = get_gateway()

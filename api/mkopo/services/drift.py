@@ -98,11 +98,7 @@ async def compute_field_accuracy(
     """
     stmt = (
         select(Extraction)
-        .where(
-            Extraction.status.in_(
-                (ExtractionStatus.ACCEPTED, ExtractionStatus.OVERRIDDEN)
-            )
-        )
+        .where(Extraction.status.in_((ExtractionStatus.ACCEPTED, ExtractionStatus.OVERRIDDEN)))
         .order_by(desc(Extraction.updated_at))
     )
     rows = (await session.execute(stmt)).scalars().all()

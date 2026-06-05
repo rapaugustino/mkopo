@@ -112,18 +112,14 @@ async def _require_challenge(*, user: User, token: str | None) -> None:
         )
 
 
-async def _assert_loan_owned_by(
-    db: AsyncSession, loan_id: uuid.UUID, user: User
-) -> Loan:
+async def _assert_loan_owned_by(db: AsyncSession, loan_id: uuid.UUID, user: User) -> Loan:
     """Load the loan and confirm the signed-in borrower owns it.
 
     Same email-keyed check borrower_portal uses. Raises HTTP 404 if
     the loan doesn't exist; HTTP 403 if it does but the user isn't
     the borrower party.
     """
-    loan = (
-        await db.execute(select(Loan).where(Loan.id == loan_id))
-    ).scalar_one_or_none()
+    loan = (await db.execute(select(Loan).where(Loan.id == loan_id))).scalar_one_or_none()
     if loan is None or loan.deleted_at is not None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Loan not found")
     row = (
@@ -148,9 +144,7 @@ async def _assert_loan_owned_by(
 
 
 @router.get("/me/loans", response_model=list[MyLoanRow])
-async def my_loans(
-    user: CurrentBorrowerDep, db: DbSessionDep
-) -> list[MyLoanRow]:
+async def my_loans(user: CurrentBorrowerDep, db: DbSessionDep) -> list[MyLoanRow]:
     """List the loans associated with the signed-in borrower.
 
     Match is by email — the borrower's ``users.email`` joins to the
@@ -161,18 +155,22 @@ async def my_loans(
     Powers the ``/account`` landing page after login.
     """
     rows = (
-        await db.execute(
-            select(Loan)
-            .join(LoanParty, LoanParty.loan_id == Loan.id)
-            .join(Party, Party.id == LoanParty.party_id)
-            .where(
-                LoanParty.role == PartyRole.BORROWER,
-                Party.email == user.email,
-                Loan.deleted_at.is_(None),
+        (
+            await db.execute(
+                select(Loan)
+                .join(LoanParty, LoanParty.loan_id == Loan.id)
+                .join(Party, Party.id == LoanParty.party_id)
+                .where(
+                    LoanParty.role == PartyRole.BORROWER,
+                    Party.email == user.email,
+                    Loan.deleted_at.is_(None),
+                )
+                .order_by(Loan.created_at.desc())
             )
-            .order_by(Loan.created_at.desc())
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     return [_loan_to_row(loan) for loan in rows]
 
@@ -362,9 +360,7 @@ async def borrower_document_download_url(
 
 
 @router.get("/me/data/export")
-async def export_my_data(
-    user: CurrentBorrowerDep, db: DbSessionDep
-) -> dict:
+async def export_my_data(user: CurrentBorrowerDep, db: DbSessionDep) -> dict:
     """DSAR-shaped export of everything Mkopo holds about the borrower.
 
     Returns a JSON blob with their user record, every loan they're
@@ -374,34 +370,46 @@ async def export_my_data(
     via the per-document presigned-URL flow separately).
     """
     loans = (
-        await db.execute(
-            select(Loan)
-            .join(LoanParty, LoanParty.loan_id == Loan.id)
-            .join(Party, Party.id == LoanParty.party_id)
-            .where(
-                LoanParty.role == PartyRole.BORROWER,
-                Party.email == user.email,
+        (
+            await db.execute(
+                select(Loan)
+                .join(LoanParty, LoanParty.loan_id == Loan.id)
+                .join(Party, Party.id == LoanParty.party_id)
+                .where(
+                    LoanParty.role == PartyRole.BORROWER,
+                    Party.email == user.email,
+                )
+                .order_by(Loan.created_at)
             )
-            .order_by(Loan.created_at)
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     loan_blocks: list[dict[str, Any]] = []
     for loan in loans:
         docs = (
-            await db.execute(
-                select(Document)
-                .where(Document.loan_id == loan.id)
-                .order_by(Document.created_at)
+            (
+                await db.execute(
+                    select(Document)
+                    .where(Document.loan_id == loan.id)
+                    .order_by(Document.created_at)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         events = (
-            await db.execute(
-                select(AuditEvent)
-                .where(AuditEvent.loan_id == loan.id)
-                .order_by(AuditEvent.created_at)
+            (
+                await db.execute(
+                    select(AuditEvent)
+                    .where(AuditEvent.loan_id == loan.id)
+                    .order_by(AuditEvent.created_at)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         loan_blocks.append(
             {
                 "loan_id": str(loan.id),
@@ -421,9 +429,7 @@ async def export_my_data(
                 "documents": [
                     {
                         "filename": d.filename,
-                        "doc_type": d.doc_type
-                        if isinstance(d.doc_type, str)
-                        else d.doc_type.value,
+                        "doc_type": d.doc_type if isinstance(d.doc_type, str) else d.doc_type.value,
                         "size_bytes": d.size_bytes,
                         "content_hash": d.content_hash,
                         "uploaded_at": d.created_at.isoformat(),
@@ -459,8 +465,7 @@ async def export_my_data(
         },
         "loans": loan_blocks,
         "_notes": [
-            "This export covers everything Mkopo holds about you as of "
-            "the timestamp above.",
+            "This export covers everything Mkopo holds about you as of the timestamp above.",
             "Document contents are referenced by sha256 hash but not "
             "included inline. Use the loan's status page to download "
             "the bytes directly.",
@@ -511,17 +516,21 @@ async def request_erasure(
     user.deleted_at = now
 
     loans = (
-        await db.execute(
-            select(Loan)
-            .join(LoanParty, LoanParty.loan_id == Loan.id)
-            .join(Party, Party.id == LoanParty.party_id)
-            .where(
-                LoanParty.role == PartyRole.BORROWER,
-                Party.email == user.email,
-                Loan.deleted_at.is_(None),
+        (
+            await db.execute(
+                select(Loan)
+                .join(LoanParty, LoanParty.loan_id == Loan.id)
+                .join(Party, Party.id == LoanParty.party_id)
+                .where(
+                    LoanParty.role == PartyRole.BORROWER,
+                    Party.email == user.email,
+                    Loan.deleted_at.is_(None),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     hmda_years = 5
     regb_months = 25

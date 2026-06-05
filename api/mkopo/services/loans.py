@@ -65,9 +65,7 @@ async def _has_accepted_extraction(session: AsyncSession, loan_id: uuid.UUID) ->
         .join(Document)
         .where(
             Document.loan_id == loan_id,
-            Extraction.status.in_(
-                (ExtractionStatus.ACCEPTED, ExtractionStatus.OVERRIDDEN)
-            ),
+            Extraction.status.in_((ExtractionStatus.ACCEPTED, ExtractionStatus.OVERRIDDEN)),
         )
         .limit(1)
     )
@@ -79,9 +77,7 @@ async def _has_documents(session: AsyncSession, loan_id: uuid.UUID) -> bool:
     return (await session.execute(stmt)).scalar_one_or_none() is not None
 
 
-async def _missing_required_docs(
-    session: AsyncSession, loan: Loan
-) -> set[str]:
+async def _missing_required_docs(session: AsyncSession, loan: Loan) -> set[str]:
     """Return the set of required document types missing for this loan
     class, or an empty set if the packet is complete.
 
@@ -98,12 +94,8 @@ async def _missing_required_docs(
     """
     from mkopo.rules.policy import REQUIRED_DOCS, REQUIRED_DOCS_PERSONAL
 
-    loan_class_str = (
-        loan.loan_class.value if loan.loan_class is not None else "business"
-    )
-    required = (
-        REQUIRED_DOCS_PERSONAL if loan_class_str == "personal" else REQUIRED_DOCS
-    )
+    loan_class_str = loan.loan_class.value if loan.loan_class is not None else "business"
+    required = REQUIRED_DOCS_PERSONAL if loan_class_str == "personal" else REQUIRED_DOCS
 
     docs_q = select(Document.doc_type).where(Document.loan_id == loan.id)
     present = set((await session.execute(docs_q)).scalars().all())
@@ -119,9 +111,7 @@ async def _missing_required_docs(
 # to LangGraph internals.
 
 
-async def _has_audit_action(
-    session: AsyncSession, loan_id: uuid.UUID, action: str
-) -> bool:
+async def _has_audit_action(session: AsyncSession, loan_id: uuid.UUID, action: str) -> bool:
     from mkopo.models import AuditEvent
 
     stmt = (
@@ -132,9 +122,7 @@ async def _has_audit_action(
     return (await session.execute(stmt)).scalar_one_or_none() is not None
 
 
-async def _materials_drift_message(
-    session: AsyncSession, loan_id: uuid.UUID
-) -> str | None:
+async def _materials_drift_message(session: AsyncSession, loan_id: uuid.UUID) -> str | None:
     """Return a user-readable message when the loan's current
     materials no longer match the materials the latest decision was
     made against; ``None`` otherwise.
@@ -164,9 +152,7 @@ async def _materials_drift_message(
     return None
 
 
-async def check_prerequisites(
-    session: AsyncSession, loan: Loan, to_stage: LoanStage
-) -> str | None:
+async def check_prerequisites(session: AsyncSession, loan: Loan, to_stage: LoanStage) -> str | None:
     """Return an error message if the loan isn't ready for ``to_stage``,
     or ``None`` if it is.
 
@@ -190,13 +176,10 @@ async def check_prerequisites(
         # incomplete packet and emitting a warn-severity rule outcome.
         missing = await _missing_required_docs(session, loan)
         if missing:
-            human_missing = ", ".join(
-                sorted(name.replace("_", " ") for name in missing)
-            )
+            human_missing = ", ".join(sorted(name.replace("_", " ") for name in missing))
             class_label = (
                 "personal"
-                if loan.loan_class is not None
-                and loan.loan_class.value == "personal"
+                if loan.loan_class is not None and loan.loan_class.value == "personal"
                 else "commercial"
             )
             return (
@@ -226,8 +209,7 @@ async def check_prerequisites(
     if to_stage in (LoanStage.CONDITIONS, LoanStage.APPROVED):
         if not await _has_audit_action(session, loan_id, "decision_complete"):
             return (
-                "Decision agent hasn't drafted a recommendation yet. "
-                "Run the decision agent first."
+                "Decision agent hasn't drafted a recommendation yet. Run the decision agent first."
             )
         # Materials-drift gate: if the inputs that fed the latest
         # decision have changed (a document was swapped, an income
@@ -254,12 +236,16 @@ async def check_prerequisites(
 
         if loan.stage == LoanStage.CONDITIONS:
             open_conds = (
-                await session.execute(
-                    select(Condition.id).where(
-                        Condition.loan_id == loan_id, Condition.status == "open"
+                (
+                    await session.execute(
+                        select(Condition.id).where(
+                            Condition.loan_id == loan_id, Condition.status == "open"
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             if open_conds:
                 n = len(open_conds)
                 return (
@@ -316,8 +302,7 @@ async def transition_stage(
     from_stage = loan.stage
     if to_stage not in VALID_TRANSITIONS.get(from_stage, set()):
         allowed = (
-            sorted(s.value for s in VALID_TRANSITIONS.get(from_stage, set()))
-            or "none (terminal)"
+            sorted(s.value for s in VALID_TRANSITIONS.get(from_stage, set())) or "none (terminal)"
         )
         raise IllegalStageTransitionError(
             f"Cannot move from {from_stage.value} to {to_stage.value}. "
@@ -345,9 +330,7 @@ async def transition_stage(
     return loan
 
 
-async def allowed_transitions(
-    session: AsyncSession, loan: Loan
-) -> dict[str, str | None]:
+async def allowed_transitions(session: AsyncSession, loan: Loan) -> dict[str, str | None]:
     """For each legal next stage, return either ``None`` (ready) or the
     reason it's not ready yet. Drives the UI's disabled-button tooltips.
 

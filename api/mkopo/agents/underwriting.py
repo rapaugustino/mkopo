@@ -136,9 +136,7 @@ def _commercial_kpi_block(kpis: UnderwritingKPIs) -> str:
 def _personal_kpi_block(kpis: UnderwritingKPIs) -> str:
     """Format the KPI bullet list for a personal-loan prompt."""
     parts = [f"- loan_amount: ${float(kpis.loan_amount):,.0f}"]
-    parts.append(
-        f"- DTI: {kpis.dti:.1%}" if kpis.dti is not None else "- DTI: unknown"
-    )
+    parts.append(f"- DTI: {kpis.dti:.1%}" if kpis.dti is not None else "- DTI: unknown")
     parts.append(
         f"- LTI (loan / annual income): {kpis.lti:.1%}"
         if kpis.lti is not None
@@ -188,9 +186,7 @@ async def fetch_and_evaluate(state: UnderwritingState) -> UnderwritingState:
                 .join(Document)
                 .where(
                     Document.loan_id == loan_id,
-                    Extraction.status.in_(
-                        (ExtractionStatus.ACCEPTED, ExtractionStatus.OVERRIDDEN)
-                    ),
+                    Extraction.status.in_((ExtractionStatus.ACCEPTED, ExtractionStatus.OVERRIDDEN)),
                 )
                 .limit(1)
             )
@@ -225,9 +221,7 @@ async def fetch_and_evaluate(state: UnderwritingState) -> UnderwritingState:
     if loan_class_value == "personal":
         # Personal tile set.
         monthly_income = (
-            ctx.annual_income / Decimal(12)
-            if ctx.annual_income and ctx.annual_income > 0
-            else None
+            ctx.annual_income / Decimal(12) if ctx.annual_income and ctx.annual_income > 0 else None
         )
         dti = (
             float(ctx.monthly_debt_payments / monthly_income)
@@ -435,8 +429,7 @@ def _underwriting_judge_context(state: UnderwritingState) -> str:
     kpis = state.get("kpis")
     flags = state.get("rule_outcomes", []) or []
     rules_summary = "\n".join(
-        f"- {f.rule_id} (severity={f.severity}, passed={f.passed}): {f.message}"
-        for f in flags
+        f"- {f.rule_id} (severity={f.severity}, passed={f.passed}): {f.message}" for f in flags
     )
     return (
         f"Loan class: {state.get('loan_class', 'business')}\n"
@@ -450,9 +443,7 @@ def _extract_summary_text(state: UnderwritingState) -> str | None:
     summary = state.get("summary")
     if summary is None:
         return None
-    sections_block = "\n\n".join(
-        f"## {s.title}\n{s.body}" for s in summary.sections
-    )
+    sections_block = "\n\n".join(f"## {s.title}\n{s.body}" for s in summary.sections)
     return (
         f"Recommendation: {summary.recommendation}\n"
         f"Rationale: {summary.rationale}\n\n"
@@ -615,9 +606,7 @@ async def persist(state: UnderwritingState) -> UnderwritingState:
                     # render whether the draft passed cleanly or
                     # required Self-Refine retries.
                     "guardrail_judgment": state.get("last_judgment"),
-                    "validation_attempts": state.get(
-                        "validation_attempts", 0
-                    ),
+                    "validation_attempts": state.get("validation_attempts", 0),
                 },
             )
         )

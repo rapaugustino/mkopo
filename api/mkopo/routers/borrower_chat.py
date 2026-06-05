@@ -80,9 +80,7 @@ def _get_borrower_system_prompt() -> str:
 
 
 @router.post("/me/chat/stream")
-async def chat_stream(
-    payload: ChatRequest, user: CurrentBorrowerDep
-) -> StreamingResponse:
+async def chat_stream(payload: ChatRequest, user: CurrentBorrowerDep) -> StreamingResponse:
     """Run one chat turn for the signed-in borrower and stream the
     result as SSE."""
 

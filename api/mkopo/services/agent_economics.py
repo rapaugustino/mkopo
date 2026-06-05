@@ -105,10 +105,7 @@ async def compute_agent_economics(
         .where(AgentRun.created_at >= cutoff)
         .group_by(AgentRun.agent_name)
     )
-    runs_by_agent = {
-        name: int(n)
-        for (name, n) in (await session.execute(run_counts_stmt)).all()
-    }
+    runs_by_agent = {name: int(n) for (name, n) in (await session.execute(run_counts_stmt)).all()}
 
     # Per-agent LLM-call rows. Join on thread_id (both are strings
     # for historical reasons; the join is exact-match).
@@ -132,12 +129,8 @@ async def compute_agent_economics(
         lst = per_agent_latencies.setdefault(agent_name, [])
         lst.append(float(elapsed))
         cost = float(cost_in or 0) + float(cost_out or 0)
-        per_agent_cost[agent_name] = (
-            per_agent_cost.get(agent_name, 0.0) + cost
-        )
-        per_agent_calls[agent_name] = (
-            per_agent_calls.get(agent_name, 0) + 1
-        )
+        per_agent_cost[agent_name] = per_agent_cost.get(agent_name, 0.0) + cost
+        per_agent_calls[agent_name] = per_agent_calls.get(agent_name, 0) + 1
 
     # Build result rows. Include agents with runs but no calls
     # (short-circuits) — they have cost 0 and no percentile.

@@ -65,9 +65,7 @@ async def maybe_chain_after_intake(loan_id: uuid.UUID, completed_with: str) -> N
         return
     # 1. Advance the stage. _try_advance is a no-op if the loan is
     #    not autonomous, so this is safe to call unconditionally.
-    advanced = await _try_advance(
-        loan_id, LoanStage.UNDERWRITING, after=AgentName.INTAKE
-    )
+    advanced = await _try_advance(loan_id, LoanStage.UNDERWRITING, after=AgentName.INTAKE)
     if not advanced:
         return
     # 2. Kick off the underwriting agent. Without this step the
@@ -161,9 +159,7 @@ def _loan_q(loan_id: uuid.UUID):
     return select(Loan).where(Loan.id == loan_id)
 
 
-async def _try_advance(
-    loan_id: uuid.UUID, to_stage: LoanStage, *, after: str
-) -> bool:
+async def _try_advance(loan_id: uuid.UUID, to_stage: LoanStage, *, after: str) -> bool:
     """Advance ``loan_id`` to ``to_stage`` if the loan is autonomous
     and prerequisites are met. No-op otherwise.
 
@@ -337,9 +333,7 @@ async def _run_underwriting_agent(loan_id: uuid.UUID) -> None:
     """
     thread_id = f"underwriting-{loan_id}"
     config = {"configurable": {"thread_id": thread_id}}
-    agent_run_id = await _create_running_agent_run(
-        loan_id, AgentName.UNDERWRITING, thread_id
-    )
+    agent_run_id = await _create_running_agent_run(loan_id, AgentName.UNDERWRITING, thread_id)
     state: dict[str, Any] = {"loan_id": str(loan_id)}
     if agent_run_id is not None:
         state["agent_run_id"] = str(agent_run_id)
@@ -347,9 +341,7 @@ async def _run_underwriting_agent(loan_id: uuid.UUID) -> None:
         async with build_underwriting_graph() as graph:
             await graph.ainvoke(state, config=config)
     except Exception:
-        logger.exception(
-            "orchestrator_underwriting_agent_failed", loan_id=str(loan_id)
-        )
+        logger.exception("orchestrator_underwriting_agent_failed", loan_id=str(loan_id))
         # Same finalization the decision path does — leaving the row
         # at 'running' confuses operators reading observability.
         await _finalize_failed_agent_run(agent_run_id)

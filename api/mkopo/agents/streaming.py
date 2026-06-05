@@ -102,8 +102,7 @@ DECISION_NODES: list[tuple[str, str]] = [
 # by the agents (which understand the gate), not by each UI screen.
 SKIP_REASONS: dict[str, str] = {
     "needs_documents": (
-        "No documents uploaded yet — attach the loan packet first, "
-        "then run intake again."
+        "No documents uploaded yet — attach the loan packet first, then run intake again."
     ),
     "needs_extractions": (
         "No accepted extractions on this loan. Run intake first, or "
@@ -153,9 +152,7 @@ def classify_exception(e: BaseException) -> tuple[str, str]:
                 "API key is missing or invalid.",
                 "Set ANTHROPIC_API_KEY in api/.env and restart the server.",
             )
-        if "model" in msg.lower() and (
-            "not_found" in msg.lower() or "invalid" in msg.lower()
-        ):
+        if "model" in msg.lower() and ("not_found" in msg.lower() or "invalid" in msg.lower()):
             return (
                 "The configured Claude model isn't available. The "
                 "model identifier in .env may be wrong or unreleased.",
@@ -163,8 +160,7 @@ def classify_exception(e: BaseException) -> tuple[str, str]:
             )
         if "rate_limit" in msg.lower() or "429" in msg:
             return (
-                "Anthropic rate-limited the request. Wait a moment "
-                "and try again.",
+                "Anthropic rate-limited the request. Wait a moment and try again.",
                 msg,
             )
         return ("The AI service errored after retries.", msg)
@@ -196,9 +192,7 @@ def _failing_node_from_exception(e: BaseException) -> str | None:
     return None
 
 
-def _next_node_after(
-    nodes: list[tuple[str, str]], completed: str | None
-) -> str | None:
+def _next_node_after(nodes: list[tuple[str, str]], completed: str | None) -> str | None:
     """Best-effort guess: the node that *would have run next* after the
     last completed one. Used when the exception doesn't tell us which
     step blew up — typically the step *after* the most recent
@@ -250,10 +244,7 @@ def _summarise_node(node: str, delta: dict[str, Any]) -> str:
         if node == "fetch_and_evaluate":
             flags = delta.get("flags") or []
             failed = sum(1 for f in flags if not f.get("passed", True))
-            return (
-                f"Ran {len(flags)} rule{'' if len(flags) == 1 else 's'}; "
-                f"{failed} failing"
-            )
+            return f"Ran {len(flags)} rule{'' if len(flags) == 1 else 's'}; {failed} failing"
         if node == "draft_summary":
             summary = delta.get("summary")
             if summary is not None:
@@ -482,9 +473,7 @@ async def stream_graph_run(
                                 status="ok",
                                 summary=summary,
                                 payload=_step_payload(node, delta_dict),
-                                started_at=node_started_at.get(
-                                    node, time.monotonic()
-                                ),
+                                started_at=node_started_at.get(node, time.monotonic()),
                             )
                         # Stamp the next node's start clock — best-effort,
                         # the topology in ``nodes`` is the source of
@@ -553,9 +542,7 @@ async def stream_graph_run(
     # (cache invalidation, modal open) can keep working unchanged.
     state_dict = final_state or {}
     final_status: str = (
-        "awaiting_approval"
-        if seen_interrupt
-        else state_dict.get(final_status_key) or "complete"
+        "awaiting_approval" if seen_interrupt else state_dict.get(final_status_key) or "complete"
     )
     # If the run short-circuited at a pre-flight gate, surface that
     # plainly via a dedicated SSE event before ``done``. The frontend
@@ -594,13 +581,7 @@ async def stream_graph_run(
     # reads "complete" / "interrupted" / "skipped" instead of the
     # stale "running" we stamped at the start.
     if persist:
-        run_status = (
-            "interrupted"
-            if seen_interrupt
-            else "skipped"
-            if skip_msg
-            else "complete"
-        )
+        run_status = "interrupted" if seen_interrupt else "skipped" if skip_msg else "complete"
         await _finalize_agent_run(agent_run_id, status=run_status)
 
     # Post-completion hook — used by the autonomous orchestrator to
@@ -777,9 +758,7 @@ async def _persist_step(
         )
 
 
-async def _thread_id_for_run(
-    session: AsyncSession, agent_run_id: uuid.UUID
-) -> str | None:
+async def _thread_id_for_run(session: AsyncSession, agent_run_id: uuid.UUID) -> str | None:
     """Read ``agent_runs.thread_id`` so the backfill knows which
     llm_calls belong to this run.
 
@@ -787,16 +766,12 @@ async def _thread_id_for_run(
     missing (shouldn't happen mid-stream but we guard for it).
     """
     row = (
-        await session.execute(
-            select(AgentRun.thread_id).where(AgentRun.id == agent_run_id)
-        )
+        await session.execute(select(AgentRun.thread_id).where(AgentRun.id == agent_run_id))
     ).scalar_one_or_none()
     return row
 
 
-async def _finalize_agent_run(
-    agent_run_id: uuid.UUID | None, *, status: str
-) -> None:
+async def _finalize_agent_run(agent_run_id: uuid.UUID | None, *, status: str) -> None:
     """Flip the AgentRun's ``status`` from ``running`` to the terminal
     state. The agent's own persist node may have set a richer status
     via its update path (``complete`` carries the same meaning), so we
@@ -850,9 +825,7 @@ def _step_payload(node: str, delta: dict[str, Any]) -> dict[str, Any]:
         ros = delta.get("rule_outcomes") or []
         if isinstance(ros, (list, tuple)):
             out["rule_count"] = len(ros)
-            out["rules_failed"] = sum(
-                1 for r in ros if not getattr(r, "passed", True)
-            )
+            out["rules_failed"] = sum(1 for r in ros if not getattr(r, "passed", True))
     if "status" in delta and isinstance(delta["status"], str):
         out["node_status"] = delta["status"]
     return out

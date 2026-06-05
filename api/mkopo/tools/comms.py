@@ -237,10 +237,7 @@ def compose_magic_link_email(
         "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;"
         "color:#111;"
     )
-    card_style = (
-        "background:#ffffff;border-radius:12px;"
-        "border:1px solid #e5e5e5;padding:32px;"
-    )
+    card_style = "background:#ffffff;border-radius:12px;border:1px solid #e5e5e5;padding:32px;"
     brand_style = (
         "font-size:14px;color:#666;letter-spacing:0.05em;"
         "text-transform:uppercase;padding-bottom:24px;"
@@ -251,8 +248,7 @@ def compose_magic_link_email(
         "padding:12px 24px;border-radius:8px;"
     )
     footer_style = (
-        "font-size:13px;color:#888;padding-top:24px;"
-        "border-top:1px solid #eee;line-height:1.6;"
+        "font-size:13px;color:#888;padding-top:24px;border-top:1px solid #eee;line-height:1.6;"
     )
     body_html = f"""<!doctype html>
 <html lang="en">

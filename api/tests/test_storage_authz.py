@@ -159,12 +159,8 @@ class TestLocalStorageEnforcement:
         #       JWT for ``/api/v1/storage/local/<token>``.
         # If this URL shape changes, also update the matching proxy
         # route handler in routers/storage.py.
-        assert url.startswith("http"), (
-            f"presigned_url should return an HTTP proxy URL; got {url!r}"
-        )
-        assert "/api/v1/storage/local/" in url, (
-            "expected the local-proxy path segment in the URL"
-        )
+        assert url.startswith("http"), f"presigned_url should return an HTTP proxy URL; got {url!r}"
+        assert "/api/v1/storage/local/" in url, "expected the local-proxy path segment in the URL"
 
 
 def _ensure_db_env():

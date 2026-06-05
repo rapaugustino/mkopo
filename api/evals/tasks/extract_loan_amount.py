@@ -62,9 +62,7 @@ class ExtractLoanAmountTask:
             "source_quote": result.source_quote,
         }
 
-    def score(
-        self, prediction: dict[str, Any], expected: dict[str, Any]
-    ) -> TaskScore:
+    def score(self, prediction: dict[str, Any], expected: dict[str, Any]) -> TaskScore:
         pred = float(prediction["loan_amount"])
         gold = float(expected["loan_amount"])
         if gold == 0:

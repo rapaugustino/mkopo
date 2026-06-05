@@ -64,13 +64,10 @@ def _user_message(inputs: dict[str, Any]) -> str:
     message. Mirrors the format the live decision drafter uses so
     the eval measures the same thing the agent does."""
     rule_block = "\n".join(
-        f"- {r['rule_id']} (severity={r['severity']}, "
-        f"passed={r['passed']}): {r['message']}"
+        f"- {r['rule_id']} (severity={r['severity']}, passed={r['passed']}): {r['message']}"
         for r in inputs.get("rule_outcomes", [])
     )
-    ext_block = "\n".join(
-        f"- {k}: {v}" for k, v in (inputs.get("extractions") or {}).items()
-    )
+    ext_block = "\n".join(f"- {k}: {v}" for k, v in (inputs.get("extractions") or {}).items())
     return (
         f"Loan class: {inputs.get('loan_class', 'business')}\n\n"
         f"Rule outcomes:\n{rule_block}\n\n"
@@ -96,9 +93,7 @@ class DecisionVerdictTask:
             "confidence": result.confidence,
         }
 
-    def score(
-        self, prediction: dict[str, Any], expected: dict[str, Any]
-    ) -> TaskScore:
+    def score(self, prediction: dict[str, Any], expected: dict[str, Any]) -> TaskScore:
         pred_path = prediction["path"]
         gold_path = expected["path"]
         passed = pred_path == gold_path
@@ -125,9 +120,7 @@ class DecisionVerdictTask:
         # Confusion matrix as a nested dict keyed [expected][predicted].
         # NB: we use the closed CLASSES tuple so the matrix has stable
         # axis order even when a class is unrepresented in the run.
-        cm: dict[str, dict[str, int]] = {
-            c: {c2: 0 for c2 in CLASSES} for c in CLASSES
-        }
+        cm: dict[str, dict[str, int]] = {c: {c2: 0 for c2 in CLASSES} for c in CLASSES}
         for score, ex in zip(scores, examples, strict=True):
             expected_path = ex.expected.get("path")
             predicted_path = score.details.get("predicted_path")
@@ -144,11 +137,7 @@ class DecisionVerdictTask:
             fp = sum(cm[c2][c] for c2 in CLASSES if c2 != c)
             precision = tp / (tp + fp) if (tp + fp) else 0.0
             recall = tp / (tp + fn) if (tp + fn) else 0.0
-            f1 = (
-                2 * precision * recall / (precision + recall)
-                if (precision + recall)
-                else 0.0
-            )
+            f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
             per_class[c] = {
                 "n": sum(cm[c].values()),  # support
                 "precision": precision,

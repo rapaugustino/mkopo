@@ -53,9 +53,7 @@ class TestChallengeRoundTrip:
     async def test_consume_with_wrong_token_fails(self):
         user_id = uuid.uuid4()
         await mint_challenge(user_id=user_id)
-        assert not await consume_challenge(
-            user_id=user_id, plain_token="not-the-right-token"
-        )
+        assert not await consume_challenge(user_id=user_id, plain_token="not-the-right-token")
 
     async def test_consume_with_empty_token_fails(self):
         """Defensive: an empty / None token should never be accepted,
@@ -85,14 +83,10 @@ class TestChallengeRoundTrip:
         new_token = await mint_challenge(user_id=user_id)
         assert old_token != new_token
         # Old token must NOT authorise.
-        assert not await consume_challenge(
-            user_id=user_id, plain_token=old_token
-        )
+        assert not await consume_challenge(user_id=user_id, plain_token=old_token)
         # New token works.
         assert await consume_challenge(user_id=user_id, plain_token=new_token)
 
     async def test_no_mint_means_no_consume(self):
         """A user that never minted a challenge can't consume one."""
-        assert not await consume_challenge(
-            user_id=uuid.uuid4(), plain_token="anything"
-        )
+        assert not await consume_challenge(user_id=uuid.uuid4(), plain_token="anything")

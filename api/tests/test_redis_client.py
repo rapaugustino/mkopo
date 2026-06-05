@@ -81,23 +81,17 @@ class TestJwtBlacklist:
 
 class TestRateLimit:
     async def test_first_request_allowed(self):
-        allowed, count = await rate_limit_check(
-            key=_unique("rl"), limit=3, window_seconds=10
-        )
+        allowed, count = await rate_limit_check(key=_unique("rl"), limit=3, window_seconds=10)
         assert allowed is True
         assert count == 1
 
     async def test_blocks_after_limit_exceeded(self):
         key = _unique("rl-exceed")
         for _ in range(3):
-            allowed, _ = await rate_limit_check(
-                key=key, limit=3, window_seconds=10
-            )
+            allowed, _ = await rate_limit_check(key=key, limit=3, window_seconds=10)
             assert allowed
         # 4th request exceeds the budget.
-        allowed, count = await rate_limit_check(
-            key=key, limit=3, window_seconds=10
-        )
+        allowed, count = await rate_limit_check(key=key, limit=3, window_seconds=10)
         assert allowed is False
         assert count == 4
 
@@ -106,9 +100,7 @@ class TestRateLimit:
         for _ in range(5):
             await rate_limit_check(key=key, limit=3, window_seconds=10)
         await rate_limit_reset(key=key)
-        allowed, count = await rate_limit_check(
-            key=key, limit=3, window_seconds=10
-        )
+        allowed, count = await rate_limit_check(key=key, limit=3, window_seconds=10)
         assert allowed
         assert count == 1
 

@@ -52,12 +52,16 @@ async def list_documents(
     the UI can mark "needs OCR" pages without re-fetching the body.
     """
     rows = (
-        await db.execute(
-            select(Document)
-            .where(Document.loan_id == loan_id)
-            .order_by(Document.created_at.desc())
+        (
+            await db.execute(
+                select(Document)
+                .where(Document.loan_id == loan_id)
+                .order_by(Document.created_at.desc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return [
         {
             "id": str(d.id),

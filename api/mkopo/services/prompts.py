@@ -61,6 +61,7 @@ def current_prompt_version_id() -> uuid.UUID | None:
     """The ``prompts.id`` of the prompt currently being applied, if any."""
     return _current_prompt_version_id.get()
 
+
 # ----- registry -------------------------------------------------------------
 
 
@@ -104,8 +105,8 @@ _INTAKE_DRAFT_DOC_PERSONAL = (
     "roll, business tax returns, or property documents.\n\n"
     "Compose a single email asking the borrower to upload the specific "
     "missing items. Reference each item by its human-friendly name "
-    "(\"your most recent pay stubs\", \"last 2 years of tax returns\", "
-    "\"a recent bank statement\"). Do not invent items that aren't in "
+    '("your most recent pay stubs", "last 2 years of tax returns", '
+    '"a recent bank statement"). Do not invent items that aren\'t in '
     "the supplied list of missing materials.\n\n"
     "Use the borrower's name, loan reference, sign-off name, title, "
     "institution, and contact email exactly as supplied in the user "
@@ -180,9 +181,9 @@ _DECISION_PATH = (
     "You are a senior credit officer making a decision recommendation.\n\n"
     "Hard rules:\n"
     "1. You may NOT contradict the rules engine's BLOCKING failures. If "
-    "any blocking rule failed, the path is \"decline\".\n"
+    'any blocking rule failed, the path is "decline".\n'
     "2. If only warnings fired and the underwriting summary supports it, "
-    "you may recommend \"approve\" or \"conditional\".\n"
+    'you may recommend "approve" or "conditional".\n'
     "3. Output the path and a short rationale (under 200 words). The "
     "drafting prompts run after this one and will assemble the term sheet "
     "or adverse-action letter."
@@ -350,10 +351,7 @@ DEFAULTS: dict[str, PromptDef] = {
         PromptDef(
             identifier="underwriting.summary.personal",
             label="Underwriting — personal-loan summary",
-            description=(
-                "Drafts the adjudication-queue summary for personal / "
-                "consumer loans."
-            ),
+            description=("Drafts the adjudication-queue summary for personal / consumer loans."),
             default_body=_UW_PERSONAL,
         ),
         PromptDef(
@@ -481,8 +479,7 @@ def get(identifier: str) -> str:
     default = DEFAULTS.get(identifier)
     if default is None:
         raise KeyError(
-            f"Unknown prompt identifier {identifier!r}. Add it to "
-            "mkopo.services.prompts.DEFAULTS."
+            f"Unknown prompt identifier {identifier!r}. Add it to mkopo.services.prompts.DEFAULTS."
         )
     return default.default_body
 
@@ -501,9 +498,7 @@ async def refresh_cache(session: AsyncSession) -> None:
     try:
         rows = (
             await session.execute(
-                select(Prompt.id, Prompt.identifier, Prompt.body).where(
-                    Prompt.is_active.is_(True)
-                )
+                select(Prompt.id, Prompt.identifier, Prompt.body).where(Prompt.is_active.is_(True))
             )
         ).all()
     except Exception as exc:  # noqa: BLE001 — refresh must not raise
@@ -537,17 +532,14 @@ async def load(session: AsyncSession, identifier: str) -> str:
     variant exists for the bootstrap helpers and any future code
     that needs guaranteed-fresh reads against the DB.
     """
-    stmt = select(Prompt.body).where(
-        Prompt.identifier == identifier, Prompt.is_active.is_(True)
-    )
+    stmt = select(Prompt.body).where(Prompt.identifier == identifier, Prompt.is_active.is_(True))
     body = (await session.execute(stmt)).scalar_one_or_none()
     if body is not None:
         return body
     default = DEFAULTS.get(identifier)
     if default is None:
         raise KeyError(
-            f"Unknown prompt identifier {identifier!r}. Add it to "
-            "mkopo.services.prompts.DEFAULTS."
+            f"Unknown prompt identifier {identifier!r}. Add it to mkopo.services.prompts.DEFAULTS."
         )
     return default.default_body
 
@@ -566,9 +558,7 @@ async def ensure_defaults_seeded(session: AsyncSession) -> int:
     the management UI immediately. Tests can also call it before a
     case that needs the seeded state.
     """
-    existing = (
-        await session.execute(select(Prompt.identifier).distinct())
-    ).scalars().all()
+    existing = (await session.execute(select(Prompt.identifier).distinct())).scalars().all()
     have = set(existing)
     written = 0
     for d in list_definitions():
@@ -674,15 +664,11 @@ async def activate_version(
     """
     target = (
         await session.execute(
-            select(Prompt).where(
-                Prompt.identifier == identifier, Prompt.version == version
-            )
+            select(Prompt).where(Prompt.identifier == identifier, Prompt.version == version)
         )
     ).scalar_one_or_none()
     if target is None:
-        raise ValueError(
-            f"No version {version} for prompt {identifier!r}."
-        )
+        raise ValueError(f"No version {version} for prompt {identifier!r}.")
     if target.is_active:
         return target  # already active — noop
 
@@ -702,9 +688,7 @@ async def activate_version(
 # ----- read helpers (used by the router) ------------------------------------
 
 
-async def history(
-    session: AsyncSession, identifier: str
-) -> list[Prompt]:
+async def history(session: AsyncSession, identifier: str) -> list[Prompt]:
     """All versions for ``identifier``, newest first.
 
     Includes the active row. Does not include the code default
@@ -713,12 +697,14 @@ async def history(
     default" in the UI.
     """
     rows = (
-        await session.execute(
-            select(Prompt)
-            .where(Prompt.identifier == identifier)
-            .order_by(desc(Prompt.version))
+        (
+            await session.execute(
+                select(Prompt).where(Prompt.identifier == identifier).order_by(desc(Prompt.version))
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return list(rows)
 
 
@@ -811,9 +797,5 @@ async def latest_active_per_identifier(
     without N+1 — the management page queries this once and joins
     against the static registry in Python.
     """
-    rows = (
-        await session.execute(
-            select(Prompt).where(Prompt.is_active.is_(True))
-        )
-    ).scalars().all()
+    rows = (await session.execute(select(Prompt).where(Prompt.is_active.is_(True)))).scalars().all()
     return {r.identifier: r for r in rows}

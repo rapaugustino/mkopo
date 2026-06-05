@@ -206,9 +206,7 @@ async def signup(
     from carpet-bombing the users table with throwaway addresses.
     """
     ip = _client_ip(request)
-    allowed, _ = await rate_limit_check(
-        key=f"signup:ip:{ip}", limit=10, window_seconds=3600
-    )
+    allowed, _ = await rate_limit_check(key=f"signup:ip:{ip}", limit=10, window_seconds=3600)
     if not allowed:
         raise HTTPException(
             status.HTTP_429_TOO_MANY_REQUESTS,
@@ -216,13 +214,9 @@ async def signup(
         )
 
     email = payload.email.lower().strip()
-    existing = (
-        await db.execute(select(User).where(User.email == email))
-    ).scalar_one_or_none()
+    existing = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
     if existing is not None:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT, "An account with that email already exists"
-        )
+        raise HTTPException(status.HTTP_409_CONFLICT, "An account with that email already exists")
 
     user = User(
         email=email,
@@ -279,9 +273,7 @@ async def login(
     # IP-wide rate limit. Generous enough that a normal user typo-ing
     # their password three times in a row isn't blocked, tight enough
     # that a credential-stuffing run gets throttled hard.
-    allowed, _ = await rate_limit_check(
-        key=f"login:ip:{ip}", limit=20, window_seconds=60
-    )
+    allowed, _ = await rate_limit_check(key=f"login:ip:{ip}", limit=20, window_seconds=60)
     if not allowed:
         raise HTTPException(
             status.HTTP_429_TOO_MANY_REQUESTS,
@@ -294,9 +286,7 @@ async def login(
     if await is_account_locked(email=email):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
 
-    user = (
-        await db.execute(select(User).where(User.email == email))
-    ).scalar_one_or_none()
+    user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
 
     # ``verify_password`` handles a None hash gracefully so this
     # works for magic-link-only users (always returns False) and
@@ -308,9 +298,7 @@ async def login(
         # failures in 15min locks the account for an hour; the lock
         # clears on a successful magic-link consume.
         fail_key = f"login-fail:{email}:{ip}"
-        _, attempts = await rate_limit_check(
-            key=fail_key, limit=10**9, window_seconds=900
-        )
+        _, attempts = await rate_limit_check(key=fail_key, limit=10**9, window_seconds=900)
         if attempts >= 5:
             await lock_account(email=email, ttl_seconds=3600)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
@@ -362,9 +350,7 @@ async def request_magic_link(
     attacker from inundating someone's inbox with login links.
     """
     email = payload.email.lower().strip()
-    allowed, _ = await rate_limit_check(
-        key=f"magic-link:{email}", limit=3, window_seconds=600
-    )
+    allowed, _ = await rate_limit_check(key=f"magic-link:{email}", limit=3, window_seconds=600)
     if not allowed:
         # Same anti-enumeration shape — we still return MagicLinkIssued
         # rather than a 429 so a bot can't tell the email exists from
@@ -372,9 +358,7 @@ async def request_magic_link(
         logger.info("magic_link_request_rate_limited", email=email)
         return MagicLinkIssued()
 
-    user = (
-        await db.execute(select(User).where(User.email == email))
-    ).scalar_one_or_none()
+    user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
 
     if user is None or user.role != "borrower":
         # Anti-enumeration: return success even when there's no
@@ -397,9 +381,7 @@ async def request_magic_link(
         expires_minutes=settings.magic_link_ttl_seconds // 60,
         recipient_name=user.name,
     )
-    return MagicLinkIssued(
-        magic_link_url=_dev_link_for_response(minted.plain_token, "login")
-    )
+    return MagicLinkIssued(magic_link_url=_dev_link_for_response(minted.plain_token, "login"))
 
 
 @router.post("/magic-link/consume")
@@ -423,22 +405,16 @@ async def consume_login_link(
     # one lock from the same plain token.
     user = await consume_magic_link(db, plain_token=payload.token, purpose="login")
     if user is None:
-        user = await consume_magic_link(
-            db, plain_token=payload.token, purpose="email_verify"
-        )
+        user = await consume_magic_link(db, plain_token=payload.token, purpose="email_verify")
         if user is not None and user.email_verified_at is None:
             user.email_verified_at = datetime.now(UTC)
     if user is None:
-        user = await consume_magic_link(
-            db, plain_token=payload.token, purpose="loan_invite"
-        )
+        user = await consume_magic_link(db, plain_token=payload.token, purpose="loan_invite")
         if user is not None and user.email_verified_at is None:
             # Receiving the invite at this address proves ownership.
             user.email_verified_at = datetime.now(UTC)
     if user is None:
-        raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED, "Magic link is invalid or expired"
-        )
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Magic link is invalid or expired")
 
     await db.commit()
     # Successfully clicking a login magic link proves the user owns the
@@ -460,18 +436,14 @@ async def request_password_reset(
     """Send a password-reset link. Same anti-enumeration semantics
     as the login magic-link request endpoint."""
     email = payload.email.lower().strip()
-    allowed, _ = await rate_limit_check(
-        key=f"password-reset:{email}", limit=3, window_seconds=600
-    )
+    allowed, _ = await rate_limit_check(key=f"password-reset:{email}", limit=3, window_seconds=600)
     if not allowed:
         # Same anti-enumeration shape as ``/magic-link/request`` —
         # quiet 200 so a bot can't tell anything about the account.
         logger.info("password_reset_request_rate_limited", email=email)
         return MagicLinkIssued()
 
-    user = (
-        await db.execute(select(User).where(User.email == email))
-    ).scalar_one_or_none()
+    user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
     if user is None or user.role != "borrower":
         return MagicLinkIssued()
 
@@ -503,13 +475,9 @@ async def confirm_password_reset(
     matches the conventional UX where a successful reset drops you
     into your account.
     """
-    user = await consume_magic_link(
-        db, plain_token=payload.token, purpose="password_reset"
-    )
+    user = await consume_magic_link(db, plain_token=payload.token, purpose="password_reset")
     if user is None:
-        raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED, "Reset link is invalid or expired"
-        )
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Reset link is invalid or expired")
     user.password_hash = hash_password(payload.new_password)
     await db.commit()
     _set_session_cookie(response, user)
@@ -538,9 +506,7 @@ async def logout(
     if session_cookie:
         claims = decode_jwt(session_cookie)
         if claims is not None:
-            remaining = int(
-                (claims.expires_at - datetime.now(UTC)).total_seconds()
-            )
+            remaining = int((claims.expires_at - datetime.now(UTC)).total_seconds())
             if remaining > 0:
                 await revoke_jti(claims.jti, ttl_seconds=remaining)
 

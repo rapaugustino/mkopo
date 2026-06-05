@@ -112,12 +112,12 @@ def upgrade() -> None:
         sa.Column("sequence_num", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("tool_name", sa.String(64), nullable=False),
         sa.Column(
-            "input", postgresql.JSONB(astext_type=sa.Text()), nullable=False,
+            "input",
+            postgresql.JSONB(astext_type=sa.Text()),
+            nullable=False,
             server_default="{}",
         ),
-        sa.Column(
-            "output", postgresql.JSONB(astext_type=sa.Text()), nullable=True
-        ),
+        sa.Column("output", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.Column("status", sa.String(16), nullable=False, server_default="ok"),
         sa.Column("error_message", sa.Text(), nullable=True),
         sa.Column("elapsed_ms", sa.Integer(), nullable=True),

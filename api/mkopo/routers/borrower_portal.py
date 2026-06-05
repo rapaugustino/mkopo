@@ -311,9 +311,7 @@ async def borrower_apply(
     )
     db.add(borrower_party)
     await db.flush()
-    db.add(
-        LoanParty(loan_id=loan.id, party_id=borrower_party.id, role=PartyRole.BORROWER)
-    )
+    db.add(LoanParty(loan_id=loan.id, party_id=borrower_party.id, role=PartyRole.BORROWER))
 
     # Optional guarantors
     for g in payload.guarantors:
@@ -380,9 +378,7 @@ async def borrower_apply(
 # ----- upload docs from the portal --------------------------------------
 
 
-async def _assert_borrower_owns_loan(
-    db: AsyncSession, loan: Loan, user_email: str
-) -> None:
+async def _assert_borrower_owns_loan(db: AsyncSession, loan: Loan, user_email: str) -> None:
     """Refuse the request if the signed-in borrower isn't the loan's
     borrower party.
 
@@ -475,9 +471,7 @@ async def borrower_upload_document(
     from mkopo.agents.injection import detect_injection
     from mkopo.models import InjectionSourceKind
 
-    borrower_email_for_audit = (
-        (loan.meta or {}).get("borrower_email") or "unknown"
-    )
+    borrower_email_for_audit = (loan.meta or {}).get("borrower_email") or "unknown"
     injection_result = await detect_injection(
         text=text_content,
         source_kind=InjectionSourceKind.DOCUMENT,
@@ -567,10 +561,14 @@ async def borrower_status(
     await _assert_borrower_owns_loan(db, loan, user.email)
 
     docs = (
-        await db.execute(
-            select(Document).where(Document.loan_id == loan_id).order_by(Document.created_at)
+        (
+            await db.execute(
+                select(Document).where(Document.loan_id == loan_id).order_by(Document.created_at)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     # Required-docs list scoped to the loan's class. Pulled from the
     # rules engine's REQUIRED_DOCS_* sets so the borrower portal's
@@ -580,12 +578,8 @@ async def borrower_status(
     # we'll later refuse to advance without.
     from mkopo.rules.policy import REQUIRED_DOCS, REQUIRED_DOCS_PERSONAL
 
-    loan_class_str = (
-        loan.loan_class.value if loan.loan_class is not None else "business"
-    )
-    required = (
-        REQUIRED_DOCS_PERSONAL if loan_class_str == "personal" else REQUIRED_DOCS
-    )
+    loan_class_str = loan.loan_class.value if loan.loan_class is not None else "business"
+    required = REQUIRED_DOCS_PERSONAL if loan_class_str == "personal" else REQUIRED_DOCS
     return BorrowerStatusOut(
         loan_id=loan.id,
         reference=loan.reference,
@@ -593,9 +587,7 @@ async def borrower_status(
         next_step=_next_step_for_borrower(loan.stage),
         submitted_at=loan.created_at.isoformat(),
         loan_class=loan_class_str,
-        loan_type=loan.loan_type.value
-        if hasattr(loan.loan_type, "value")
-        else str(loan.loan_type),
+        loan_type=loan.loan_type.value if hasattr(loan.loan_type, "value") else str(loan.loan_type),
         amount=str(loan.amount),
         required_docs=sorted(required),
         documents=[

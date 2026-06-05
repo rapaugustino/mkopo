@@ -117,9 +117,7 @@ def upgrade() -> None:
             server_default=sa.func.now(),
         ),
     )
-    op.create_index(
-        "ix_infrastructure_errors_created", "infrastructure_errors", ["created_at"]
-    )
+    op.create_index("ix_infrastructure_errors_created", "infrastructure_errors", ["created_at"])
     op.create_index(
         "ix_infrastructure_errors_class_created",
         "infrastructure_errors",
@@ -133,16 +131,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index(
-        "ix_infrastructure_errors_path_created", table_name="infrastructure_errors"
-    )
+    op.drop_index("ix_infrastructure_errors_path_created", table_name="infrastructure_errors")
     op.drop_index(
         "ix_infrastructure_errors_class_created",
         table_name="infrastructure_errors",
     )
-    op.drop_index(
-        "ix_infrastructure_errors_created", table_name="infrastructure_errors"
-    )
+    op.drop_index("ix_infrastructure_errors_created", table_name="infrastructure_errors")
     op.drop_table("infrastructure_errors")
     op.drop_column("llm_calls", "cost_output_usd")
     op.drop_column("llm_calls", "cost_input_usd")

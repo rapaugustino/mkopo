@@ -57,9 +57,7 @@ from mkopo.services.audit import Actor, record
 # message requires changing the wrapper, not duplicating logic.
 
 
-async def _resolve_loan(
-    ctx: ToolContext, loan_id: uuid.UUID | None = None
-) -> Loan:
+async def _resolve_loan(ctx: ToolContext, loan_id: uuid.UUID | None = None) -> Loan:
     """Borrower-specific loan resolver — verifies ownership against
     ``ctx.user_email`` and surfaces borrower-flavoured error messages."""
     return await resolve_loan(
@@ -67,9 +65,7 @@ async def _resolve_loan(
         loan_id,
         require_owner_email_match=True,
         not_found_msg="Application not found.",
-        no_scope_msg=(
-            "No loan in scope. Open the chat on a specific application page."
-        ),
+        no_scope_msg=("No loan in scope. Open the chat on a specific application page."),
         not_owned_msg="That application isn't on your account.",
     )
 
@@ -99,14 +95,10 @@ class GetLoanStatusArgs(BaseModel):
     """Empty args — the loan is implicit from the chat scope."""
 
 
-async def _handle_get_loan_status(
-    ctx: ToolContext, args: GetLoanStatusArgs
-) -> dict[str, Any]:
+async def _handle_get_loan_status(ctx: ToolContext, args: GetLoanStatusArgs) -> dict[str, Any]:
     loan = await _resolve_loan(ctx)
     docs_count = (
-        await ctx.session.execute(
-            select(Document.id).where(Document.loan_id == loan.id)
-        )
+        await ctx.session.execute(select(Document.id).where(Document.loan_id == loan.id))
     ).all()
     from mkopo.routers.borrower_portal import _next_step_for_borrower
     from mkopo.services.materials_hash import materials_drift_detected
@@ -153,17 +145,17 @@ class ListDocumentsArgs(BaseModel):
     pass
 
 
-async def _handle_list_documents(
-    ctx: ToolContext, args: ListDocumentsArgs
-) -> dict[str, Any]:
+async def _handle_list_documents(ctx: ToolContext, args: ListDocumentsArgs) -> dict[str, Any]:
     loan = await _resolve_loan(ctx)
     rows = (
-        await ctx.session.execute(
-            select(Document)
-            .where(Document.loan_id == loan.id)
-            .order_by(Document.created_at)
+        (
+            await ctx.session.execute(
+                select(Document).where(Document.loan_id == loan.id).order_by(Document.created_at)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     docs = [
         {
             "filename": d.filename,
@@ -286,21 +278,21 @@ async def _handle_get_decision_reasoning(
     """
     loan = await _resolve_loan(ctx)
     rows = (
-        await ctx.session.execute(
-            select(AuditEvent)
-            .where(
-                AuditEvent.loan_id == loan.id,
-                AuditEvent.action.in_(
-                    ("underwriting_complete", "decision_complete")
-                ),
+        (
+            await ctx.session.execute(
+                select(AuditEvent)
+                .where(
+                    AuditEvent.loan_id == loan.id,
+                    AuditEvent.action.in_(("underwriting_complete", "decision_complete")),
+                )
+                .order_by(AuditEvent.created_at.desc())
+                .limit(4)
             )
-            .order_by(AuditEvent.created_at.desc())
-            .limit(4)
         )
-    ).scalars().all()
-    underwriting = next(
-        (r for r in rows if r.action == "underwriting_complete"), None
+        .scalars()
+        .all()
     )
+    underwriting = next((r for r in rows if r.action == "underwriting_complete"), None)
     decision = next((r for r in rows if r.action == "decision_complete"), None)
 
     if not underwriting and not decision:
@@ -318,15 +310,11 @@ async def _handle_get_decision_reasoning(
             "underwriting_rationale": (underwriting.payload or {}).get("rationale")
             if underwriting
             else None,
-            "underwriting_recommendation": (underwriting.payload or {}).get(
-                "recommendation"
-            )
+            "underwriting_recommendation": (underwriting.payload or {}).get("recommendation")
             if underwriting
             else None,
             "decision_path": (decision.payload or {}).get("path") if decision else None,
-            "decision_rationale": (decision.payload or {}).get("rationale")
-            if decision
-            else None,
+            "decision_rationale": (decision.payload or {}).get("rationale") if decision else None,
         }
     await _audit_tool_call(
         ctx,
@@ -382,9 +370,7 @@ _EDITABLE_FIELDS = {
 }
 
 
-async def _handle_update_loan_field(
-    ctx: ToolContext, args: UpdateLoanFieldArgs
-) -> dict[str, Any]:
+async def _handle_update_loan_field(ctx: ToolContext, args: UpdateLoanFieldArgs) -> dict[str, Any]:
     loan = await _resolve_loan(ctx)
     if args.field not in _EDITABLE_FIELDS:
         raise ToolError(
@@ -392,9 +378,7 @@ async def _handle_update_loan_field(
             f"{', '.join(sorted(_EDITABLE_FIELDS))}."
         )
     if loan.stage in (LoanStage.CLOSING, LoanStage.SERVICING, LoanStage.WITHDRAWN):
-        raise ToolError(
-            f"This application is in {loan.stage.value} stage — fields are locked."
-        )
+        raise ToolError(f"This application is in {loan.stage.value} stage — fields are locked.")
 
     meta = dict(loan.meta or {})
     old = meta.get(args.field)
@@ -585,33 +569,33 @@ class RequestErasureArgs(BaseModel):
     )
 
 
-async def _handle_request_erasure(
-    ctx: ToolContext, args: RequestErasureArgs
-) -> dict[str, Any]:
+async def _handle_request_erasure(ctx: ToolContext, args: RequestErasureArgs) -> dict[str, Any]:
     """Soft-delete account + all loans. Same retention logic as the
     REST endpoint — we can't share the handler directly because it's
     a router function, but we mirror its effects."""
     now = datetime.now(UTC)
 
     # Soft-delete the user.
-    user = (
-        await ctx.session.execute(select(User).where(User.id == ctx.user_id))
-    ).scalar_one()
+    user = (await ctx.session.execute(select(User).where(User.id == ctx.user_id))).scalar_one()
     user.deleted_at = now
 
     # Soft-delete every loan the borrower owns + schedule retention.
     loans = (
-        await ctx.session.execute(
-            select(Loan)
-            .join(LoanParty, LoanParty.loan_id == Loan.id)
-            .join(Party, Party.id == LoanParty.party_id)
-            .where(
-                LoanParty.role == PartyRole.BORROWER,
-                Party.email == ctx.user_email,
-                Loan.deleted_at.is_(None),
+        (
+            await ctx.session.execute(
+                select(Loan)
+                .join(LoanParty, LoanParty.loan_id == Loan.id)
+                .join(Party, Party.id == LoanParty.party_id)
+                .where(
+                    LoanParty.role == PartyRole.BORROWER,
+                    Party.email == ctx.user_email,
+                    Loan.deleted_at.is_(None),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     for loan in loans:
         loan.deleted_at = now
         if loan.stage in (LoanStage.APPROVED, LoanStage.CLOSING, LoanStage.SERVICING):

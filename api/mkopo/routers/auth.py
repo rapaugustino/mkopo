@@ -40,9 +40,7 @@ from mkopo.services.redis_client import is_jti_revoked
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
-BearerCredsDep = Annotated[
-    HTTPAuthorizationCredentials | None, Depends(bearer_scheme)
-]
+BearerCredsDep = Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)]
 
 
 @dataclass
@@ -69,9 +67,7 @@ class CurrentUser:
 _STAFF_ROLES = frozenset({"underwriter", "admin"})
 
 
-async def _resolve_from_jwt(
-    db: AsyncSession, token: str
-) -> CurrentUser | None:
+async def _resolve_from_jwt(db: AsyncSession, token: str) -> CurrentUser | None:
     """Decode a staff JWT and load the user. Returns ``None`` on
     any failure so the caller's fallback logic can fire."""
     claims = decode_staff_jwt(token)
@@ -79,9 +75,7 @@ async def _resolve_from_jwt(
         return None
     if await is_jti_revoked(claims.jti):
         return None
-    user = (
-        await db.execute(select(User).where(User.id == claims.user_id))
-    ).scalar_one_or_none()
+    user = (await db.execute(select(User).where(User.id == claims.user_id))).scalar_one_or_none()
     if user is None or user.deleted_at is not None:
         return None
     if user.role not in _STAFF_ROLES:
@@ -97,9 +91,7 @@ async def _resolve_from_jwt(
 async def require_user(
     creds: BearerCredsDep,
     db: Annotated[AsyncSession, Depends(get_db)],
-    session_cookie: Annotated[
-        str | None, Cookie(alias=STAFF_SESSION_COOKIE)
-    ] = None,
+    session_cookie: Annotated[str | None, Cookie(alias=STAFF_SESSION_COOKIE)] = None,
 ) -> CurrentUser:
     """Resolve the current staff user.
 
@@ -125,6 +117,4 @@ async def require_user(
         if user is not None:
             return user
 
-    raise HTTPException(
-        status.HTTP_401_UNAUTHORIZED, "Authentication required"
-    )
+    raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Authentication required")

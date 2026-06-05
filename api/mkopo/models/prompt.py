@@ -22,9 +22,7 @@ from mkopo.models.base import Base
 class Prompt(Base):
     __tablename__ = "prompts"
     __table_args__ = (
-        UniqueConstraint(
-            "identifier", "version", name="uq_prompts_identifier_version"
-        ),
+        UniqueConstraint("identifier", "version", name="uq_prompts_identifier_version"),
     )
 
     # `id`, `created_at`, `updated_at` are inherited from Base.

@@ -31,17 +31,13 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 
 # ``None`` outside any agent run; a UUID string while a run is active.
-_current_thread_id: ContextVar[str | None] = ContextVar(
-    "mkopo_current_thread_id", default=None
-)
+_current_thread_id: ContextVar[str | None] = ContextVar("mkopo_current_thread_id", default=None)
 # ``None`` outside any step; a UUID string while a step is executing.
 # Stacks under thread_id — a run binds thread_id at the start, then
 # each node binds the step id around its execution. Calls made inside
 # the node carry both; calls made outside any node (rare —
 # orchestrator-level helpers) carry only thread_id.
-_current_step_id: ContextVar[str | None] = ContextVar(
-    "mkopo_current_step_id", default=None
-)
+_current_step_id: ContextVar[str | None] = ContextVar("mkopo_current_step_id", default=None)
 
 
 def current_thread_id() -> str | None:

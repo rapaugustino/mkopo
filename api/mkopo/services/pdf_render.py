@@ -84,9 +84,7 @@ def _wrap_text(c: canvas.Canvas, text: str, max_width: float) -> list[str]:
     return out
 
 
-def render_text_to_pdf(
-    *, title: str, body: str, footer_ref: str | None = None
-) -> bytes:
+def render_text_to_pdf(*, title: str, body: str, footer_ref: str | None = None) -> bytes:
     """Convert a text fixture into PDF bytes.
 
     ``title`` becomes the bold page header on every page (also

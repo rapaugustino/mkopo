@@ -114,9 +114,7 @@ class LoanRefArgs(BaseModel):
     loan_id: uuid.UUID | None = None
 
 
-async def _handle_get_loan_overview(
-    ctx: ToolContext, args: LoanRefArgs
-) -> dict[str, Any]:
+async def _handle_get_loan_overview(ctx: ToolContext, args: LoanRefArgs) -> dict[str, Any]:
     loan = await _load_loan(ctx, args.loan_id)
     # Borrower name (handy for cross-references in the conversation).
     borrower_email = (
@@ -142,9 +140,7 @@ async def _handle_get_loan_overview(
             .join(Document)
             .where(
                 Document.loan_id == loan.id,
-                Extraction.status.in_(
-                    (ExtractionStatus.ACCEPTED, ExtractionStatus.OVERRIDDEN)
-                ),
+                Extraction.status.in_((ExtractionStatus.ACCEPTED, ExtractionStatus.OVERRIDDEN)),
             )
         )
     ).scalar_one()
@@ -201,13 +197,17 @@ async def _handle_list_recent_activity(
 ) -> dict[str, Any]:
     loan = await _load_loan(ctx, args.loan_id)
     rows = (
-        await ctx.session.execute(
-            select(AuditEvent)
-            .where(AuditEvent.loan_id == loan.id)
-            .order_by(desc(AuditEvent.created_at))
-            .limit(args.limit)
+        (
+            await ctx.session.execute(
+                select(AuditEvent)
+                .where(AuditEvent.loan_id == loan.id)
+                .order_by(desc(AuditEvent.created_at))
+                .limit(args.limit)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     events = [
         {
             "action": e.action,
@@ -243,14 +243,10 @@ def _summarise_audit_payload(action: str, payload: dict[str, Any]) -> str:
         return f"{payload.get('from_stage')} → {payload.get('to_stage')}"
     if action == "underwriting_complete":
         return (
-            f"recommendation={payload.get('recommendation')}, "
-            f"risk_band={payload.get('risk_band')}"
+            f"recommendation={payload.get('recommendation')}, risk_band={payload.get('risk_band')}"
         )
     if action == "decision_complete":
-        return (
-            f"path={payload.get('path')}, "
-            f"confidence={payload.get('confidence')}"
-        )
+        return f"path={payload.get('path')}, confidence={payload.get('confidence')}"
     if action == "tool_invoked":
         return f"tool={payload.get('tool_name')}"
     if action == "document_uploaded" or action == "borrower_document_uploaded":
@@ -286,8 +282,7 @@ class SearchLoansArgs(BaseModel):
         min_length=1,
         max_length=200,
         description=(
-            "Free-text search across loan reference, borrower name, "
-            "borrower email, and purpose."
+            "Free-text search across loan reference, borrower name, borrower email, and purpose."
         ),
     )
     stage: str | None = Field(
@@ -301,9 +296,7 @@ class SearchLoansArgs(BaseModel):
     limit: int = Field(default=10, ge=1, le=50)
 
 
-async def _handle_search_loans(
-    ctx: ToolContext, args: SearchLoansArgs
-) -> dict[str, Any]:
+async def _handle_search_loans(ctx: ToolContext, args: SearchLoansArgs) -> dict[str, Any]:
     """Pipeline-wide search. Read-only; respects soft-delete."""
     q = args.query.strip()
     stmt = (
@@ -325,8 +318,7 @@ async def _handle_search_loans(
             stmt = stmt.where(Loan.stage == LoanStage(args.stage))
         except ValueError as e:
             raise ToolError(
-                f"Unknown stage '{args.stage}'. Valid: "
-                f"{', '.join(s.value for s in LoanStage)}."
+                f"Unknown stage '{args.stage}'. Valid: {', '.join(s.value for s in LoanStage)}."
             ) from e
     rows = (await ctx.session.execute(stmt)).all()
     # Dedupe (same loan may match on multiple LoanParty rows).
@@ -386,31 +378,31 @@ async def _handle_get_borrower_messages(
     underwriter, plus the borrower's literal agent prompts."""
     loan = await _load_loan(ctx, args.loan_id)
     rows = (
-        await ctx.session.execute(
-            select(AuditEvent)
-            .where(
-                AuditEvent.loan_id == loan.id,
-                AuditEvent.action.in_(
-                    (
-                        "internal_note",
-                        "borrower_reply",
-                        "borrower_chat_message",
-                    )
-                ),
+        (
+            await ctx.session.execute(
+                select(AuditEvent)
+                .where(
+                    AuditEvent.loan_id == loan.id,
+                    AuditEvent.action.in_(
+                        (
+                            "internal_note",
+                            "borrower_reply",
+                            "borrower_chat_message",
+                        )
+                    ),
+                )
+                .order_by(desc(AuditEvent.created_at))
+                .limit(args.limit)
             )
-            .order_by(desc(AuditEvent.created_at))
-            .limit(args.limit)
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     messages = [
         {
             "action": r.action,
-            "from": str(r.actor_type)
-            + ":"
-            + (r.actor_id or "?"),
-            "text": (r.payload or {}).get("body")
-            or (r.payload or {}).get("text")
-            or "",
+            "from": str(r.actor_type) + ":" + (r.actor_id or "?"),
+            "text": (r.payload or {}).get("body") or (r.payload or {}).get("text") or "",
             "at": r.created_at.isoformat(),
         }
         for r in rows
@@ -538,10 +530,7 @@ register(
 
 class AdvanceStageArgs(BaseModel):
     to_stage: str = Field(
-        description=(
-            "Target stage — must be a legal forward edge from the loan's "
-            "current stage."
-        )
+        description=("Target stage — must be a legal forward edge from the loan's current stage.")
     )
     reason: str = Field(
         min_length=1,
@@ -551,9 +540,7 @@ class AdvanceStageArgs(BaseModel):
     loan_id: uuid.UUID | None = None
 
 
-async def _handle_advance_stage(
-    ctx: ToolContext, args: AdvanceStageArgs
-) -> dict[str, Any]:
+async def _handle_advance_stage(ctx: ToolContext, args: AdvanceStageArgs) -> dict[str, Any]:
     from mkopo.services.loans import (
         IllegalStageTransitionError,
         transition_stage,

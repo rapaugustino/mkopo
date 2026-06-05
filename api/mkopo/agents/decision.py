@@ -254,7 +254,7 @@ async def draft_decision(state: DecisionState) -> DecisionState:
         user_path += (
             "\n\nIMPORTANT — previous draft was rejected by the "
             "guardrail judge:\n"
-            f"\"{last_critique}\"\n\n"
+            f'"{last_critique}"\n\n'
             "Revise to address the specific failure above. Do not "
             "repeat the same mistake."
         )
@@ -322,7 +322,7 @@ async def draft_decision(state: DecisionState) -> DecisionState:
         reason_block = "\n".join(
             (
                 f"- rule_id={f.rule_id} (friendly label for prose: "
-                f"\"{friendly_rule_label(f.rule_id)}\"): {f.message}"
+                f'"{friendly_rule_label(f.rule_id)}"): {f.message}'
             )
             for f in flags
             if f.rule_id in candidate_reasons
@@ -343,9 +343,7 @@ async def draft_decision(state: DecisionState) -> DecisionState:
 
         loan_id = uuid.UUID(state["loan_id"])
         async with get_session() as session:
-            loan = (
-                await session.execute(select(Loan).where(Loan.id == loan_id))
-            ).scalar_one()
+            loan = (await session.execute(select(Loan).where(Loan.id == loan_id))).scalar_one()
             borrower_row = (
                 await session.execute(
                     select(Party)
@@ -359,9 +357,7 @@ async def draft_decision(state: DecisionState) -> DecisionState:
             ).scalar_one_or_none()
             institution = await get_institution(session)
 
-        applicant_name = (
-            borrower_row.name if borrower_row else "(applicant name not on file)"
-        )
+        applicant_name = borrower_row.name if borrower_row else "(applicant name not on file)"
         # Property type is in extractions if intake ran; default to
         # the loan_type as a degraded fallback so the prompt still
         # has something to interpolate.
@@ -445,8 +441,7 @@ def _decision_judge_context(state: DecisionState) -> str:
     decision = state.get("decision")
     flags = state.get("rule_outcomes", []) or []
     rules_summary = "\n".join(
-        f"- {f.rule_id} (severity={f.severity}, passed={f.passed}): {f.message}"
-        for f in flags
+        f"- {f.rule_id} (severity={f.severity}, passed={f.passed}): {f.message}" for f in flags
     )
     path = decision.path if decision else "(no decision)"
     confidence = decision.confidence if decision else "(no decision)"
@@ -462,9 +457,7 @@ def _extract_verdict_text(state: DecisionState) -> str | None:
     decision = state.get("decision")
     if decision is None:
         return None
-    return (
-        f"Verdict: {decision.verdict_text}\n\nRationale: {decision.rationale}"
-    )
+    return f"Verdict: {decision.verdict_text}\n\nRationale: {decision.rationale}"
 
 
 def _extract_aal_text(state: DecisionState) -> str | None:
@@ -568,9 +561,7 @@ async def persist(state: DecisionState) -> DecisionState:
                     # see whether the constitutional judge passed/warned/
                     # gave up on this draft + the critique it produced.
                     "guardrail_judgment": state.get("last_judgment"),
-                    "validation_attempts": state.get(
-                        "validation_attempts", 0
-                    ),
+                    "validation_attempts": state.get("validation_attempts", 0),
                 },
             )
         )

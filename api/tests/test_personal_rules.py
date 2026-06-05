@@ -123,15 +123,11 @@ class TestCreditScoreFloor:
 
 class TestEmploymentTenure:
     def test_well_tenured_passes(self):
-        ctx = RuleContext(
-            loan_amount=Decimal("20000"), years_employment=Decimal("5.5")
-        )
+        ctx = RuleContext(loan_amount=Decimal("20000"), years_employment=Decimal("5.5"))
         assert rule_employment_tenure(ctx).passed
 
     def test_below_minimum_fails(self):
-        ctx = RuleContext(
-            loan_amount=Decimal("20000"), years_employment=Decimal("0.5")
-        )
+        ctx = RuleContext(loan_amount=Decimal("20000"), years_employment=Decimal("0.5"))
         result = rule_employment_tenure(ctx)
         assert not result.passed
 

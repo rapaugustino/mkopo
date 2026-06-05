@@ -40,6 +40,7 @@ Not done here (next session):
 Run from the api/ directory so it picks up .env:
     python scripts/harden_s3_bucket.py
 """
+
 from __future__ import annotations
 
 import asyncio

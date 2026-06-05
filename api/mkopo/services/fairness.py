@@ -97,11 +97,7 @@ class _GroupStats:
 
     @property
     def approval_rate(self) -> float:
-        return (
-            self.n_approved / self.n_decisioned
-            if self.n_decisioned > 0
-            else 0.0
-        )
+        return self.n_approved / self.n_decisioned if self.n_decisioned > 0 else 0.0
 
 
 @dataclass
@@ -115,9 +111,7 @@ class FairnessResult:
     flag: str  # "ok" | "watch" | "concern" — banded against 0.80
 
     @classmethod
-    def from_groups(
-        cls, groups: list[_GroupStats], window_days: int
-    ) -> FairnessResult:
+    def from_groups(cls, groups: list[_GroupStats], window_days: int) -> FairnessResult:
         # AIR requires at least two groups with decisioned loans.
         active = [g for g in groups if g.n_decisioned > 0]
         rates = [g.approval_rate for g in active]
@@ -181,18 +175,14 @@ def _synthetic_class_for_loan(loan_id: uuid.UUID) -> str:
     return "Group A" if digest[0] % 2 == 0 else "Group B"
 
 
-async def _load_decisioned_loans(
-    session: AsyncSession, window_days: int
-) -> list[Loan]:
+async def _load_decisioned_loans(session: AsyncSession, window_days: int) -> list[Loan]:
     """Pull every loan that received a lender decision within the
     window. The dashboard's other monitors (drift, calibration) use
     ``created_at`` for the same purpose; we follow suit so the three
     monitors' trends share a population definition."""
     cutoff = datetime.now(UTC) - timedelta(days=window_days)
     stmt = select(Loan).where(
-        Loan.stage.in_(
-            tuple(_APPROVED_STAGES) + (LoanStage.DECLINED,)
-        ),
+        Loan.stage.in_(tuple(_APPROVED_STAGES) + (LoanStage.DECLINED,)),
         Loan.created_at >= cutoff,
     )
     rows = (await session.execute(stmt)).scalars().all()

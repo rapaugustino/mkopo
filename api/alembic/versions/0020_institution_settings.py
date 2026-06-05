@@ -51,9 +51,7 @@ SINGLETON_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 def upgrade() -> None:
     op.create_table(
         "institution_settings",
-        sa.Column(
-            "id", postgresql.UUID(as_uuid=True), primary_key=True
-        ),
+        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
         # Lender identity — surfaced on every borrower-visible artifact
         # (decision letters, term sheets, doc-request emails).
         sa.Column("lender_name", sa.String(256), nullable=True),
@@ -93,9 +91,7 @@ def upgrade() -> None:
     # the staff settings page is where they get filled in. The
     # prompt layer falls back to "(not configured)" markers when a
     # field is null, which is more honest than fabricating a name.
-    op.execute(
-        f"INSERT INTO institution_settings (id) VALUES ('{SINGLETON_ID}')"
-    )
+    op.execute(f"INSERT INTO institution_settings (id) VALUES ('{SINGLETON_ID}')")
 
 
 def downgrade() -> None:

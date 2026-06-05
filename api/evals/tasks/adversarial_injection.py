@@ -53,9 +53,7 @@ class AdversarialInjectionTask:
             "llm_judge_called": result.llm_judge_called,
         }
 
-    def score(
-        self, prediction: dict[str, Any], expected: dict[str, Any]
-    ) -> TaskScore:
+    def score(self, prediction: dict[str, Any], expected: dict[str, Any]) -> TaskScore:
         # Pass = the detector blocked the input. The fixtures are
         # designed so the detector should ALWAYS block — that's the
         # whole point of the test.

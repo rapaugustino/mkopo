@@ -102,9 +102,7 @@ class InjectionDetection(Base):
         nullable=True,
     )
     source_kind: Mapped[str] = mapped_column(_source_kind_pg, nullable=False)
-    source_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), nullable=True
-    )
+    source_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     severity: Mapped[str] = mapped_column(_severity_pg, nullable=False)
     decision: Mapped[str] = mapped_column(_decision_pg, nullable=False)
     matched_patterns: Mapped[list[dict]] = mapped_column(
@@ -119,9 +117,7 @@ class InjectionDetection(Base):
         default=False,
         server_default="false",
     )
-    llm_judge_severity: Mapped[str | None] = mapped_column(
-        _severity_pg, nullable=True
-    )
+    llm_judge_severity: Mapped[str | None] = mapped_column(_severity_pg, nullable=True)
     llm_judge_critique: Mapped[str | None] = mapped_column(Text, nullable=True)
     raw_text_excerpt: Mapped[str] = mapped_column(Text, nullable=False)
     actor_kind: Mapped[str] = mapped_column(String(16), nullable=False)

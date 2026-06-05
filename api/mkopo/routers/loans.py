@@ -53,10 +53,7 @@ async def list_loans(user: CurrentUserDep, db: DbSessionDep) -> list[Loan]:
     # though the row sticks around for the regulatory retention
     # window. Cited by the partial index ``ix_loans_active``.
     result = await db.execute(
-        select(Loan)
-        .where(Loan.deleted_at.is_(None))
-        .order_by(Loan.created_at.desc())
-        .limit(100)
+        select(Loan).where(Loan.deleted_at.is_(None)).order_by(Loan.created_at.desc()).limit(100)
     )
     return list(result.scalars().all())
 
@@ -328,9 +325,7 @@ class StaffUserOut(BaseModel):
 
 
 @router.get("/staff/users", response_model=list[StaffUserOut])
-async def list_staff_users(
-    user: CurrentUserDep, db: DbSessionDep
-) -> list[User]:
+async def list_staff_users(user: CurrentUserDep, db: DbSessionDep) -> list[User]:
     """List staff users (underwriters + admins) for the
     owner-reassignment dropdown on the loan detail page.
 
@@ -344,15 +339,19 @@ async def list_staff_users(
     a typical lender) that we don't paginate.
     """
     rows = (
-        await db.execute(
-            select(User)
-            .where(
-                User.role.in_(("underwriter", "admin")),
-                User.deleted_at.is_(None),
+        (
+            await db.execute(
+                select(User)
+                .where(
+                    User.role.in_(("underwriter", "admin")),
+                    User.deleted_at.is_(None),
+                )
+                .order_by(User.name.asc())
             )
-            .order_by(User.name.asc())
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return list(rows)
 
 
@@ -396,9 +395,7 @@ async def set_loan_owner(
             await db.execute(select(User).where(User.id == payload.owner_id))
         ).scalar_one_or_none()
         if new_owner is None or new_owner.deleted_at is not None:
-            raise HTTPException(
-                status.HTTP_404_NOT_FOUND, "Staff user not found"
-            )
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Staff user not found")
         if new_owner.role not in ("underwriter", "admin"):
             # A borrower can't be a loan owner — keep the role boundary
             # tight; the dropdown only ever offers staff, so this would
@@ -484,9 +481,7 @@ async def materials_status(
     from mkopo.services.materials_hash import materials_drift_detected
 
     drifted, current_hash, decision_hash = await materials_drift_detected(db, loan_id)
-    return MaterialsStatus(
-        drifted=drifted, current_hash=current_hash, decision_hash=decision_hash
-    )
+    return MaterialsStatus(drifted=drifted, current_hash=current_hash, decision_hash=decision_hash)
 
 
 class CitationOut(BaseModel):
@@ -583,9 +578,7 @@ async def resolve_citation(
         char_start=span.get("char_start"),
         char_end=span.get("char_end"),
         status=(
-            extraction.status
-            if isinstance(extraction.status, str)
-            else extraction.status.value
+            extraction.status if isinstance(extraction.status, str) else extraction.status.value
         ),
     )
 
@@ -680,9 +673,7 @@ async def get_rules_preview(
     )
     debt_yield = float(ctx.annual_noi / ctx.loan_amount) if ctx.annual_noi else None
     doc_confidence = (
-        sum(result.confidences.values()) / len(result.confidences)
-        if result.confidences
-        else None
+        sum(result.confidences.values()) / len(result.confidences) if result.confidences else None
     )
     return {
         "kpis": {

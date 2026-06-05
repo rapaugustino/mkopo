@@ -184,9 +184,9 @@ def _build_user(inputs: dict[str, Any]) -> str:
 # lists (`1. ` at line start). The `re.MULTILINE` flag lets the
 # heading + list patterns match at any line.
 _MARKDOWN_RE = re.compile(
-    r"\*\*\S|"           # **bold (asterisk followed by non-space)
-    r"^#{1,6}\s|"        # heading at line start
-    r"^\s*\d+\.\s",      # numbered list "1. item"
+    r"\*\*\S|"  # **bold (asterisk followed by non-space)
+    r"^#{1,6}\s|"  # heading at line start
+    r"^\s*\d+\.\s",  # numbered list "1. item"
     re.MULTILINE,
 )
 
@@ -226,9 +226,7 @@ class IntakeEmailTask:
             "body_text": result.body_text,
         }
 
-    def score(
-        self, prediction: dict[str, Any], expected: dict[str, Any]
-    ) -> TaskScore:
+    def score(self, prediction: dict[str, Any], expected: dict[str, Any]) -> TaskScore:
         body = prediction.get("body_text") or ""
         body_lower = body.lower()
         borrower_name = (expected.get("borrower_name") or "").strip()
@@ -239,13 +237,8 @@ class IntakeEmailTask:
         # "Hi Jane," instead of "Hi Jane Doe,"). We require any
         # name token of length ≥ 3 to appear to avoid spurious
         # matches on "the", "and", etc.
-        name_tokens = [
-            tok for tok in re.split(r"\s+", borrower_name)
-            if len(tok) >= 3
-        ]
-        addressed_by_name = any(
-            tok.lower() in body_lower for tok in name_tokens
-        )
+        name_tokens = [tok for tok in re.split(r"\s+", borrower_name) if len(tok) >= 3]
+        addressed_by_name = any(tok.lower() in body_lower for tok in name_tokens)
 
         # Criterion 2: no markdown bold / heading / numbered list.
         no_markdown = _MARKDOWN_RE.search(body) is None
@@ -254,11 +247,7 @@ class IntakeEmailTask:
         # appears in the body. ``personal`` and ``business`` have
         # disjoint vocabularies (see top of file) — a single hit is
         # enough.
-        terms = (
-            _PERSONAL_DOC_TERMS
-            if loan_class == "personal"
-            else _BUSINESS_DOC_TERMS
-        )
+        terms = _PERSONAL_DOC_TERMS if loan_class == "personal" else _BUSINESS_DOC_TERMS
         matched_terms = [t for t in terms if t in body_lower]
         doc_asks_match_class = len(matched_terms) > 0
 

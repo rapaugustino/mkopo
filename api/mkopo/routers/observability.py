@@ -261,8 +261,7 @@ async def llm_observability(
         # what we have and surface model_cost=None when the *whole*
         # model is uncosted so the UI knows to flag it.
         model_cost = sum(
-            (float(c.cost_input_usd or 0) + float(c.cost_output_usd or 0))
-            for c in calls
+            (float(c.cost_input_usd or 0) + float(c.cost_output_usd or 0)) for c in calls
         )
         has_cost = any(c.cost_input_usd is not None for c in calls)
         by_model_stats.append(
@@ -282,10 +281,7 @@ async def llm_observability(
     # Window-level cost totals. ``uncosted_calls`` is the count of
     # rows with no cost (unknown model) so the UI can warn when the
     # bill is incomplete.
-    total_cost = sum(
-        (float(r.cost_input_usd or 0) + float(r.cost_output_usd or 0))
-        for r in rows
-    )
+    total_cost = sum((float(r.cost_input_usd or 0) + float(r.cost_output_usd or 0)) for r in rows)
     uncosted = sum(1 for r in rows if r.cost_input_usd is None)
 
     # Pull the most recent ``limit`` rows for the raw-events table.
@@ -344,9 +340,7 @@ async def llm_call_detail(
     operator can tell "this prompt always fails on this model" from
     "one-off transient API blip".
     """
-    call = (
-        await db.execute(select(LLMCall).where(LLMCall.id == call_id))
-    ).scalar_one_or_none()
+    call = (await db.execute(select(LLMCall).where(LLMCall.id == call_id))).scalar_one_or_none()
     if call is None:
         raise HTTPException(
             status_code=http_status.HTTP_404_NOT_FOUND,
@@ -357,28 +351,36 @@ async def llm_call_detail(
     # because the drawer doesn't need a huge list.
     cutoff = call.created_at - timedelta(hours=72)
     neighbours = (
-        await db.execute(
-            select(LLMCall)
-            .where(
-                LLMCall.system_prompt_hash == call.system_prompt_hash,
-                LLMCall.id != call.id,
-                LLMCall.created_at >= cutoff,
+        (
+            await db.execute(
+                select(LLMCall)
+                .where(
+                    LLMCall.system_prompt_hash == call.system_prompt_hash,
+                    LLMCall.id != call.id,
+                    LLMCall.created_at >= cutoff,
+                )
+                .order_by(desc(LLMCall.created_at))
+                .limit(20)
             )
-            .order_by(desc(LLMCall.created_at))
-            .limit(20)
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     # Tool trajectory issued by this call. Ordered by sequence_num so
     # the drawer renders the agent's reasoning in the same order the
     # model proposed it.
     tool_uses = (
-        await db.execute(
-            select(ToolUse)
-            .where(ToolUse.llm_call_id == call.id)
-            .order_by(ToolUse.sequence_num.asc())
+        (
+            await db.execute(
+                select(ToolUse)
+                .where(ToolUse.llm_call_id == call.id)
+                .order_by(ToolUse.sequence_num.asc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     return LLMCallDetail(
         id=str(call.id),
@@ -393,12 +395,8 @@ async def llm_call_detail(
         # Decimal → float for JSON serialisation. None when the
         # gateway didn't have pricing data (third-party / unknown
         # model) — the dashboard renders this as "—" rather than $0.
-        cost_input_usd=(
-            float(call.cost_input_usd) if call.cost_input_usd is not None else None
-        ),
-        cost_output_usd=(
-            float(call.cost_output_usd) if call.cost_output_usd is not None else None
-        ),
+        cost_input_usd=(float(call.cost_input_usd) if call.cost_input_usd is not None else None),
+        cost_output_usd=(float(call.cost_output_usd) if call.cost_output_usd is not None else None),
         system_prompt_hash=call.system_prompt_hash,
         error_reason=call.error_reason,
         error_detail=call.error_detail,
@@ -453,12 +451,16 @@ async def agents_observability(
     cutoff = datetime.now(UTC) - timedelta(hours=hours)
 
     runs = (
-        await db.execute(
-            select(AgentRun)
-            .where(AgentRun.created_at >= cutoff)
-            .order_by(desc(AgentRun.created_at))
+        (
+            await db.execute(
+                select(AgentRun)
+                .where(AgentRun.created_at >= cutoff)
+                .order_by(desc(AgentRun.created_at))
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     by_agent_counts = await db.execute(
         select(AgentRun.agent_name, func.count())  # type: ignore[arg-type]
@@ -552,20 +554,28 @@ async def agent_run_detail(
         )
 
     steps = (
-        await db.execute(
-            select(AgentStep)
-            .where(AgentStep.agent_run_id == agent_run_id)
-            .order_by(AgentStep.created_at)
+        (
+            await db.execute(
+                select(AgentStep)
+                .where(AgentStep.agent_run_id == agent_run_id)
+                .order_by(AgentStep.created_at)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     llm_calls = (
-        await db.execute(
-            select(LLMCall)
-            .where(LLMCall.thread_id == run.thread_id)
-            .order_by(LLMCall.created_at)
+        (
+            await db.execute(
+                select(LLMCall)
+                .where(LLMCall.thread_id == run.thread_id)
+                .order_by(LLMCall.created_at)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     return AgentRunDetail(
         id=str(run.id),
@@ -600,9 +610,7 @@ async def agent_run_detail(
                 output_tokens=c.output_tokens,
                 system_prompt_hash=c.system_prompt_hash[:12],
                 error_reason=c.error_reason,
-                parent_step_id=(
-                    str(c.parent_step_id) if c.parent_step_id else None
-                ),
+                parent_step_id=(str(c.parent_step_id) if c.parent_step_id else None),
             )
             for c in llm_calls
         ],
@@ -638,12 +646,16 @@ async def errors_observability(
     cutoff = datetime.now(UTC) - timedelta(hours=hours)
 
     rows = (
-        await db.execute(
-            select(InfrastructureError)
-            .where(InfrastructureError.created_at >= cutoff)
-            .order_by(desc(InfrastructureError.created_at))
+        (
+            await db.execute(
+                select(InfrastructureError)
+                .where(InfrastructureError.created_at >= cutoff)
+                .order_by(desc(InfrastructureError.created_at))
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     # Per-class rollup. Counts + most recent occurrence so the UI can
     # show "OperationalError × 3 — last seen 2m ago" at a glance.
@@ -689,9 +701,7 @@ async def error_detail(
 ) -> InfrastructureErrorDetail:
     """One error's full traceback. Powers the drill-in drawer."""
     row = (
-        await db.execute(
-            select(InfrastructureError).where(InfrastructureError.id == error_id)
-        )
+        await db.execute(select(InfrastructureError).where(InfrastructureError.id == error_id))
     ).scalar_one_or_none()
     if row is None:
         raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND)

@@ -120,29 +120,21 @@ def hash_payload(payload: dict[str, Any]) -> str:
     builds the payload; this function does the canonical-JSON +
     sha256 step.
     """
-    canonical = json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), default=_json_default
-    )
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=_json_default)
     digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     return f"{HASH_VERSION}:{digest}"
 
 
-async def _materials_payload(
-    session: AsyncSession, loan_id: uuid.UUID
-) -> dict[str, Any]:
+async def _materials_payload(session: AsyncSession, loan_id: uuid.UUID) -> dict[str, Any]:
     """Build the dict that gets hashed. Exposed for testing and for
     the explainability surface ("show me what fed this hash")."""
-    loan = (
-        await session.execute(select(Loan).where(Loan.id == loan_id))
-    ).scalar_one()
+    loan = (await session.execute(select(Loan).where(Loan.id == loan_id))).scalar_one()
 
     # Filter meta to the decision-feeding keys; sort the result so
     # JSON serialisation is stable across Python dict-iteration order.
     raw_meta = loan.meta or {}
     meta = {
-        k: raw_meta[k]
-        for k in _DECISION_META_KEYS
-        if raw_meta.get(k) not in (None, "", "None")
+        k: raw_meta[k] for k in _DECISION_META_KEYS if raw_meta.get(k) not in (None, "", "None")
     }
 
     # Accepted + overridden extractions — the field/value pairs the
@@ -155,16 +147,12 @@ async def _materials_payload(
             .join(Document)
             .where(
                 Document.loan_id == loan_id,
-                Extraction.status.in_(
-                    (ExtractionStatus.ACCEPTED, ExtractionStatus.OVERRIDDEN)
-                ),
+                Extraction.status.in_((ExtractionStatus.ACCEPTED, ExtractionStatus.OVERRIDDEN)),
             )
             .order_by(Extraction.field_name, Extraction.id)
         )
     ).all()
-    extractions = [
-        {"field": r.field_name, "value": r.value, "id": str(r.id)} for r in ext_rows
-    ]
+    extractions = [{"field": r.field_name, "value": r.value, "id": str(r.id)} for r in ext_rows]
 
     # Documents — capture each one's content_hash. content_hash is
     # nullable for backwards compat; ``null`` is included as itself
@@ -228,9 +216,7 @@ def _json_default(v: Any) -> Any:
     raise TypeError(f"unhashable type {type(v).__name__}")
 
 
-async def latest_decision_materials_hash(
-    session: AsyncSession, loan_id: uuid.UUID
-) -> str | None:
+async def latest_decision_materials_hash(session: AsyncSession, loan_id: uuid.UUID) -> str | None:
     """Return the materials hash stamped on the most recent COMPLETED
     decision agent run for this loan, or ``None`` if no decision has
     ever completed.

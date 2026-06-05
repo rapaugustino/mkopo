@@ -103,5 +103,3 @@ async def comparable_loans(
         )
         for row in rows
     ]
-
-

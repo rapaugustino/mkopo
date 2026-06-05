@@ -99,9 +99,7 @@ def upgrade() -> None:
         ),
         # (identifier, version) is the natural composite key; UUID id
         # stays primary for FK targeting (e.g. future annotations).
-        sa.UniqueConstraint(
-            "identifier", "version", name="uq_prompts_identifier_version"
-        ),
+        sa.UniqueConstraint("identifier", "version", name="uq_prompts_identifier_version"),
     )
     # Partial unique index — at most one is_active row per identifier.
     # This is the constraint that makes "activate version N" safe

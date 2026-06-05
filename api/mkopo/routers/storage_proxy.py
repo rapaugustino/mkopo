@@ -93,14 +93,10 @@ async def serve_local_file(token: str) -> Response:
             options={"require": ["exp", "key", "loan_id"]},
         )
     except jwt.ExpiredSignatureError as exc:
-        raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED, "Download link has expired."
-        ) from exc
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Download link has expired.") from exc
     except jwt.PyJWTError as exc:
         logger.warning("storage_proxy_bad_token", error=str(exc))
-        raise HTTPException(
-            status.HTTP_401_UNAUTHORIZED, "Invalid download link."
-        ) from exc
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid download link.") from exc
 
     key = payload["key"]
     # Defense in depth: the key must point inside STORAGE_ROOT after

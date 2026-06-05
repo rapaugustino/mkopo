@@ -61,9 +61,7 @@ def upgrade() -> None:
         "ix_loans_retention_sweep",
         "loans",
         ["retention_until"],
-        postgresql_where=sa.text(
-            "deleted_at IS NOT NULL AND retention_until IS NOT NULL"
-        ),
+        postgresql_where=sa.text("deleted_at IS NOT NULL AND retention_until IS NOT NULL"),
     )
     op.add_column(
         "users",

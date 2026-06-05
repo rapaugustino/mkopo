@@ -169,9 +169,7 @@ class LLMGateway:
                     # which fields failed and how.
                     err_count = len(e.errors()) if hasattr(e, "errors") else 1
                     first_loc = (
-                        e.errors()[0].get("loc", ())
-                        if hasattr(e, "errors") and e.errors()
-                        else ()
+                        e.errors()[0].get("loc", ()) if hasattr(e, "errors") and e.errors() else ()
                     )
                     first_field = ".".join(str(p) for p in first_loc) or "?"
                     short_reason = (
@@ -207,12 +205,7 @@ class LLMGateway:
                 # so the downstream LLMCallFailedError carries something
                 # the UI can show. Without this, the user sees a generic
                 # "LLM call errored after N attempts" with no clue why.
-                inner = (
-                    getattr(e, "message", None)
-                    or str(e)
-                    or repr(e)
-                    or e.__class__.__name__
-                )
+                inner = getattr(e, "message", None) or str(e) or repr(e) or e.__class__.__name__
                 last_error = str(inner)
                 if attempt == max_retries:
                     # Short reason = exception class + inner message;
@@ -338,9 +331,7 @@ class LLMGateway:
             )
         except Exception as e:
             elapsed = time.monotonic() - started_at
-            inner = (
-                getattr(e, "message", None) or str(e) or repr(e) or e.__class__.__name__
-            )
+            inner = getattr(e, "message", None) or str(e) or repr(e) or e.__class__.__name__
             await self._record_call(
                 call_id=call_id,
                 model=model,

@@ -137,9 +137,7 @@ def _rbf(a: list[float], b: list[float], sigma_sq: float) -> float:
     return math.exp(-_sq_dist(a, b) / (2.0 * sigma_sq))
 
 
-def compute_mmd2(
-    current: list[list[float]], reference: list[list[float]]
-) -> tuple[float, float]:
+def compute_mmd2(current: list[list[float]], reference: list[list[float]]) -> tuple[float, float]:
     """Unbiased MMD² estimator + median-heuristic σ.
 
     Returns ``(mmd2, sigma)``. The caller bands ``mmd2`` against
@@ -170,11 +168,7 @@ def compute_mmd2(
     for x in current:
         for y in reference:
             sum_cr += _rbf(x, y, sigma_sq)
-    mmd2 = (
-        sum_cc / (n * (n - 1))
-        + sum_rr / (m * (m - 1))
-        - 2.0 * sum_cr / (n * m)
-    )
+    mmd2 = sum_cc / (n * (n - 1)) + sum_rr / (m * (m - 1)) - 2.0 * sum_cr / (n * m)
     return mmd2, sigma
 
 
@@ -188,9 +182,7 @@ def _band(mmd2: float | None) -> str:
     return "major"
 
 
-async def _load_message_bodies(
-    session: AsyncSession, start: datetime, end: datetime
-) -> list[str]:
+async def _load_message_bodies(session: AsyncSession, start: datetime, end: datetime) -> list[str]:
     """Pull inbound borrower messages in the window. We filter to
     inbound only — outbound is system-generated and would dominate
     any drift signal with our own prompt-template phrasing."""
