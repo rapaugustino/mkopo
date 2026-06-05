@@ -45,3 +45,6 @@ Thumbs.db
 
 # Local document storage
 api/var/
+
+# Owner-private notes (interview prep, blog drafts, etc.)
+.private/

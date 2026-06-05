@@ -64,8 +64,6 @@ For sample workflows with sequence diagrams, see
 [**WORKFLOWS.md**](docs/WORKFLOWS.md).
 For acronym definitions, see [**GLOSSARY.md**](docs/GLOSSARY.md)
 (or the in-app `/help` page).
-For interview talking points (project owner reference), see
-[**INTERVIEW.md**](docs/INTERVIEW.md).
 
 ---
 
@@ -504,8 +502,7 @@ mkopo/
 │   ├── GLOSSARY.md                 acronym definitions (mirrors /help)
 │   ├── SAFETY.md                   hallucination-mitigation audit
 │   ├── WORKFLOWS.md                sample workflows + sequence diagrams
-│   ├── EVAL_PLAN.md                eval surface state + roadmap
-│   └── INTERVIEW.md                interview talking points
+│   └── EVAL_PLAN.md                eval surface state + roadmap
 ├── samples/                        labeled sample loan packets
 ├── TESTING_GUIDE.md                end-to-end click-through scripts
 └── README.md
@@ -543,7 +540,6 @@ mkopo/
 - [docs/SAFETY.md](docs/SAFETY.md) — hallucination-mitigation audit
 - [docs/WORKFLOWS.md](docs/WORKFLOWS.md) — sample workflows with sequence diagrams
 - [docs/EVAL_PLAN.md](docs/EVAL_PLAN.md) — current eval surface + phased plan to lender-grade
-- [docs/INTERVIEW.md](docs/INTERVIEW.md) — interview talking points (project owner reference)
 - [TESTING_GUIDE.md](TESTING_GUIDE.md) — clickable end-to-end scripts for every flow
 
 ---

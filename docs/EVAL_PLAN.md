@@ -1,11 +1,16 @@
-# Eval surface — current state + plan to industry standard
+# Eval surface — current state + roadmap
 
-A snapshot of what the `/eval` page actually does today, what numbers
-update (and when), what's missing for a credible lender-grade eval,
-and a phased plan to close the gap. Industry references are inline
-so anyone picking this up later can verify the claims.
+A snapshot of what the `/eval` page does today, what numbers update
+(and when), and what's still missing for a credible lender-grade
+eval. Industry references are inline so anyone reading this can
+verify the claims.
 
-Status: **proposal — not yet executed.** Owner: TBD.
+Status: **most of the original plan shipped.** This doc was authored
+as an aspirational roadmap; Phases 1–3 below are now mostly ✅
+implemented. The roadmap framing is preserved because it documents
+*why* each piece exists with citations — but each section is now
+tagged with what shipped vs what's still gap. See git log for the
+actual sequence.
 
 ---
 
@@ -22,92 +27,94 @@ Four queries power the page:
 | `getEvalTrend(days)` | `GET /eval/trend?days=30` | Mount + window focus only |
 | `getEvalDiagnostics()` | `GET /eval/diagnostics` | **20 s polling** |
 
-### Backend (`api/mkopo/routers/evals.py`)
+### Backend (`api/mkopo/routers/evals/` package)
 
-All four read from the `task_runs` table. `task_runs` rows come from
-two writers:
+All four read from the `task_runs` table. The routes are split across
+sub-modules under `routers/evals/` (was a single 1533-line
+`evals.py` until the May 2026 refactor): `summary.py`, `refresh.py`,
+`task_detail.py`, `diagnostics.py`, `annotations.py`, `llm_diff.py`.
 
-- `services/drift.py:run_drift_monitor()` — production accuracy
-  computed by comparing the extractor's accepted values against staff
-  overrides in the review queue. Writes one row per field per run.
-- `scripts/seed_eval_baseline.py` — synthetic baseline rows so the
-  page isn't empty on a fresh clone.
+`task_runs` rows are written by **nine** sources today (was 2 when
+this doc was drafted):
+
+- `services/drift.py:run_drift_monitor()` — production extraction
+  accuracy from review-queue overrides (`source='production'`)
+- `services/calibration.py:run_calibration_monitor()` — ECE/Brier
+- `services/fairness.py:run_fairness_monitor()` — AIR
+- `services/psi.py:run_psi_monitor()` — PSI per input feature
+- `services/refusal.py:run_refusal_monitor()` — block-rate z-test
+- `services/agent_economics.py:run_agent_economics_monitor()` — $/run + p95
+- `services/prompt_drift.py:run_prompt_drift_monitor()` — MMD² on
+  inbound borrower messages
+- `evals/runner.py` (CLI + arq cron) — golden-set tasks
+  (`source='golden'`); writes 12 rows per pass
+- `scripts/seed_eval_baseline.py` — synthetic seed for fresh clones
 
 ### What this means in practice
 
 | You did this | Does the page update? |
 |---|---|
-| Ran `uv run python -m evals.runner` | **No.** CLI writes only to `evals/results/results.json` — not to `task_runs`. The page is unaware. |
-| Clicked **Refresh** on the page (calls `POST /eval/refresh`) | **Yes** — re-runs `drift_monitor` and inserts new `task_runs` rows. |
-| A staff member overrode a low-confidence extraction in the review queue | **Yes**, but only after the next `drift_monitor` run. There is no automatic trigger today. |
-| New review-queue activity in the last 20s | The **diagnostics tile** updates (calibration + recent failures). Summary, fields, trend do NOT auto-refetch. |
-| Background scheduled drift sweep | **Not wired.** `drift_monitor` only runs on the `/refresh` button (or test code). No cron, no arq job. |
+| Ran `uv run python -m evals.runner` | **Yes** — runner writes one `task_runs` row per task with `source='golden'`. Dashboard's golden-side tiles update on next refetch. |
+| Clicked **Refresh** on any monitor card | **Yes** — corresponding `POST /eval/<monitor>/refresh` endpoint re-runs and inserts new rows. |
+| A staff member overrode a low-confidence extraction | **Yes**, but only after the next `drift_monitor` cron tick (3:00 UTC daily) or a manual `/eval/refresh`. |
+| Cron tick at 3:00–4:00 UTC | **Yes** — arq scheduler runs all 7 monitors + the golden sweep in sequence (see `workers/tasks.py`). |
+| New review-queue activity in the last 20s | The **diagnostics tile** updates (calibration + recent failures). Summary, fields, trend refetch on window focus, not on a timer. |
 
-### The big disconnect to flag
-
-The CLI runner (`evals/runner.py`) and the page (`drift_monitor`) are
-**two separate systems** that both call themselves "evals":
-
-- **CLI runner** = golden-set regression test for the extractor /
-  summarizer prompts. Compares prediction to a YAML reference. Writes
-  to a JSON file. Used as a CI gate.
-- **Drift monitor** = production accuracy computed from review-queue
-  overrides. Writes to `task_runs`. Powers the dashboard.
-
-There's no unified "eval run" that drives both. That's a chunk of
-the planning work below.
+The CLI runner and the dashboard are now the same system — both
+write to `task_runs`. The original "two separate systems" disconnect
+called out below was closed in Phase 1.
 
 ---
 
 ## 2. What's missing for a credible lender-grade eval
 
-Brief summary; full research with citations in
-[§ 4 Industry references](#4-industry-references).
+Most of the original gap list closed. Status as of May 2026:
 
-| Gap | Why it matters |
-|---|---|
-| Tiny golden sets (2, 1, 1 examples) | No statistical signal; 25–50 examples per task is the minimum for meaningful accuracy bands |
-| Only extraction tasks scored | Decision verdict, AAL, intake email all unscored — and they're the highest-stakes outputs |
-| Single accuracy metric per task | Real eval suites surface **precision, recall, F1, calibration, faithfulness** separately |
-| No confusion matrix on the decision agent | SR 11-7 outcome analysis (the canonical US bank guidance) requires direction-of-error breakdown |
-| No calibration metrics on confidence | Extractor + decision both emit confidence; no Expected Calibration Error (ECE) or Brier score is computed |
-| No faithfulness / groundedness score | The #1 NIST AI 600-1 generative-AI risk is Confabulation; no online metric tracks it |
-| No fair-lending metrics | Adverse Impact Ratio is the entry-level ECOA test; not present |
-| No PSI / drift on inputs | Population Stability Index is bank-canonical for input-distribution drift; not present |
-| CLI runner ↔ dashboard disconnect | CI run doesn't update the dashboard; harder to demo "model upgrade caused regression" |
-| Page doesn't auto-refresh top-line metrics | A staff user clicking around won't see a fresh number unless they reload |
+| Original gap | Status | Where |
+|---|---|---|
+| Tiny golden sets (2, 1, 1 examples) | ⚠️ **Partial** — extraction tasks scaled to 5–7 fixtures; decision_verdict at 10; intake_email at 8; some still small (summarize_underwriting n=1). Scale-up to 25–50 each is just more YAMLs | `evals/golden_sets/` |
+| Only extraction tasks scored | ✅ **Shipped** — decision_verdict, aal_fidelity, intake_email, adversarial_injection, uw_groundedness, tool_call_accuracy all wired | `evals/tasks/` |
+| Single accuracy metric per task | ✅ **Shipped** — `AggregatingEvalTask` protocol lets tasks emit per-criterion / per-class / confusion-matrix details into `task_runs.details` | `evals/tasks/_base.py` |
+| No confusion matrix on the decision agent | ✅ **Shipped** — per-class precision/recall/F1 + macro-F1 + matrix | `evals/tasks/decision_verdict.py`, `web/app/eval/cards/DecisionVerdictCard.tsx` |
+| No calibration metrics on confidence | ✅ **Shipped** — ECE (K=10) + Brier on resolved extractions, reliability diagram in `details` | `services/calibration.py`, `CalibrationCard.tsx` |
+| No faithfulness / groundedness score | ✅ **Shipped** — RAGAS-style pinned-judge faithfulness | `evals/tasks/uw_groundedness.py`, `UWGroundednessCard.tsx` |
+| No fair-lending metrics | ✅ **Shipped** — AIR with EEOC four-fifths bands; protected class is synthetic (`loan.id` hash) — production swap is a one-function change | `services/fairness.py`, `FairnessCard.tsx` |
+| No PSI / drift on inputs | ✅ **Shipped** — PSI on `loan_amount` + `loan_class` + `loan_type` | `services/psi.py`, `PSICard.tsx` |
+| CLI runner ↔ dashboard disconnect | ✅ **Shipped** — `evals/runner.py` writes one `task_runs` row per task with `source='golden'` | `evals/runner.py:_persist_to_task_runs` |
+| Page doesn't auto-refresh top-line metrics | ❌ **Open** — summary/fields/trend refetch on window-focus, not on a timer. Diagnostics polls 20s. Decision call: most cards don't move minute-to-minute; manual Refresh + window-focus is enough for a single-operator dashboard | n/a |
+
+**Genuinely still missing** (not yet shipped):
+
+| Gap | Why it matters | Why deferred |
+|---|---|---|
+| Auto-refetch on summary/fields/trend | Stale headline numbers without manual reload | Low pain at single-operator scale; trivial to add (one prop on each `useQuery`) |
+| MMD card in the UI | Backend (`prompt_drift.borrower_inbound`) writes `task_runs` rows, but no card renders them | Excluded from trend chart by `_DERIVED_METRIC_PREFIXES`; needs a dedicated card |
+| Real protected class for AIR | Synthetic class makes the AIR number a structural placeholder; demos must disclose | Real attribution requires HMDA-grade demographic capture, which is out of scope per `SCOPE.md` |
+| Bigger golden sets | Some tasks still at n=1–4 | Scale-up is just more YAMLs; cost is real LLM spend per run |
+| Continuous groundedness time-series | Per-decision RAGAS would catch hallucination regressions live | Cost: every UW summary judged by Opus ≈ $0.07 each |
+| Test-runtime status flips for scenarios catalog | The `/safety` scenarios manifest is static; pytest failure doesn't flip the card | Aspirational; pytest output isn't currently parsed into the manifest |
 
 ---
 
-## 3. Phased plan
+## 3. Phased plan (mostly shipped)
 
-Three phases. Each phase is independently shippable — the dashboard
-gets better at each step, you can stop at any phase.
+This was the original three-phase plan. Phases 1–3 are now mostly
+✅ done; the per-item ✅ / ❌ markers below preserve the original
+plan-of-record for historical reference.
 
-### Phase 1 — Plumbing (ship-blocker fixes; ~1 day)
+### Phase 1 — Plumbing
 
-The most painful disconnect is that the CLI doesn't feed the
-dashboard. Fix that first.
-
-- [ ] **Unify the writers.** Update `evals/runner.py` to insert one
-  `task_runs` row per task with a `kind="golden"` discriminator (the
-  ORM already has `kind` — just needs to be populated correctly). The
-  drift monitor's `kind="production"` rows stay as-is.
-- [ ] **Update `GET /eval/summary` + `/eval/fields`** to read both
-  kinds and surface them side-by-side. The dashboard already has
-  `production_accuracy` / `golden_accuracy` columns; just wire the
-  CLI to feed the golden side.
-- [ ] **Add `refetchInterval: 60_000`** to summary, fields, trend
-  queries so the page stays fresh without a manual reload. Drop
-  diagnostics to 60s too (20s is overkill for slow-moving data).
-- [ ] **Make the "last run" timestamp visible** on the dashboard
-  header so users know how stale the numbers are.
-- [ ] **Add a background arq job** that runs `drift_monitor` every
-  hour. Existing arq infra in `workers/tasks.py`.
-
-**Why this first:** without this, every other phase ships into a
-dashboard that doesn't reflect reality. After Phase 1, "ran the
-eval" → "saw new numbers" is reliable.
+- [x] **Unify the writers.** `evals/runner.py` now writes
+  `source='golden'` rows to `task_runs`; production monitors write
+  `source='production'`. Dashboard reads both, surfaces paired
+  vs golden-only.
+- [x] **`GET /eval/summary` + `/eval/fields`** read both sources;
+  paired intersection drives the headline KPIs.
+- [ ] **`refetchInterval` on summary/fields/trend** — still
+  window-focus only. Trivial follow-on if cadence matters.
+- [x] **"Last run" timestamp visible on the dashboard header.**
+- [x] **Background arq job for `drift_monitor`** at 3:00 UTC, plus
+  6 more monitor crons at 3:30–3:58 and the golden sweep at 4:00.
 
 ### Phase 2 — Industry-standard metric coverage
 
@@ -398,21 +405,19 @@ are stable.
 
 ---
 
-## 7. What to do now vs later
+## 7. What's left
 
-**Now (deferred per user request).**
+Items 1–6 + 8–10 from the original "later" list all shipped (see
+git log; the audit-cleanup + populate-data work in May 2026 closed
+most of them). Items still open as of May 2026:
 
-**Picking it up later, in order of value:**
+| Item | Effort | Why deferred |
+|---|---|---|
+| **MMD card in the UI** | ~½ day | Backend writes `task_runs` rows already (`prompt_drift.borrower_inbound`); needs a dashboard card to surface them. The monitor itself ships + has paired math tests in `tests/test_prompt_drift_math.py` |
+| **`refetchInterval` on summary/fields/trend** | 5 min | Add `refetchInterval: 60_000` to three `useQuery` calls. Low pain at single-operator scale |
+| **Bigger goldens** (some tasks at n=1–4) | ongoing | Drop more YAMLs into `evals/golden_sets/`. Real LLM cost on each pass, so wait until prompt iteration justifies it |
+| **Continuous groundedness time-series** | 1 day | Per-decision RAGAS judging on the live `underwriting_results` stream. Cost: ~$0.07 per UW summary in Opus judge calls |
+| **Real protected class for AIR** | structural change | Requires HMDA-grade demographic capture, out of scope per `SCOPE.md` |
+| **Scenarios catalog auto-flip on test failure** | 1 day | Parse pytest output into the static `SCENARIOS` manifest so a regression visibly flips the card. Aspirational — currently the "verified by" link is doc-only |
 
-1. Phase 1 plumbing (1 day) → CLI feeds dashboard, auto-refresh works.
-2. Decision verdict task + confusion matrix (1 day) → ships SR 11-7 outcome analysis.
-3. Calibration card (½ day) → ECE + Brier on extractor confidence.
-4. Faithfulness card (1 day) → groundedness on every summary.
-5. Wire the adversarial-injection fixtures as a scored task (½ day) → CI gate on detector regressions.
-6. AAL fidelity task (½ day) → CFPB Circular 2022-03 covered.
-7. Bigger goldens (ongoing) → 25–30 examples per task.
-8. Operational metrics ($/decision, p95) on the eval page (½ day).
-9. Adverse Impact Ratio (1 day) → fair-lending screen.
-10. PSI + embedding drift (1–2 days) → input + semantic drift.
-
-Total: ~7–10 days to a credibly comprehensive dashboard.
+Everything else from the original plan shipped.
