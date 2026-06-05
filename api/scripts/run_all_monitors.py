@@ -22,8 +22,6 @@ import asyncio
 import sys
 import traceback
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from mkopo.db import SessionLocal
 from mkopo.services.agent_economics import run_agent_economics_monitor
 from mkopo.services.calibration import run_calibration_monitor

@@ -16,7 +16,6 @@ import uuid
 from dataclasses import dataclass
 from decimal import Decimal
 
-from pgvector.sqlalchemy import Vector
 from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 

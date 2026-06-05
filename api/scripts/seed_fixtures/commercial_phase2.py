@@ -21,9 +21,7 @@ from mkopo.models import (
     PartyRole,
     PartyType,
 )
-
 from scripts.seed_fixtures._types import SeedDoc, SeedLoan, SeedParty
-
 
 MERIDIAN = SeedLoan(
     loan_type=LoanType.BRIDGE,

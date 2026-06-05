@@ -21,7 +21,6 @@ from dataclasses import dataclass
 
 from mkopo.models.eval import TaskRun
 
-
 # Drift below the golden baseline by this much (3 percentage points)
 # is the threshold the DESIGN doc calls out for alerting.
 DRIFT_THRESHOLD = 0.03

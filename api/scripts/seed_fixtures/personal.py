@@ -25,9 +25,7 @@ from mkopo.models import (
     PartyRole,
     PartyType,
 )
-
 from scripts.seed_fixtures._types import SeedDoc, SeedLoan, SeedParty
-
 
 KAYA = SeedLoan(
     loan_type=LoanType.PERMANENT,  # closest mapping for an unsecured term loan

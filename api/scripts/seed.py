@@ -42,7 +42,6 @@ from mkopo.services.audit import Actor, record
 from mkopo.services.ingest import documents_for_loan, embed_document
 from mkopo.services.pdf_render import filename_for_pdf, render_text_to_pdf
 from mkopo.services.storage import get_storage
-
 from scripts.seed_fixtures import LOANS_TO_SEED, SeedDoc, SeedLoan, SeedParty
 
 logger = structlog.get_logger()

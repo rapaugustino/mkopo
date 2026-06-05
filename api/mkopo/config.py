@@ -6,6 +6,18 @@ from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Allowlist of env vars where an empty-string value should be treated as
+# unset, so a real value from the ``.env`` file can take over. See
+# ``_strip_empty_env_overrides`` for the full rationale. Module-level
+# (not function-local) so it's allocated once at import and so ruff's
+# N806 doesn't flag it as a misnamed local.
+_SENSITIVE_TO_EMPTY = (
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_BASE_URL",
+    "OPENAI_API_KEY",
+    "RESEND_API_KEY",
+)
+
 
 def _strip_empty_env_overrides() -> None:
     """Remove environment variables that are literally the empty
@@ -17,17 +29,11 @@ def _strip_empty_env_overrides() -> None:
     file, so an empty env var silently shadows the real key in
     ``.env`` and every LLM call fails with "Could not resolve
     authentication method." Treating empty as unset gives the .env
-    file a chance to provide the value. Only applied to a fixed
-    allowlist of settings we know are sensitive to this — we don't
-    want to wholesale strip every empty env var.
+    file a chance to provide the value. Only applied to the
+    ``_SENSITIVE_TO_EMPTY`` allowlist — we don't want to wholesale
+    strip every empty env var.
     """
-    SENSITIVE_TO_EMPTY = (
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_BASE_URL",
-        "OPENAI_API_KEY",
-        "RESEND_API_KEY",
-    )
-    for name in SENSITIVE_TO_EMPTY:
+    for name in _SENSITIVE_TO_EMPTY:
         if name in os.environ and os.environ[name] == "":
             del os.environ[name]
 
