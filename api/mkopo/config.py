@@ -72,7 +72,13 @@ class Settings(BaseSettings):
     # judge model — if the judge moves quarter to quarter, scores
     # stop being comparable. Override per-deployment via .env when a
     # newer model lands.
-    anthropic_api_key: str
+    #
+    # Defaults to empty string (NOT required at construction time) so
+    # alembic migrations + tests can build Settings without an LLM key.
+    # The runtime check in ``startup_check._check_anthropic`` catches a
+    # missing key at app boot and emits ``degraded`` with a clear hint.
+    # Same pattern as ``openai_api_key`` and ``resend_api_key`` below.
+    anthropic_api_key: str = ""
     llm_default_model: str = "claude-sonnet-4-5-20250929"
     llm_heavy_model: str = "claude-opus-4-5-20251115"
     llm_fast_model: str = "claude-haiku-4-5-20251001"

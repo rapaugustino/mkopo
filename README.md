@@ -396,10 +396,23 @@ uv run arq mkopo.workers.tasks.WorkerSettings
 
 ### Production monitors
 
-Five non-CLI monitors run on the arq scheduler alongside the golden
+Seven non-CLI monitors run on the arq scheduler alongside the golden
 sweep. Each writes ``task_runs`` rows so the ``/eval`` dashboard's
 trend chart picks them up; each has a manual ``POST /eval/<name>/refresh``
 for on-demand recomputation from the dashboard.
+
+For demo populates that don't want to wait for the cron, run all
+seven on demand:
+
+```bash
+cd api
+uv run python scripts/run_all_monitors.py
+```
+
+Skips monitors with insufficient data (fairness needs ≥2 protected-
+class buckets, PSI needs ≥30 samples per window, etc.) and prints
+per-monitor status — so a fresh seed → dashboard is one command and
+~30 seconds, no waiting for 3 AM UTC.
 
 | Monitor | Cron (UTC) | What it pins | Card |
 |---|---|---|---|
