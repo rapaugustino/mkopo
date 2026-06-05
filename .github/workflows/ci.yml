@@ -58,6 +58,15 @@ jobs:
         run: uv run mypy mkopo
         continue-on-error: true # tighten as the codebase stabilises
 
+      # pgvector's binary ships with the postgres image (pgvector/pgvector:pg16)
+      # but `CREATE EXTENSION vector` still has to run once per database. We
+      # do it here rather than inside the first migration because production
+      # deploys want the app's runtime role to be non-superuser, and
+      # CREATE EXTENSION requires superuser. The docker image's POSTGRES_USER
+      # IS a superuser in CI, so this works.
+      - name: Enable pgvector extension
+        run: PGPASSWORD=mkopo psql -h localhost -U mkopo -d mkopo -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
       - name: Migrations
         run: uv run alembic upgrade head
 
@@ -99,4 +108,3 @@ jobs:
         run: npm run build
         env:
           NEXT_PUBLIC_API_URL: http://localhost:8000
-          NEXT_PUBLIC_DEV_TOKEN: dev-token-replace-me
